@@ -1,11 +1,11 @@
-local validator = require("keystone.tasks.validate.validator")
-local toml_parse = require("keystone.tasks.parse.toml_parse")
+local validator = require("easytasks.tasks.validate.validator")
+local toml_parse = require("easytasks.tasks.parse.toml_parse")
 
 local M = {}
 
-local SERVER_NAME = "keystone-toml"
+local SERVER_NAME = "easytasks-toml"
 
-M.namespace = vim.api.nvim_create_namespace("keystone-toml")
+M.namespace = vim.api.nvim_create_namespace("easytasks-toml")
 M.debounce_ms = 250
 
 ---@type table<integer, integer?>
@@ -14,7 +14,7 @@ local debounce_timers = {}
 ---@type table<integer, integer[]>
 local autocmd_ids = {}
 
----@param range keystone.tasks.Range4
+---@param range easytasks.tasks.Range4
 ---@return lsp.Range
 local function to_lsp_range(range)
   return {
@@ -23,7 +23,7 @@ local function to_lsp_range(range)
   }
 end
 
----@param range keystone.tasks.Range4|nil
+---@param range easytasks.tasks.Range4|nil
 ---@param bufnr integer
 ---@return lsp.Range
 local function fallback_range(range, bufnr)
@@ -38,7 +38,7 @@ local function fallback_range(range, bufnr)
 end
 
 ---@param bufnr integer
----@param schema keystone.tasks.JsonSchema
+---@param schema easytasks.tasks.JsonSchema
 ---@return lsp.Diagnostic[]
 function M.build(bufnr, schema)
   local parsed = toml_parse.parse(bufnr)
@@ -119,7 +119,7 @@ end
 ---@param bufnr integer
 ---@param client_id integer?
 ---@param bufnr integer
----@param schema keystone.tasks.JsonSchema
+---@param schema easytasks.tasks.JsonSchema
 ---@param client_id integer?
 function M.run(bufnr, schema, client_id)
   if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -130,7 +130,7 @@ function M.run(bufnr, schema, client_id)
 end
 
 ---@param bufnr integer
----@param schema keystone.tasks.JsonSchema
+---@param schema easytasks.tasks.JsonSchema
 ---@param client_id integer?
 local function schedule(bufnr, schema, client_id)
   if debounce_timers[bufnr] then
@@ -158,13 +158,13 @@ function M.detach(bufnr)
 end
 
 ---@param bufnr integer
----@param schema keystone.tasks.JsonSchema
+---@param schema easytasks.tasks.JsonSchema
 ---@param client_id integer?
 function M.attach(bufnr, schema, client_id)
   M.detach(bufnr)
   autocmd_ids[bufnr] = {}
 
-  local group = vim.api.nvim_create_augroup("keystone_toml_diag_" .. bufnr, { clear = true })
+  local group = vim.api.nvim_create_augroup("easytasks_toml_diag_" .. bufnr, { clear = true })
   local events = { "BufEnter", "TextChanged", "InsertLeave", "BufWritePost" }
   for _, event in ipairs(events) do
     autocmd_ids[bufnr][#autocmd_ids[bufnr] + 1] = vim.api.nvim_create_autocmd(event, {

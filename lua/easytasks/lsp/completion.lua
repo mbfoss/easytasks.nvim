@@ -1,5 +1,5 @@
-local schema_nav = require("keystone.tasks.parse.schema_nav")
-local toml_context = require("keystone.tasks.parse.toml_context")
+local schema_nav = require("easytasks.tasks.parse.schema_nav")
+local toml_context = require("easytasks.tasks.parse.toml_context")
 
 local M = {}
 
@@ -21,7 +21,7 @@ local function partial_header(bufnr, row)
   return line:match("%[([^%]]*)$") or ""
 end
 
----@param ctx keystone.tasks.TomlContext
+---@param ctx easytasks.tasks.TomlContext
 ---@param bufnr integer
 ---@param row integer
 ---@return lsp.CompletionItem[]
@@ -48,8 +48,8 @@ local function complete_table_headers(ctx, bufnr, row)
   return items
 end
 
----@param ctx keystone.tasks.TomlContext
----@param schema_node keystone.tasks.JsonSchema
+---@param ctx easytasks.tasks.TomlContext
+---@param schema_node easytasks.tasks.JsonSchema
 ---@return lsp.CompletionItem[]
 local function complete_keys(ctx, schema_node)
   local items = {}
@@ -76,7 +76,7 @@ local function complete_keys(ctx, schema_node)
   return items
 end
 
----@param ctx keystone.tasks.TomlContext
+---@param ctx easytasks.tasks.TomlContext
 ---@return lsp.CompletionItem[]
 local function complete_values(ctx)
   local items = {}

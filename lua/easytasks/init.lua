@@ -1,21 +1,21 @@
 local M = {}
 
----@class keystone.tasks.Config
+---@class easytasks.tasks.Config
 ---@field enabled boolean
----@field schema keystone.tasks.JsonSchema?
+---@field schema easytasks.tasks.JsonSchema?
 
-local tasks_lsp = require("keystone.tasks.tasks_lsp")
-local default_schema = require("keystone.tasks.parse.schema")
+local tasks_lsp = require("easytasks.tasks.tasks_lsp")
+local default_schema = require("easytasks.tasks.parse.schema")
 
 local function _get_default_config()
-  ---@type keystone.tasks.Config
+  ---@type easytasks.tasks.Config
   return {
     enabled = true,
     schema = default_schema,
   }
 end
 
----@type keystone.tasks.Config
+---@type easytasks.tasks.Config
 M.config = _get_default_config()
 
 local enabled = false
@@ -25,7 +25,7 @@ function M.enable()
     return
   end
   enabled = true
-  local augroup = vim.api.nvim_create_augroup("keystone_tasks_lsp", { clear = true })
+  local augroup = vim.api.nvim_create_augroup("easytasks_tasks_lsp", { clear = true })
   vim.api.nvim_create_autocmd("FileType", {
     pattern = { "toml" },
     group = augroup,
@@ -40,7 +40,7 @@ function M.disable()
     return
   end
   enabled = false
-  vim.api.nvim_del_augroup_by_name("keystone_tasks_lsp")
+  vim.api.nvim_del_augroup_by_name("easytasks_tasks_lsp")
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buf].filetype == "toml" then
       tasks_lsp.stop(buf)
@@ -52,7 +52,7 @@ function M.clear()
   vim.lsp.buf.clear_references()
 end
 
----@param opts keystone.tasks.Config?
+---@param opts easytasks.tasks.Config?
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", _get_default_config(), opts or {})
   tasks_lsp.set_schema(M.config.schema)

@@ -1,18 +1,18 @@
-local default_schema = require("keystone.tasks.parse.schema")
-local toml_context = require("keystone.tasks.parse.toml_context")
+local default_schema = require("easytasks.tasks.parse.schema")
+local toml_context = require("easytasks.tasks.parse.toml_context")
 
-local completion = require("keystone.tasks.lsp.completion")
-local hover = require("keystone.tasks.lsp.hover")
-local code_action = require("keystone.tasks.lsp.code_action")
-local diagnostics = require("keystone.tasks.lsp.diagnostics")
+local completion = require("easytasks.tasks.lsp.completion")
+local hover = require("easytasks.tasks.lsp.hover")
+local code_action = require("easytasks.tasks.lsp.code_action")
+local diagnostics = require("easytasks.tasks.lsp.diagnostics")
 
 local M = {}
 
 ---https://neo451.github.io/blog/posts/in-process-lsp-guide/
-M.SERVER_NAME = "keystone-toml"
+M.SERVER_NAME = "easytasks-toml"
 M.SERVER_VERSION = "0.1.0"
 
----@type keystone.tasks.JsonSchema
+---@type easytasks.tasks.JsonSchema
 M.schema = default_schema
 
 ---@type table<vim.lsp.protocol.Method, fun(params: table, callback: fun(err: lsp.ResponseError?, result: any))>
@@ -65,17 +65,17 @@ end
 
 M._bind_handlers()
 
----@param schema keystone.tasks.JsonSchema?
+---@param schema easytasks.tasks.JsonSchema?
 function M.set_schema(schema)
   M.schema = schema or default_schema
   toml_context.set_schema(M.schema)
 end
 
----@class keystone.tasks.LspStartOpts
----@field schema keystone.tasks.JsonSchema?
+---@class easytasks.tasks.LspStartOpts
+---@field schema easytasks.tasks.JsonSchema?
 
 ---@param buf integer
----@param opts keystone.tasks.LspStartOpts?
+---@param opts easytasks.tasks.LspStartOpts?
 ---@return integer? client_id
 function M.start(buf, opts)
   opts = opts or {}
