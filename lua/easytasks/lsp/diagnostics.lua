@@ -1,6 +1,8 @@
-local validator = require("easytasks.toml.validator")
-local toml_parse = require("easytasks.parse.toml_parse")
+-- easytasks/lsp/diagnostics.lua
 
+local validator = require("easytasks.toml.validator")
+local parser = require("easytasks.toml.parser")
+local decoder = require("easytasks.toml.decoder")
 local M = {}
 
 local SERVER_NAME = "easytasks-toml"
@@ -38,13 +40,17 @@ local function fallback_range(range, bufnr)
 end
 
 ---@param bufnr integer
----@param schema easytasks.JsonSchema
+---@param context easytasks.LspBufferContext
 ---@return lsp.Diagnostic[]
-function M.build(bufnr, schema)
-  local parsed = toml_parse.parse(bufnr)
+function M.build(bufnr, context)
+  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+
+  local parsed = parser.parse(text)
+
   local diagnostics = {}
 
-  for _, err in ipairs(parsed.syntax_errors) do
+  -- syntax/parser diagnostics
+  for _, err in ipairs(parsed.errors or {}) do
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(err.range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
@@ -53,17 +59,53 @@ function M.build(bufnr, schema)
     }
   end
 
-  if not parsed.data then
+  -- stop if parser failed
+  if not parsed.ok or not parsed.ast then
+    -- Cache partial/error results so context remains updated
+    context.parse_results = { data = nil, pointer_map = nil, errors = parsed.errors }
     return diagnostics
   end
 
-  local valid, errors = validator.validate(schema, parsed.data)
+  -- semantic decode/evaluation
+  local decoded = decoder.decode(parsed.ast)
+
+  for _, err in ipairs(decoded.errors or {}) do
+    diagnostics[#diagnostics + 1] = {
+      range = fallback_range(err.range, bufnr),
+      severity = vim.lsp.protocol.DiagnosticSeverity.Error,
+      source = SERVER_NAME,
+      message = err.message,
+    }
+  end
+
+  -- stop if semantic evaluation failed
+  if not decoded.ok or not decoded.data then
+    context.parse_results = { data = nil, pointer_map = decoded.pointer_map, errors = decoded.errors }
+    return diagnostics
+  end
+
+  -- Mutate and sync the closure state with the successfully evaluated AST data maps
+  context.parse_results = {
+    data = decoded.data,
+    pointer_map = decoded.pointer_map,
+    errors = {},
+  }
+
+  -- If no schema is provided, we can skip schema validation entirely
+  if not context.schema then
+    return diagnostics
+  end
+
+  -- schema validation
+  local valid, errors = validator.validate(context.schema, decoded.data)
+
   if valid then
     return diagnostics
   end
 
   for _, err in ipairs(errors) do
-    local range = parsed.pointer_map[err.path]
+    local range = decoded.pointer_map[err.path]
+
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
@@ -107,27 +149,27 @@ function M.publish(bufnr, diagnostics, client_id)
 end
 
 ---@param bufnr integer
----@param schema easytasks.JsonSchema
+---@param context easytasks.LspBufferContext
 ---@param client_id integer?
-function M.run(bufnr, schema, client_id)
+function M.run(bufnr, context, client_id)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  local diagnostics = M.build(bufnr, schema)
+  local diagnostics = M.build(bufnr, context)
   M.publish(bufnr, diagnostics, client_id)
 end
 
 ---@param bufnr integer
----@param schema easytasks.JsonSchema
+---@param context easytasks.LspBufferContext
 ---@param client_id integer?
-local function schedule(bufnr, schema, client_id)
+local function schedule(bufnr, context, client_id)
   if debounce_timers[bufnr] then
     vim.fn.timer_stop(debounce_timers[bufnr])
   end
   debounce_timers[bufnr] = vim.fn.timer_start(M.debounce_ms, function()
     debounce_timers[bufnr] = nil
     vim.schedule(function()
-      M.run(bufnr, schema, client_id)
+      M.run(bufnr, context, client_id)
     end)
   end)
 end
@@ -146,9 +188,9 @@ function M.detach(bufnr)
 end
 
 ---@param bufnr integer
----@param schema easytasks.JsonSchema
+---@param context easytasks.LspBufferContext
 ---@param client_id integer?
-function M.attach(bufnr, schema, client_id)
+function M.attach(bufnr, context, client_id)
   M.detach(bufnr)
   autocmd_ids[bufnr] = {}
 
@@ -159,12 +201,12 @@ function M.attach(bufnr, schema, client_id)
       group = group,
       buffer = bufnr,
       callback = function()
-        schedule(bufnr, schema, client_id)
+        schedule(bufnr, context, client_id)
       end,
     })
   end
 
-  M.run(bufnr, schema, client_id)
+  M.run(bufnr, context, client_id)
 end
 
 return M

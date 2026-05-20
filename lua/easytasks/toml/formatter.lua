@@ -1,0 +1,125 @@
+local M = {}
+
+---@class easytasks.FormatOptions
+---@field indent string|nil
+---@field newline string|nil
+---@field trailing_newline boolean|nil
+
+local DEFAULTS = {
+    indent = "    ",
+    newline = "\n",
+    trailing_newline = true,
+}
+
+local function merge_options(opts)
+    opts = opts or {}
+
+    return {
+        indent = opts.indent or DEFAULTS.indent,
+        newline = opts.newline or DEFAULTS.newline,
+        trailing_newline = opts.trailing_newline ~= false,
+    }
+end
+
+local function write(buf, str)
+    table.insert(buf, str)
+end
+
+local function format_literal(node)
+    local t = node.token
+
+    if t.type == "STRING" then
+        return string.format("%q", t.value)
+    elseif t.type == "BOOLEAN" then
+        return t.value and "true" or "false"
+    else
+        return tostring(t.value)
+    end
+end
+
+local function format_key(token)
+    if token.type == "STRING" then
+        return string.format("%q", token.value)
+    end
+
+    return tostring(token.value)
+end
+
+local function format_value(node)
+    if node.kind == "Literal" then
+        return format_literal(node)
+    end
+
+    error("Unsupported value node: " .. tostring(node.kind))
+end
+
+local function format_table_section(node)
+    local out = {}
+
+    write(out, "[")
+
+    for i, key in ipairs(node.keys) do
+        if i > 1 then
+            write(out, ".")
+        end
+
+        write(out, format_key(key))
+    end
+
+    write(out, "]")
+
+    return table.concat(out)
+end
+
+local function format_key_value(node)
+    local out = {}
+
+    write(out, format_key(node.key))
+    write(out, " = ")
+    write(out, format_value(node.value))
+
+    return table.concat(out)
+end
+
+---@param ast table
+---@param opts easytasks.FormatOptions|nil
+---@return string
+function M.format(ast, opts)
+    opts = merge_options(opts)
+
+    local nl = opts.newline
+
+    local out = {}
+
+    local previous_was_table = false
+
+    for _, node in ipairs(ast.body) do
+        if node.kind == "TableSection" then
+            if #out > 0 then
+                write(out, nl)
+
+                if previous_was_table then
+                    write(out, nl)
+                end
+            end
+
+            write(out, format_table_section(node))
+            previous_was_table = true
+        elseif node.kind == "KeyValuePair" then
+            if #out > 0 then
+                write(out, nl)
+            end
+
+            write(out, format_key_value(node))
+            previous_was_table = false
+        end
+    end
+
+    if opts.trailing_newline then
+        write(out, nl)
+    end
+
+    return table.concat(out)
+end
+
+return M

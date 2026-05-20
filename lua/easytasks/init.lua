@@ -2,10 +2,10 @@ local M = {}
 
 ---@class easytasks.Config
 ---@field enabled boolean
----@field schema easytasks.JsonSchema?
+---@field schema table
 
 local tasks_lsp = require("easytasks.tasks_lsp")
-local default_schema = require("easytasks.parse.schema")
+local default_schema = require("easytasks.schema")
 
 local function _get_default_config()
   ---@type easytasks.Config
@@ -30,7 +30,9 @@ function M.enable()
     pattern = { "toml" },
     group = augroup,
     callback = function(ev)
-      tasks_lsp.start(ev.buf, { schema = M.config.schema })
+      tasks_lsp.start(ev.buf, {
+        schema = M.config.schema or require("easytasks.schema")
+      })
     end,
   })
 end
@@ -51,7 +53,6 @@ end
 ---@param opts easytasks.Config?
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", _get_default_config(), opts or {})
-  tasks_lsp.set_schema(M.config.schema)
 
   if M.config.enabled then
     M.enable()

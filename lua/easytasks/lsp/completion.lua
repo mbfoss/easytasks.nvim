@@ -1,13 +1,12 @@
-local schema_nav = require("easytasks.parse.schema_nav")
-local toml_context = require("easytasks.parse.toml_context")
-
+-- easytasks/lsp/completion.lua
 local M = {}
 
----@param line string
----@param col integer
----@param prefix string
----@param kind easytasks.TomlContext["kind"]
----@return integer start_col, integer end_col
+local s_util = require("easytasks.toml.schema_util")
+
+--------------------------------------------------------------------------------
+-- LSP Range & Item Mapping Formatter Helpers
+--------------------------------------------------------------------------------
+
 local function replace_range(line, col, prefix, kind)
   if kind == "table_header" then
     local open = line:find("%[")
@@ -16,16 +15,11 @@ local function replace_range(line, col, prefix, kind)
     end
   end
   if prefix ~= "" then
-    return col + 1 - #prefix, col + 1
+    return col - #prefix, col
   end
-  return col + 1, col + 1
+  return col, col
 end
 
----@param row integer
----@param start_col integer
----@param end_col integer
----@param new_text string
----@return lsp.TextEdit
 local function text_edit(row, start_col, end_col, new_text)
   return {
     range = {
@@ -36,15 +30,6 @@ local function text_edit(row, start_col, end_col, new_text)
   }
 end
 
----@param row integer
----@param start_col integer
----@param end_col integer
----@param new_text string
----@param label string
----@param kind integer
----@param detail? string
----@param documentation? string
----@return lsp.CompletionItem
 local function make_item(row, start_col, end_col, new_text, label, kind, detail, documentation)
   return {
     label = label,
@@ -56,9 +41,6 @@ local function make_item(row, start_col, end_col, new_text, label, kind, detail,
   }
 end
 
----@param a lsp.CompletionItem
----@param b lsp.CompletionItem
----@return boolean
 local function sort_items(a, b)
   local ar = a.sortText == "0"
   local br = b.sortText == "0"
@@ -68,161 +50,174 @@ local function sort_items(a, b)
   return (a.label or "") < (b.label or "")
 end
 
----@param bufnr integer
----@param row integer
----@return string
 local function partial_header(bufnr, row)
   local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
   return line:match("%[([^%]]*)$") or ""
 end
 
----@param ctx easytasks.TomlContext
----@param bufnr integer
----@param row integer
----@param col integer
----@param line string
----@return lsp.CompletionItem[]
-local function complete_table_headers(ctx, bufnr, row, col, line)
-  local items = {}
-  local prefix = partial_header(bufnr, row)
-  if prefix == "" then
-    prefix = ctx.prefix
-  end
-  local start_col, end_col = replace_range(line, col, prefix, "table_header")
+--------------------------------------------------------------------------------
+-- Completion Request Dispatcher
+--------------------------------------------------------------------------------
 
-  local paths = schema_nav.table_paths(ctx.schema, {})
-  for _, path in ipairs(paths) do
-    local label = schema_nav.path_label(path)
-    if schema_nav.matches_filter(prefix, label) then
-      local node = schema_nav.at_path(ctx.schema, path)
-      items[#items + 1] = make_item(
-        row,
-        start_col,
-        end_col,
-        label,
-        label,
-        vim.lsp.protocol.CompletionItemKind.Module,
-        schema_nav.header_label(path),
-        schema_nav.description(node)
-      )
-    end
-  end
-  return items
-end
-
----@param ctx easytasks.TomlContext
----@param schema_node easytasks.JsonSchema
----@param row integer
----@param col integer
----@param line string
----@return lsp.CompletionItem[]
-local function complete_keys(ctx, schema_node, row, col, line)
-  local items = {}
-  local existing = {}
-  for _, key in ipairs(ctx.existing_keys) do
-    existing[key] = true
-  end
-
-  local start_col, end_col = replace_range(line, col, ctx.prefix, ctx.kind)
-
-  for _, entry in ipairs(schema_nav.ordered_properties(schema_node)) do
-    if not existing[entry.key] and schema_nav.matches_filter(ctx.prefix, entry.key) then
-      local detail = schema_nav.type_label(entry.schema)
-      local default = schema_nav.default_toml(entry.schema)
-      if schema_nav.is_required(schema_node, entry.key) then
-        detail = detail and ("required · " .. detail) or "required"
-      end
-      if default ~= "" and default ~= '""' then
-        detail = detail and (detail .. " · default " .. default) or ("default " .. default)
-      end
-      items[#items + 1] = make_item(
-        row,
-        start_col,
-        end_col,
-        entry.key,
-        entry.key,
-        vim.lsp.protocol.CompletionItemKind.Property,
-        detail,
-        schema_nav.description(entry.schema)
-      )
-      if schema_nav.is_required(schema_node, entry.key) then
-        items[#items].sortText = "0"
-      end
-    end
-  end
-  return items
-end
-
----@param ctx easytasks.TomlContext
----@param row integer
----@param col integer
----@param line string
----@return lsp.CompletionItem[]
-local function complete_values(ctx, row, col, line)
-  local items = {}
-  local node = ctx.key_schema
-  if not node then
-    return items
-  end
-
-  local start_col, end_col = replace_range(line, col, ctx.prefix, ctx.kind)
-  local kind = schema_nav.completion_kind(node)
-
-  for _, value in ipairs(schema_nav.value_candidates(node)) do
-    if schema_nav.matches_filter(ctx.prefix, value) then
-      items[#items + 1] = make_item(row, start_col, end_col, value, value, kind)
-    end
-  end
-
-  local default = schema_nav.default_toml(node)
-  if schema_nav.matches_filter(ctx.prefix, default) then
-    local seen = {}
-    for _, item in ipairs(items) do
-      seen[item.label] = true
-    end
-    if not seen[default] then
-      items[#items + 1] = make_item(
-        row,
-        start_col,
-        end_col,
-        default,
-        default,
-        kind,
-        "default",
-        schema_nav.description(node)
-      )
-    end
-  end
-
-  return items
-end
-
+---@param context easytasks.LspBufferContext buffer context
 ---@param params lsp.CompletionParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
-function M.handler(params, callback)
-  local bufnr = vim.uri_to_bufnr(params.textDocument.uri)
+function M.handler(context, params, callback)
+  local bufnr = context.bufnr or vim.uri_to_bufnr(params.textDocument.uri)
   local row = params.position.line
   local col = params.position.character
-  local ctx = toml_context.get(bufnr, row, col)
-  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
 
+  if not context.schema or not context.parse_results then
+    callback(nil, { isIncomplete = false, items = {} })
+    return
+  end
+
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
+  local line_before_cursor = line:sub(1, col)
+
+  -- 1. Classify typing target via line string pattern inspection
+  local kind = "root_key"
+  local prefix = ""
+  local active_key = nil
+
+  if line_before_cursor:match("%[[^%]]*$") then
+    kind = "table_header"
+    prefix = line_before_cursor:match("([^%.%[%s]+)$") or ""
+  else
+    local has_equals = line_before_cursor:find("=")
+    if not has_equals then
+      prefix = line_before_cursor:match("([%w%-_]+)$") or ""
+    else
+      kind = "table_value"
+      prefix = line_before_cursor:match("([^%s=]+)$") or ""
+      active_key = line_before_cursor:match("^%s*([%w%-_]+)%s*=")
+    end
+  end
+
+  -- 2. Trace the target sub-table block position inside cached pointer_map
+  local active_table_path = ""
+  local highest_row = -1
+  local pointer_map = context.parse_results.pointer_map or {}
+
+  for path, range in pairs(pointer_map) do
+    if path ~= "/" and range[1] <= row and range[1] > highest_row then
+      active_table_path = path
+      highest_row = range[1]
+    end
+  end
+
+  -- Resolve matching nested sub-tree layout node inside schema blueprints
+  local schema_node = context.schema
+  if active_table_path ~= "" then
+    kind = (kind == "root_key") and "table_key" or kind
+    for segment in active_table_path:gmatch("[^/]+") do
+      segment = segment:gsub("~1", "/"):gsub("~0", "~")
+      if schema_node and schema_node.properties and schema_node.properties[segment] then
+        schema_node = schema_node.properties[segment]
+      end
+    end
+  end
+
+  -- Collect brother elements declared inside the target block to block duplicate entry variants
+  local existing_keys = {}
+  if kind == "table_key" and context.parse_results.data then
+    local current_data = context.parse_results.data
+    for segment in active_table_path:gmatch("[^/]+") do
+      segment = segment:gsub("~1", "/"):gsub("~0", "~")
+      if type(current_data) == "table" then
+        current_data = current_data[segment]
+      end
+    end
+    if type(current_data) == "table" then
+      for k, _ in pairs(current_data) do
+        existing_keys[k] = true
+      end
+    end
+  end
+
+  -- 3. Populate LSP results
   local items = {}
-  if ctx.kind == "table_header" then
-    items = complete_table_headers(ctx, bufnr, row, col, line)
-  elseif ctx.kind == "root_key" then
-    items = complete_keys(ctx, ctx.schema, row, col, line)
-  elseif ctx.kind == "table_key" and ctx.schema_node then
-    items = complete_keys(ctx, ctx.schema_node, row, col, line)
-  elseif ctx.kind == "table_value" then
-    items = complete_values(ctx, row, col, line)
-  elseif ctx.kind == "unknown" then
-    items = complete_keys(ctx, ctx.schema, row, col, line)
+  local start_col, end_col = replace_range(line, col, prefix, kind)
+
+  if kind == "table_header" then
+    local paths = {}
+    s_util.gather_table_paths(context.schema, "", paths)
+    for _, entry in ipairs(paths) do
+      if s_util.matches_filter(prefix, entry.path) then
+        items[#items + 1] = make_item(
+          row, start_col, end_col,
+          entry.path, entry.path,
+          vim.lsp.protocol.CompletionItemKind.Module,
+          "table block", s_util.get_description(entry.node)
+        )
+      end
+    end
+  elseif kind == "root_key" or kind == "table_key" then
+    for _, entry in ipairs(s_util.get_ordered_properties(schema_node)) do
+      if not existing_keys[entry.key] and s_util.matches_filter(prefix, entry.key) then
+        local detail = s_util.get_type_label(entry.schema)
+        local default = s_util.get_default_toml(entry.schema)
+        if s_util.is_required(schema_node, entry.key) then
+          detail = detail and ("required · " .. detail) or "required"
+        end
+        if default ~= "" and default ~= '""' then
+          detail = detail and (detail .. " · default " .. default) or ("default " .. default)
+        end
+
+        items[#items + 1] = make_item(
+          row, start_col, end_col,
+          entry.key, entry.key,
+          vim.lsp.protocol.CompletionItemKind.Property,
+          detail, s_util.get_description(entry.schema)
+        )
+        if s_util.is_required(schema_node, entry.key) then
+          items[#items].sortText = "0"
+        end
+      end
+    end
+  elseif kind == "table_value" and active_key then
+    local key_schema = schema_node and schema_node.properties and schema_node.properties[active_key]
+    if key_schema then
+      local t = s_util.get_type_label(key_schema)
+      local item_kind = (t == "boolean") and vim.lsp.protocol.CompletionItemKind.Keyword or
+      vim.lsp.protocol.CompletionItemKind.Value
+
+      local candidates = {}
+      if t == "boolean" then candidates = { "true", "false" } end
+      if key_schema.enum then
+        for _, v in ipairs(key_schema.enum) do
+          table.insert(candidates, type(v) == "string" and string.format("%q", v) or tostring(v))
+        end
+      end
+
+      for _, val in ipairs(candidates) do
+        if s_util.matches_filter(prefix, val) then
+          items[#items + 1] = make_item(row, start_col, end_col, val, val, item_kind)
+        end
+      end
+
+      local default = s_util.get_default_toml(key_schema)
+      if default ~= "" and s_util.matches_filter(prefix, default) then
+        local seen = false
+        for _, item in ipairs(items) do if item.label == default then
+            seen = true
+            break
+          end end
+        if not seen then
+          items[#items + 1] = make_item(
+            row, start_col, end_col,
+            default, default, item_kind,
+            "default", s_util.get_description(key_schema)
+          )
+        end
+      end
+    end
   end
 
   table.sort(items, sort_items)
 
   callback(nil, {
-    isIncomplete = ctx.prefix ~= "",
+    isIncomplete = prefix ~= "",
     items = items,
   })
 end

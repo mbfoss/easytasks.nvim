@@ -1,243 +1,160 @@
--- easytasks/toml/decoder.lua
-
----@class easytasks.Range4
----@field [1] integer
----@field [2] integer
----@field [3] integer
----@field [4] integer
-
----@class easytasks.TomlSyntaxError
----@field message string
----@field range easytasks.Range4
-
----@class easytasks.DecoderResult
----@field ok boolean
----@field data table|nil
----@field errors easytasks.TomlSyntaxError[]
----@field pointer_map table<string, easytasks.Range4>
+local parser = require("easytasks.toml.parser")
 
 local M = {}
 
-local pointer_map = {}
-
----@param token string
----@return string
 local function escape(token)
     token = token:gsub("~", "~0")
     token = token:gsub("/", "~1")
     return token
 end
 
----@param base string
----@param key string
----@return string
 local function join(base, key)
     key = escape(key)
+
     if base == "" then
         return "/" .. key
     end
+
     return base .. "/" .. key
 end
 
----@param s string
----@return string
-local function trim(s)
-    return s:match("^%s*(.-)%s*$")
-end
-
----@param text string
----@return string[]
-local function split_lines(text)
-    local lines = {}
-    text = text:gsub("\r\n", "\n")
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        table.insert(lines, line)
-    end
-    return lines
-end
-
----@param row integer
----@param start_col integer
----@param end_col integer
----@return easytasks.Range4
-local function range(row, start_col, end_col)
-    return { row, start_col, row, end_col }
-end
-
----@param row integer
----@param line string
----@return easytasks.Range4
-local function line_range(row, line)
-    return { row, 0, row, #line }
-end
-
----@param path string
----@param r easytasks.Range4
-local function register(path, r)
-    if not pointer_map[path] then
-        pointer_map[path] = r
-    end
-end
-
----@param raw string
----@return boolean, any
-local function parse_value(raw)
-    raw = trim(raw)
-
-    do
-        local s = raw:match('^"(.*)"$')
-        if s then
-            return true, (s:gsub('\\"', '"'))
-        end
-    end
-
-    if raw == "true" then return true, true end
-    if raw == "false" then return true, false end
-
-    if raw:match("^%[.*%]$") then
-        local inner = raw:sub(2, -2)
-        local arr = {}
-
-        if trim(inner) == "" then
-            return true, arr
-        end
-
-        local current = ""
-        local in_string = false
-
-        local function push()
-            local ok, v = parse_value(current)
-            if not ok then return false, v end
-            table.insert(arr, v)
-            current = ""
-            return true
-        end
-
-        for i = 1, #inner do
-            local c = inner:sub(i, i)
-
-            if c == '"' then
-                in_string = not in_string
-                current = current .. c
-            elseif c == "," and not in_string then
-                local ok, err = push()
-                if not ok then return false, err end
-            else
-                current = current .. c
-            end
-        end
-
-        if current ~= "" then
-            local ok, err = push()
-            if not ok then return false, err end
-        end
-
-        return true, arr
-    end
-
-    local n = tonumber(raw)
-    if n ~= nil then return true, n end
-
-    return false, "unsupported value: " .. raw
-end
-
----@param text string
----@return easytasks.DecoderResult
-function M.decode(text)
+local function evaluate(ast)
     local root = {}
+    local pointer_map = {}
     local errors = {}
+    local path_kinds = {}
 
-    pointer_map = {}
-    register("/", { 0, 0, 0, 0 })
-
-    local current = root
+    -- Fallback dummy context to catch orphaned properties during invalid sections
+    local dead_end_table = {}
+    local current_table = root
     local current_path = ""
 
-    local lines = split_lines(text)
+    pointer_map["/"] = { 0, 0, 0, 0 }
 
-    local function add_error(msg, r)
-        table.insert(errors, { message = msg, range = r })
+    local function register(path, range)
+        -- Overwrite or set range context to keep pointers accurate to the latest block mutation
+        pointer_map[path] = range
     end
 
-    for line_no, raw_line in ipairs(lines) do
-        local row = line_no - 1
+    local function eval_value(node, path)
+        if node.kind == "Literal" then
+            path_kinds[path] = "Literal"
+            return node.token.value
+        end
+        return nil
+    end
 
-        local line = raw_line
-        line = line:gsub("%s+#.*$", "")
-        line = trim(line)
+    for _, node in ipairs(ast.body) do
+        -- [table]
+        if node.kind == "TableSection" then
+            current_table = root
+            current_path = ""
 
-        if line ~= "" then
-            local table_name = line:match("^%[(.+)%]$")
+            local invalid = false
 
-            if table_name then
-                current = root
-                current_path = ""
+            for _, key_token in ipairs(node.keys) do
+                local key = key_token.value
+                local next_path = join(current_path, key)
+                local kind = path_kinds[next_path]
 
-                for part in table_name:gmatch("[^%.]+") do
-                    part = trim(part)
-
-                    if part == "" then
-                        add_error("empty table segment", line_range(row, raw_line))
-                        goto continue
-                    end
-
-                    if current[part] == nil then
-                        current[part] = {}
-                    end
-
-                    current = current[part]
-                    current_path = join(current_path, part)
-
-                    register(current_path, line_range(row, raw_line))
+                if kind == "Literal" then
+                    table.insert(errors, {
+                        message = "Cannot redefine non-table target: " .. key,
+                        range = key_token.range or node.range,
+                    })
+                    invalid = true
+                    break
                 end
+
+                if current_table[key] == nil then
+                    current_table[key] = {}
+                    path_kinds[next_path] = "Table"
+                elseif path_kinds[next_path] ~= "Table" then
+                    -- Catch-all for structural type mismatch
+                    table.insert(errors, {
+                        message = "Type mismatch on path: " .. key,
+                        range = key_token.range or node.range,
+                    })
+                    invalid = true
+                    break
+                end
+
+                current_table = current_table[key]
+                current_path = next_path
+
+                -- Register using the token range of the specific key for higher precision
+                register(next_path, key_token.range or node.range)
+            end
+
+            if invalid then
+                -- Safely sink orphaned properties instead of polluting the document root
+                current_table = dead_end_table
+                current_path = "/_error_sink"
+            end
+
+            -- key = value
+        elseif node.kind == "KeyValuePair" then
+            local key = node.key.value
+            local path = join(current_path, key)
+            local existing_kind = path_kinds[path]
+
+            if existing_kind then
+                local msg = "Duplicate key: " .. key
+                if existing_kind == "Table" then
+                    msg = "Cannot overwrite table structure with key: " .. key
+                end
+
+                table.insert(errors, {
+                    message = msg,
+                    range = node.key.range or node.range,
+                })
             else
-                local eq = raw_line:find("=", 1, true)
-
-                if not eq then
-                    add_error("expected '='", line_range(row, raw_line))
-                    goto continue
-                end
-
-                local key = trim(raw_line:sub(1, eq - 1))
-                local raw_value = trim(raw_line:sub(eq + 1))
-
-                if key == "" then
-                    add_error("missing key", line_range(row, raw_line))
-                    goto continue
-                end
-
-                if raw_value == "" then
-                    add_error("missing value", line_range(row, raw_line))
-                    goto continue
-                end
-
-                local ok, value = parse_value(raw_value)
-
-                if not ok then
-                    add_error(value, range(row, eq, #raw_line))
-                    goto continue
-                end
-
-                current[key] = value
-
-                local path = join(current_path, key)
-                register(path, range(row, eq, #raw_line))
-
-                if type(value) == "table" then
-                    for i = 1, #value do
-                        register(join(path, tostring(i - 1)), range(row, eq, #raw_line))
-                    end
-                end
+                local value = eval_value(node.value, path)
+                current_table[key] = value
+                register(path, node.range)
             end
         end
+    end
 
-        ::continue::
+    return root, pointer_map, errors
+end
+
+---@param input string|table
+function M.decode(input)
+    local ast
+
+    if type(input) == "string" then
+        local parsed = parser.parse(input)
+
+        if not parsed.ok then
+            return {
+                ok = false,
+                data = nil,
+                errors = parsed.errors,
+                pointer_map = {},
+            }
+        end
+
+        ast = parsed.ast
+    else
+        ast = input
+    end
+
+    local data, pointer_map, errors = evaluate(ast)
+
+    if #errors > 0 then
+        return {
+            ok = false,
+            data = nil,
+            errors = errors,
+            pointer_map = pointer_map,
+        }
     end
 
     return {
-        ok = #errors == 0,
-        data = (#errors == 0) and root or nil,
-        errors = errors,
+        ok = true,
+        data = data,
+        errors = {},
         pointer_map = pointer_map,
     }
 end

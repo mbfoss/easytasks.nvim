@@ -1,9 +1,9 @@
-local schema_nav = require("easytasks.parse.schema_nav")
-local toml_context = require("easytasks.parse.toml_context")
-
+-- easytasks/lsp/hover.lua
 local M = {}
 
----@param node easytasks.JsonSchema?
+local s_util = require("easytasks.toml.schema_util")
+
+---@param node table?
 ---@return string|nil
 local function hover_text(node)
   if not node then
@@ -17,48 +17,76 @@ local function hover_text(node)
   if node.description then
     lines[#lines + 1] = node.description
   end
-  if node.type then
-    local ty = node.type
-    if type(ty) == "table" then
-      ty = table.concat(ty, " | ")
-    end
-    lines[#lines + 1] = ("Type: `%s`"):format(ty)
+
+  local type_label = s_util.get_type_label(node)
+  if type_label ~= "any" then
+    lines[#lines + 1] = ("Type: `%s`"):format(type_label)
   end
-  if node.default ~= nil then
-    lines[#lines + 1] = ("Default: `%s`"):format(schema_nav.lua_to_toml(node.default))
+
+  local default_val = s_util.get_default_toml(node)
+  if default_val ~= "" then
+    lines[#lines + 1] = ("Default: `%s`"):format(default_val)
   end
-  if node.required then
+
+  if node.required and #node.required > 0 then
     lines[#lines + 1] = "Required keys: " .. table.concat(node.required, ", ")
   end
+
   if #lines == 0 then
     return nil
   end
   return table.concat(lines, "\n\n")
 end
 
+---@param context easytasks.LspBufferContext buffer context
 ---@param params lsp.HoverParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.Hover)
-function M.handler(params, callback)
-  local bufnr = vim.uri_to_bufnr(params.textDocument.uri)
+function M.handler(context, params, callback)
+  if not context.schema or not context.parse_results then
+    callback(nil, nil)
+    return
+  end
+
   local row = params.position.line
   local col = params.position.character
-  local ctx = toml_context.get(bufnr, row, col)
 
-  local node = ctx.key_schema or ctx.schema_node
-  if ctx.kind == "root_key" or ctx.kind == "table_key" then
-    if ctx.key then
-      node = schema_nav.property(ctx.schema_node or ctx.schema, ctx.key)
-    elseif ctx.schema_node then
-      node = ctx.schema_node
-    else
-      node = ctx.schema
+  local pointer_map = context.parse_results.pointer_map or {}
+  local matched_path = nil
+  local smallest_range_width = math.huge
+
+  -- 1. Scan pointer_map to find the tightest matched structural path enclosing the cursor
+  for path, range in pairs(pointer_map) do
+    local s_row, s_col, e_row, e_col = range[1], range[2], range[3], range[4]
+
+    local inside = true
+    if row < s_row or row > e_row then inside = false end
+    if row == s_row and col < s_col then inside = false end
+    if row == e_row and col > e_col then inside = false end
+
+    if inside then
+      local width = (e_row - s_row) * 1000 + (e_col - s_col)
+      if width < smallest_range_width then
+        smallest_range_width = width
+        matched_path = path
+      end
     end
   end
 
-  if ctx.kind == "table_header" and #ctx.path > 0 then
-    node = schema_nav.at_path(ctx.schema, ctx.path)
+  -- 2. Trace down the matched JSON-pointer inside the schema tree node layout
+  local node = context.schema
+  if matched_path and matched_path ~= "/" then
+    for segment in matched_path:gmatch("[^/]+") do
+      segment = segment:gsub("~1", "/"):gsub("~0", "~") -- unescape JSON-Pointer tokens
+      if node and node.properties and node.properties[segment] then
+        node = node.properties[segment]
+      else
+        node = nil
+        break
+      end
+    end
   end
 
+  -- 3. Stringify structural constraints to fulfill Markdown block protocol
   local contents = hover_text(node)
   if not contents then
     callback(nil, nil)

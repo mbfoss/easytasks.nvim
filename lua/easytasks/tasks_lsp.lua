@@ -1,6 +1,3 @@
-local default_schema = require("easytasks.parse.schema")
-local toml_context = require("easytasks.parse.toml_context")
-
 local completion = require("easytasks.lsp.completion")
 local hover = require("easytasks.lsp.hover")
 local code_action = require("easytasks.lsp.code_action")
@@ -9,17 +6,13 @@ local format = require("easytasks.lsp.format")
 
 local M = {}
 
----https://neo451.github.io/blog/posts/in-process-lsp-guide/
 M.SERVER_NAME = "easytasks-toml"
 M.SERVER_VERSION = "0.1.0"
 
----@type easytasks.JsonSchema
-M.schema = default_schema
-
----@type table<vim.lsp.protocol.Method, fun(params: table, callback: fun(err: lsp.ResponseError?, result: any))>
+---@type table<vim.lsp.protocol.Method, fun(context: table, params: table, callback: fun(err: lsp.ResponseError?, result: any))>
 local handlers = {}
 
----@type table<integer, integer?>
+---@type table<integer, integer>
 local attached_clients = {}
 
 local features = {
@@ -52,14 +45,14 @@ local initialize_result = {
 }
 
 ---@param feature string
----@param mod { handler: fun(params: table, callback: fun(err?: lsp.ResponseError, result: any)) }
+---@param mod { handler: fun(context: table, params: table, callback: fun(err?: lsp.ResponseError, result: any)) }
 function M.register_feature(feature, mod)
   features[feature] = mod
   M._bind_handlers()
 end
 
 function M._bind_handlers()
-  handlers[ms.initialize] = function(_, callback)
+  handlers[ms.initialize] = function(_, _, callback)
     callback(nil, initialize_result)
   end
   handlers[ms.textDocument_completion] = features.completion.handler
@@ -71,14 +64,8 @@ end
 
 M._bind_handlers()
 
----@param schema easytasks.JsonSchema?
-function M.set_schema(schema)
-  M.schema = schema or default_schema
-  toml_context.set_schema(M.schema)
-end
-
 ---@class easytasks.LspStartOpts
----@field schema easytasks.JsonSchema?
+---@field schema table?
 
 ---@param buf integer
 ---@param opts easytasks.LspStartOpts?
@@ -88,46 +75,61 @@ function M.start(buf, opts)
   if attached_clients[buf] then
     M.stop(buf)
   end
-  M.set_schema(opts.schema)
+
+  ---@class easytasks.LspBufferContext
+  local context = {
+    schema = opts.schema,
+    parse_results = nil,
+    bufnr = buf,
+  }
+
+  -- Build a direct, loopback interface matching Neovim's expected RPC interface layout
+  local dispatch = {
+    request = function(method, params, callback)
+      local handler = handlers[method]
+      if handler then
+        -- FIXED: context is safely passed as the first parameter
+        handler(context, params, callback)
+        return true, nil
+      end
+      return false, nil
+    end,
+    notify = function(_, _) end,
+    is_closing = function() return false end,
+    terminate = function() end,
+  }
 
   ---@type vim.lsp.ClientConfig
   local client_cfg = {
     name = M.SERVER_NAME,
-    cmd = function()
-      return {
-        request = function(method, params, callback)
-          local handler = handlers[method]
-          if handler then
-            handler(params, callback)
-            return true
-          end
-          return false
-        end,
-        notify = function() end,
-        is_closing = function() end,
-        terminate = function() end,
-      }
+    -- FIXED: Wrapped inside an initialization function matching internal core API expectations
+    cmd = function(dispatchers)
+      return dispatch
     end,
   }
 
   local client_id = vim.lsp.start(client_cfg, { bufnr = buf, silent = false })
   if client_id then
     attached_clients[buf] = client_id
-    diagnostics.attach(buf, M.schema, client_id)
+    diagnostics.attach(buf, context, client_id)
   end
+
   return client_id
 end
 
 ---@param buf integer
 function M.stop(buf)
   diagnostics.detach(buf)
-  attached_clients[buf] = nil
+
   local clients = vim.lsp.get_clients({ bufnr = buf, name = M.SERVER_NAME })
   for _, client in ipairs(clients) do
-    vim.lsp.stop_client(client.id, true)
+    if client.id == attached_clients[buf] then
+      ---@diagnostic disable-next-line: deprecated
+      vim.lsp.stop_client(client.id, true)
+    end
   end
-end
 
-M.set_schema(M.schema)
+  attached_clients[buf] = nil
+end
 
 return M
