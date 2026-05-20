@@ -1,7 +1,6 @@
 -- easytasks/lsp/diagnostics.lua
 
 local validator = require("easytasks.toml.validator")
-local parser = require("easytasks.toml.parser")
 local decoder = require("easytasks.toml.decoder")
 local M = {}
 
@@ -32,10 +31,24 @@ local function fallback_range(range, bufnr)
   if range then
     return to_lsp_range(range)
   end
+
+  -- Tie it exactly to the user's active cursor line without compounding line splits
+  local current_win = vim.fn.bufwinid(bufnr)
+  if current_win ~= -1 then
+    local cursor = vim.api.nvim_win_get_cursor(current_win)
+    local row = math.max(0, cursor[1] - 1) -- 1-indexed to 0-indexed conversion
+    return {
+      start = { line = row, character = 0 },
+      ["end"] = { line = row, character = 0 },
+    }
+  end
+
+  -- Safe fallback if window context is completely detached
   local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local target_line = math.max(0, line_count - 1)
   return {
-    start = { line = 0, character = 0 },
-    ["end"] = { line = math.max(0, line_count - 1), character = 0 },
+    start = { line = target_line, character = 0 },
+    ["end"] = { line = target_line, character = 0 },
   }
 end
 
@@ -43,33 +56,19 @@ end
 ---@param context easytasks.LspBufferContext
 ---@return lsp.Diagnostic[]
 function M.build(bufnr, context)
-  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-
-  local parsed = parser.parse(text)
-
   local diagnostics = {}
+  local accumulated_errors = {}
 
-  -- syntax/parser diagnostics
-  for _, err in ipairs(parsed.errors or {}) do
-    diagnostics[#diagnostics + 1] = {
-      range = fallback_range(err.range, bufnr),
-      severity = vim.lsp.protocol.DiagnosticSeverity.Error,
-      source = SERVER_NAME,
-      message = err.message,
-    }
-  end
-
-  -- stop if parser failed
-  if not parsed.ok or not parsed.ast then
-    -- Cache partial/error results so context remains updated
-    context.parse_results = { data = nil, pointer_map = nil, errors = parsed.errors }
+  -- If upstream has not populated an AST tree yet, skip validation and return clean
+  if not context.ast then
     return diagnostics
   end
 
-  -- semantic decode/evaluation
-  local decoded = decoder.decode(parsed.ast)
+  -- 1. Semantic decode/evaluation using the pre-existing AST tree block
+  local decoded = decoder.decode(context.ast)
 
   for _, err in ipairs(decoded.errors or {}) do
+    table.insert(accumulated_errors, err)
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(err.range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
@@ -78,41 +77,37 @@ function M.build(bufnr, context)
     }
   end
 
-  -- stop if semantic evaluation failed
+  -- Stop if semantic evaluation failed
   if not decoded.ok or not decoded.data then
-    context.parse_results = { data = nil, pointer_map = decoded.pointer_map, errors = decoded.errors }
+    context.parse_results = { data = nil, pointer_map = decoded.pointer_map, errors = accumulated_errors }
     return diagnostics
   end
 
-  -- Mutate and sync the closure state with the successfully evaluated AST data maps
+  -- 2. Schema validation running on top of decoded outputs
+  if context.schema then
+    local valid, errors = validator.validate(context.schema, decoded.data)
+
+    if not valid then
+      for _, err in ipairs(errors) do
+        table.insert(accumulated_errors, err)
+        local range = decoded.pointer_map[err.path]
+
+        diagnostics[#diagnostics + 1] = {
+          range = fallback_range(range, bufnr),
+          severity = vim.lsp.protocol.DiagnosticSeverity.Error,
+          source = SERVER_NAME,
+          message = err.err_msg,
+        }
+      end
+    end
+  end
+
+  -- Safely sync all accumulated state details back to context closure tracking
   context.parse_results = {
     data = decoded.data,
     pointer_map = decoded.pointer_map,
-    errors = {},
+    errors = accumulated_errors,
   }
-
-  -- If no schema is provided, we can skip schema validation entirely
-  if not context.schema then
-    return diagnostics
-  end
-
-  -- schema validation
-  local valid, errors = validator.validate(context.schema, decoded.data)
-
-  if valid then
-    return diagnostics
-  end
-
-  for _, err in ipairs(errors) do
-    local range = decoded.pointer_map[err.path]
-
-    diagnostics[#diagnostics + 1] = {
-      range = fallback_range(range, bufnr),
-      severity = vim.lsp.protocol.DiagnosticSeverity.Error,
-      source = SERVER_NAME,
-      message = err.err_msg,
-    }
-  end
 
   return diagnostics
 end

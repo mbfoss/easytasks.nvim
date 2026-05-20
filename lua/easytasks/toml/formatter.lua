@@ -39,6 +39,7 @@ local function format_literal(node)
 end
 
 local function format_key(token)
+    if not token then return "" end
     if token.type == "STRING" then
         return string.format("%q", token.value)
     end
@@ -81,6 +82,7 @@ local function format_inline_table(node)
 end
 
 format_value = function(node)
+    if not node then return "" end
     if node.kind == "Literal" then
         return format_literal(node)
     elseif node.kind == "Array" then
@@ -92,31 +94,14 @@ format_value = function(node)
     error("Unsupported value node: " .. tostring(node.kind))
 end
 
-local function format_table_section(node)
+local function format_table_section_keys(keys)
     local out = {}
-
-    write(out, "[")
-
-    for i, key in ipairs(node.keys) do
+    for i, key in ipairs(keys) do
         if i > 1 then
             write(out, ".")
         end
-
         write(out, format_key(key))
     end
-
-    write(out, "]")
-
-    return table.concat(out)
-end
-
-local function format_key_value(node)
-    local out = {}
-
-    write(out, format_key(node.key))
-    write(out, " = ")
-    write(out, format_value(node.value))
-
     return table.concat(out)
 end
 
@@ -130,7 +115,8 @@ function M.format(ast, opts)
     local out = {}
     local previous_was_table = false
 
-    for _, node in ipairs(ast.body) do
+    -- Adapt to the new Tree walking API design
+    ast:walk_tree(function(_, node, _)
         if node.kind == "TableSection" then
             if #out > 0 then
                 write(out, nl)
@@ -139,17 +125,34 @@ function M.format(ast, opts)
                 end
             end
 
-            write(out, format_table_section(node))
+            write(out, "[" .. format_table_section_keys(node.keys) .. "]")
             previous_was_table = true
+        elseif node.kind == "PartialTableSection" then
+            if #out > 0 then
+                write(out, nl)
+            end
+            -- Output whatever section text has been typed so far
+            write(out, "[" .. format_table_section_keys(node.keys))
+            previous_was_table = false
         elseif node.kind == "KeyValuePair" then
             if #out > 0 then
                 write(out, nl)
             end
 
-            write(out, format_key_value(node))
+            if node.value then
+                write(out, format_key(node.key) .. " = " .. format_value(node.value))
+            else
+                -- Incomplete value assignments like `key = `
+                write(out, format_key(node.key) .. " = ")
+            end
             previous_was_table = false
-
-            -- Explicitly match, format, and append freestanding comment lines or block structures
+        elseif node.kind == "PartialKeyValuePair" then
+            if #out > 0 then
+                write(out, nl)
+            end
+            -- Dangling keywords/prefixes that don't have an equal sign assignment yet
+            write(out, format_key(node.key))
+            previous_was_table = false
         elseif node.kind == "Comment" or (node.token and node.token.type == "COMMENT") then
             if #out > 0 then
                 write(out, nl)
@@ -159,9 +162,11 @@ function M.format(ast, opts)
             write(out, comment_text)
             previous_was_table = false
         end
-    end
 
-    if opts.trailing_newline then
+        return true -- Always continue traversing structural siblings
+    end)
+
+    if #out > 0 and opts.trailing_newline then
         write(out, nl)
     end
 

@@ -50,9 +50,104 @@ local function sort_items(a, b)
   return (a.label or "") < (b.label or "")
 end
 
-local function partial_header(bufnr, row)
-  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-  return line:match("%[([^%]]*)$") or ""
+--------------------------------------------------------------------------------
+-- AST Structural Context Extraction Helpers
+--------------------------------------------------------------------------------
+
+--- Inspects the bidirectional Tree AST structure to determine what structural element is under the cursor
+---@param ast table The Tree AST instance
+---@param target_row integer
+---@param target_col integer
+---@return string kind, string prefix, string|nil active_key, string[] active_segments
+local function inspect_context_from_ast(ast, target_row, target_col)
+  local kind = "root_key"
+  local prefix = ""
+  local active_key = nil
+  local active_segments = {}
+
+  if not ast or type(ast.walk_tree) ~= "function" then
+    return kind, prefix, active_key, active_segments
+  end
+
+  ast:walk_tree(function(_, node, _)
+    -- 1. Track the current containing table context up to or on the current cursor row
+    if (node.kind == "TableSection" or node.kind == "PartialTableSection") and node.range and node.range[1] <= target_row then
+      active_segments = {}
+      if node.keys then
+        for _, key_tok in ipairs(node.keys) do
+          table.insert(active_segments, key_tok.value)
+        end
+      end
+    end
+
+    -- 2. Process node logic matching the exact active editing line
+    if node.range and node.range[1] == target_row then
+      if node.kind == "PartialTableSection" then
+        kind = "table_header"
+        local last_key = node.keys and node.keys[#node.keys]
+        prefix = last_key and last_key.value or ""
+      elseif node.kind == "PartialKeyValuePair" then
+        kind = (#active_segments > 0) and "table_key" or "root_key"
+        prefix = node.key and node.key.value or ""
+      elseif node.kind == "KeyValuePair" then
+        -- Check if the cursor is past the '=' sign to decide if we are editing values
+        if node.equals and node.equals.range and target_col >= node.equals.range[4] then
+          kind = "table_value"
+          active_key = node.key and node.key.value or nil
+          if node.value and node.value.token then
+            prefix = tostring(node.value.token.value)
+          else
+            prefix = ""
+          end
+        else
+          kind = (#active_segments > 0) and "table_key" or "root_key"
+          prefix = node.key and node.key.value or ""
+        end
+      end
+    end
+
+    return true -- Continue walking
+  end)
+
+  return kind, prefix, active_key, active_segments
+end
+
+--- Collects properties declared in the current table section up to the cursor line to avoid duplicates
+---@param ast table The Tree AST instance
+---@param target_row integer
+---@return table<string, boolean> existing_keys
+local function get_sibling_keys_from_ast(ast, target_row)
+  local existing_keys = {}
+  if not ast or type(ast.walk_tree) ~= "function" then return existing_keys end
+
+  local active_table_start_row = -1
+
+  -- Locate the line index of the containing section block
+  ast:walk_tree(function(_, node, _)
+    if (node.kind == "TableSection" or node.kind == "PartialTableSection") and node.range then
+      if node.range[1] <= target_row and node.range[1] > active_table_start_row then
+        active_table_start_row = node.range[1]
+      end
+    end
+    return true
+  end)
+
+  -- Gather keys matching that same parent block container scope boundaries
+  local within_active_block = (active_table_start_row == -1)
+  ast:walk_tree(function(_, node, _)
+    if (node.kind == "TableSection" or node.kind == "PartialTableSection") and node.range then
+      within_active_block = (node.range[1] == active_table_start_row)
+    elseif node.kind == "KeyValuePair" or node.kind == "PartialKeyValuePair" then
+      if within_active_block and node.range and node.range[1] <= target_row then
+        if node.key and node.key.value and node.range[1] ~= target_row then
+          existing_keys[node.key.value] = true
+        end
+      end
+    end
+    return true
+  end)
+
+  return existing_keys
 end
 
 --------------------------------------------------------------------------------
@@ -67,83 +162,45 @@ function M.handler(context, params, callback)
   local row = params.position.line
   local col = params.position.character
 
-  if not context.schema or not context.parse_results then
+  if not context.schema or not context.ast then
     callback(nil, { isIncomplete = false, items = {} })
     return
   end
 
-  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-  local line_before_cursor = line:sub(1, col)
+  -- Determine state classifications explicitly using AST values
+  local kind, prefix, active_key, active_segments = inspect_context_from_ast(context.ast, row, col)
 
-  -- 1. Classify typing target via line string pattern inspection
-  local kind = "root_key"
-  local prefix = ""
-  local active_key = nil
-
-  if line_before_cursor:match("%[[^%]]*$") then
-    kind = "table_header"
-    prefix = line_before_cursor:match("([^%.%[%s]+)$") or ""
-  else
-    local has_equals = line_before_cursor:find("=")
-    if not has_equals then
-      prefix = line_before_cursor:match("([%w%-_]+)$") or ""
-    else
-      kind = "table_value"
-      prefix = line_before_cursor:match("([^%s=]+)$") or ""
-      active_key = line_before_cursor:match("^%s*([%w%-_]+)%s*=")
-    end
-  end
-
-  -- 2. Trace the target sub-table block position inside cached pointer_map
-  local active_table_path = ""
-  local highest_row = -1
-  local pointer_map = context.parse_results.pointer_map or {}
-
-  for path, range in pairs(pointer_map) do
-    if path ~= "/" and range[1] <= row and range[1] > highest_row then
-      active_table_path = path
-      highest_row = range[1]
-    end
-  end
-
-  -- Resolve matching nested sub-tree layout node inside schema blueprints
+  -- Track nested structural tree maps inside schema rules
   local schema_node = context.schema
-  if active_table_path ~= "" then
-    kind = (kind == "root_key") and "table_key" or kind
-    for segment in active_table_path:gmatch("[^/]+") do
-      segment = segment:gsub("~1", "/"):gsub("~0", "~")
+  if #active_segments > 0 then
+    for _, segment in ipairs(active_segments) do
       if schema_node and schema_node.properties and schema_node.properties[segment] then
         schema_node = schema_node.properties[segment]
       end
     end
   end
 
-  -- Collect brother elements declared inside the target block to block duplicate entry variants
+  -- Pull duplicate sibling blocks using structural node keys instead of regex captures
   local existing_keys = {}
-  if kind == "table_key" and context.parse_results.data then
-    local current_data = context.parse_results.data
-    for segment in active_table_path:gmatch("[^/]+") do
-      segment = segment:gsub("~1", "/"):gsub("~0", "~")
-      if type(current_data) == "table" then
-        current_data = current_data[segment]
-      end
-    end
-    if type(current_data) == "table" then
-      for k, _ in pairs(current_data) do
-        existing_keys[k] = true
-      end
-    end
+  if kind == "table_key" or kind == "root_key" then
+    existing_keys = get_sibling_keys_from_ast(context.ast, row)
   end
 
-  -- 3. Populate LSP results
+  -- Fetch current editor line metadata for textual insertion tracking points
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
   local items = {}
   local start_col, end_col = replace_range(line, col, prefix, kind)
+
+  local function matches(pfx, target)
+    if pfx == "" then return true end
+    return s_util.matches_filter(pfx, target)
+  end
 
   if kind == "table_header" then
     local paths = {}
     s_util.gather_table_paths(context.schema, "", paths)
     for _, entry in ipairs(paths) do
-      if s_util.matches_filter(prefix, entry.path) then
+      if matches(prefix, entry.path) then
         items[#items + 1] = make_item(
           row, start_col, end_col,
           entry.path, entry.path,
@@ -154,7 +211,7 @@ function M.handler(context, params, callback)
     end
   elseif kind == "root_key" or kind == "table_key" then
     for _, entry in ipairs(s_util.get_ordered_properties(schema_node)) do
-      if not existing_keys[entry.key] and s_util.matches_filter(prefix, entry.key) then
+      if not existing_keys[entry.key] and matches(prefix, entry.key) then
         local detail = s_util.get_type_label(entry.schema)
         local default = s_util.get_default_toml(entry.schema)
         if s_util.is_required(schema_node, entry.key) then
@@ -180,7 +237,7 @@ function M.handler(context, params, callback)
     if key_schema then
       local t = s_util.get_type_label(key_schema)
       local item_kind = (t == "boolean") and vim.lsp.protocol.CompletionItemKind.Keyword or
-      vim.lsp.protocol.CompletionItemKind.Value
+          vim.lsp.protocol.CompletionItemKind.Value
 
       local candidates = {}
       if t == "boolean" then candidates = { "true", "false" } end
@@ -191,18 +248,20 @@ function M.handler(context, params, callback)
       end
 
       for _, val in ipairs(candidates) do
-        if s_util.matches_filter(prefix, val) then
+        if matches(prefix, val) then
           items[#items + 1] = make_item(row, start_col, end_col, val, val, item_kind)
         end
       end
 
       local default = s_util.get_default_toml(key_schema)
-      if default ~= "" and s_util.matches_filter(prefix, default) then
+      if default ~= "" and matches(prefix, default) then
         local seen = false
-        for _, item in ipairs(items) do if item.label == default then
+        for _, item in ipairs(items) do
+          if item.label == default then
             seen = true
             break
-          end end
+          end
+        end
         if not seen then
           items[#items + 1] = make_item(
             row, start_col, end_col,

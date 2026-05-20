@@ -1,6 +1,4 @@
 local M = {}
-
-local toml_parse = require("easytasks.toml.parser")
 local toml_format = require("easytasks.toml.formatter")
 
 ---@param context easytasks.LspBufferContext

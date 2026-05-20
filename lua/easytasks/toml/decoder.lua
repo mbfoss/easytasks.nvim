@@ -2,39 +2,26 @@
 local parser = require("easytasks.toml.parser")
 
 local M = {}
+local M = {}
 
-local function escape(token)
-    token = token:gsub("~", "~0")
-    token = token:gsub("/", "~1")
-    return token
-end
-
-local function join(base, key)
-    key = escape(key)
-
-    if base == "" then
-        return "/" .. key
-    end
-
-    return base .. "/" .. key
+local function join(a, b)
+    return a .. b
 end
 
 local function evaluate(ast)
-    local root = {}
+    -- Initialize the root table context as an empty dict right away
+    local root = vim.empty_dict()
     local pointer_map = {}
     local errors = {}
     local path_kinds = {}
 
     -- Fallback dummy context to catch orphaned properties during invalid sections
-    local dead_end_table = {}
+    local dead_end_table = vim.empty_dict()
     local current_table = root
     local current_path = ""
 
     pointer_map["/"] = { 0, 0, 0, 0 }
-
-    local function register(path, range)
-        pointer_map[path] = range
-    end
+    path_kinds["/"] = "Table"
 
     -- Forward declaration to allow mutually recursive evaluation of arrays and inline tables
     local eval_value
@@ -49,16 +36,17 @@ local function evaluate(ast)
             path_kinds[path] = "Array"
             local result = {}
             for index, item_node in ipairs(node.items) do
-                -- JSON pointers for array indices use 0-based indexing per specification standards
                 local item_path = join(path, tostring(index - 1))
                 local val = eval_value(item_node, item_path)
                 table.insert(result, val)
-                register(item_path, item_node.range)
+                pointer_map[item_path] = item_node.range
             end
             return result
         elseif node.kind == "InlineTable" then
             path_kinds[path] = "Table"
-            local result = {}
+
+            -- Instantiate empty inline tables instantly
+            local result = vim.empty_dict()
             for _, pair in ipairs(node.pairs) do
                 local key = pair.key.value
                 local pair_path = join(path, key)
@@ -71,12 +59,12 @@ local function evaluate(ast)
                 else
                     local val = eval_value(pair.value, pair_path)
                     result[key] = val
-                    register(pair_path, {
+                    pointer_map[pair_path] = {
                         pair.key.range[1],
                         pair.key.range[2],
                         pair.value.range[3],
                         pair.value.range[4],
-                    })
+                    }
                 end
             end
             return result
@@ -85,7 +73,8 @@ local function evaluate(ast)
         return nil
     end
 
-    for _, node in ipairs(ast.body) do
+    -- Traverse the tree nodes using the Tree walker API instead of a flat list array
+    ast:walk_tree(function(_, node, _)
         -- [table]
         if node.kind == "TableSection" then
             current_table = root
@@ -108,14 +97,15 @@ local function evaluate(ast)
                 end
 
                 if current_table[key] == nil then
-                    current_table[key] = {}
+                    -- Instantiate missing block paths as vim.empty_dict() eagerly
+                    current_table[key] = vim.empty_dict()
                     path_kinds[next_path] = "Table"
                 end
 
                 current_table = current_table[key]
                 current_path = next_path
 
-                register(next_path, key_token.range or node.range)
+                pointer_map[next_path] = key_token.range or node.range
             end
 
             if invalid then
@@ -125,6 +115,11 @@ local function evaluate(ast)
 
             -- key = value
         elseif node.kind == "KeyValuePair" then
+            -- Fallback protection for incomplete key value structural segments
+            if not node.value or not node.key then
+                return true -- Keep walking
+            end
+
             local key = node.key.value
             local path = join(current_path, key)
             local existing_kind = path_kinds[path]
@@ -142,10 +137,16 @@ local function evaluate(ast)
             else
                 local value = eval_value(node.value, path)
                 current_table[key] = value
-                register(path, node.range)
+                pointer_map[path] = node.range
             end
+
+            -- Skip any partial structures safely during evaluator analysis loops
+        elseif node.kind == "PartialTableSection" or node.kind == "PartialKeyValuePair" then
+            -- Intentional no-op: Ignore non-evaluated intermediate fragments safely
         end
-    end
+
+        return true -- Continue walking to subsequent nodes
+    end)
 
     return root, pointer_map, errors
 end

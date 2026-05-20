@@ -1,5 +1,6 @@
 -- easytasks/toml/parser.lua
 local M = {}
+local Tree = require("easytasks.util.tree")
 
 ---@class easytasks.Range4
 ---@field [1] integer
@@ -38,7 +39,6 @@ local function tokenize(text)
 
     local function advance(n)
         n = n or 1
-
         for _ = 1, n do
             if i > len then
                 break
@@ -217,6 +217,16 @@ end
 local function parse(tokens)
     local idx = 1
     local errors = {}
+    local node_counter = 0
+
+    -- Create and prepare the tree instance
+    local tree_ast = Tree.new()
+    tree_ast:init()
+
+    local function next_id()
+        node_counter = node_counter + 1
+        return "node_" .. tostring(node_counter)
+    end
 
     local function peek(offset)
         return tokens[idx + (offset or 0)]
@@ -230,15 +240,10 @@ local function parse(tokens)
         return t
     end
 
-    -- skip_trivia only skips formatting whitespace and newlines, allowing comments to be parsed explicitly
     local function skip_trivia()
         while true do
             local t = peek()
-
-            if not t then
-                return
-            end
-
+            if not t then return end
             if t.type == "WHITESPACE" or t.type == "NEWLINE" then
                 idx = idx + 1
             else
@@ -257,7 +262,6 @@ local function parse(tokens)
             skip_trivia()
             local t = peek()
 
-            -- Inside arrays, we skip inline comments safely to keep values contiguous
             if t and t.type == "COMMENT" then
                 advance()
                 t = peek()
@@ -394,19 +398,11 @@ local function parse(tokens)
 
     parse_value = function()
         skip_trivia()
-
         local t = peek()
+        if not t then return nil end
 
-        if not t then
-            return nil
-        end
-
-        if t.type == "STRING"
-            or t.type == "NUMBER"
-            or t.type == "BOOLEAN"
-        then
+        if t.type == "STRING" or t.type == "NUMBER" or t.type == "BOOLEAN" then
             advance()
-
             return {
                 kind = "Literal",
                 token = t,
@@ -417,27 +413,20 @@ local function parse(tokens)
         elseif t.type == "LBRACE" then
             return parse_inline_table(t)
         end
-
         return nil
     end
 
-    local document = {
-        kind = "Document",
-        body = {},
-    }
+    -- Tracks the active table section block container node ID for proper hierarchy nesting
+    local current_container_id = nil
 
     while true do
         skip_trivia()
-
         local t = peek()
 
-        if not t or t.type == "EOF" then
-            break
-        end
+        if not t or t.type == "EOF" then break end
 
-        -- Handle standalone or leading comments explicitly
         if t.type == "COMMENT" then
-            table.insert(document.body, {
+            tree_ast:add_item(current_container_id, next_id(), {
                 kind = "Comment",
                 token = advance(),
             })
@@ -445,24 +434,16 @@ local function parse(tokens)
             -- [table]
         elseif t.type == "LBRACKET" then
             local open = advance()
-
             skip_trivia()
 
             local keys = {}
-
             while true do
                 local kt = peek()
-
                 if not kt or (kt.type ~= "IDENTIFIER" and kt.type ~= "STRING") then
-                    table.insert(errors, {
-                        message = "Expected table key",
-                        range = kt and kt.range or open.range,
-                    })
                     break
                 end
 
                 table.insert(keys, advance())
-
                 skip_trivia()
 
                 local next_t = peek()
@@ -475,66 +456,74 @@ local function parse(tokens)
             end
 
             local close = peek()
+            local section_id = next_id()
 
             if close and close.type == "RBRACKET" then
                 advance()
+                tree_ast:add_item(nil, section_id, {
+                    kind = "TableSection",
+                    open_bracket = open,
+                    keys = keys,
+                    close_bracket = close,
+                    range = { open.range[1], open.range[2], close.range[3], close.range[4] },
+                })
             else
+                -- Fault Tolerant Branch: User is actively typing inside a block bracket section header
                 table.insert(errors, {
                     message = "Expected closing ']'",
                     range = close and close.range or open.range,
                 })
-                close = close or token("RBRACKET", "]", open.range)
+                local end_t = peek(-1) or open
+                tree_ast:add_item(nil, section_id, {
+                    kind = "PartialTableSection",
+                    open_bracket = open,
+                    keys = keys,
+                    range = { open.range[1], open.range[2], end_t.range[3], end_t.range[4] },
+                })
             end
 
-            table.insert(document.body, {
-                kind = "TableSection",
-                open_bracket = open,
-                keys = keys,
-                close_bracket = close,
-                range = {
-                    open.range[1],
-                    open.range[2],
-                    close.range[3],
-                    close.range[4],
-                },
-            })
+            -- Shift subsequent keys into this new container block section context scope
+            current_container_id = section_id
 
-            -- key = value
+            -- key = value OR active word key prefixes
         elseif t.type == "IDENTIFIER" or t.type == "STRING" then
             local key = advance()
-
+            local save_idx = idx
             skip_trivia()
 
             local eq = peek()
-
             if not eq or eq.type ~= "EQUALS" then
-                table.insert(errors, {
-                    message = "Expected '='",
-                    range = eq and eq.range or key.range,
+                -- Fault Tolerant Branch: Captured a trailing context word before an equals operator assignment exists
+                idx = save_idx -- Backtrack past spacing adjustments
+                tree_ast:add_item(current_container_id, next_id(), {
+                    kind = "PartialKeyValuePair",
+                    key = key,
+                    range = key.range,
                 })
-
-                if eq and eq.type ~= "EOF" then advance() end
                 goto continue
             end
 
-            advance()
-
+            advance() -- Consume '='
             local value = parse_value()
 
             if value then
-                table.insert(document.body, {
+                tree_ast:add_item(current_container_id, next_id(), {
                     kind = "KeyValuePair",
                     key = key,
                     equals = eq,
                     value = value,
-                    range = {
-                        key.range[1],
-                        key.range[2],
-                        value.range[3],
-                        value.range[4],
-                    },
+                    range = { key.range[1], key.range[2], value.range[3], value.range[4] },
                 })
             else
+                -- Fault Tolerant Branch: Empty value assignments (e.g. `foo = `)
+                local end_t = peek(-1) or eq
+                tree_ast:add_item(current_container_id, next_id(), {
+                    kind = "KeyValuePair",
+                    key = key,
+                    equals = eq,
+                    value = nil,
+                    range = { key.range[1], key.range[2], end_t.range[3], end_t.range[4] },
+                })
                 table.insert(errors, {
                     message = "Expected value after '='",
                     range = eq.range,
@@ -545,45 +534,29 @@ local function parse(tokens)
                 message = "Unexpected token: " .. t.type,
                 range = t.range,
             })
-
             advance()
         end
 
         ::continue::
     end
 
-    return document, errors
+    return tree_ast, errors
 end
 
----@param text string
 function M.parse(text)
     local tokens, lex_errors = tokenize(text)
+    local tree_ast, parse_errors = parse(tokens)
 
-    if #lex_errors > 0 then
-        return {
-            ok = false,
-            ast = nil,
-            tokens = tokens,
-            errors = lex_errors,
-        }
-    end
-
-    local ast, parse_errors = parse(tokens)
-
-    if #parse_errors > 0 then
-        return {
-            ok = false,
-            ast = ast,
-            tokens = tokens,
-            errors = parse_errors,
-        }
-    end
+    -- Combine errors but return ok = true so downstream LSP handlers can leverage the AST values
+    local all_errors = {}
+    vim.list_extend(all_errors, lex_errors)
+    vim.list_extend(all_errors, parse_errors)
 
     return {
-        ok = true,
-        ast = ast,
+        ok = true,      -- Always true to bypass strict rejection block drop-outs
+        ast = tree_ast, -- Complete bidirectional easytasks.utils.Tree instance object
         tokens = tokens,
-        errors = {},
+        errors = all_errors,
     }
 end
 
