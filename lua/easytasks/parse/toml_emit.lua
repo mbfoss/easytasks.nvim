@@ -1,5 +1,3 @@
-local tinytoml = require("easytasks.parse.tinytoml")
-
 local M = {}
 
 ---@param data table

@@ -1,4 +1,4 @@
-local validator = require("easytasks.validate.validator")
+local validator = require("easytasks.toml.validator")
 local toml_parse = require("easytasks.parse.toml_parse")
 
 local M = {}
@@ -63,7 +63,7 @@ function M.build(bufnr, schema)
   end
 
   for _, err in ipairs(errors) do
-    local range = toml_parse.range_for_pointer(bufnr, err.path, parsed.pointer_map)
+    local range = parsed.pointer_map[err.path]
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
