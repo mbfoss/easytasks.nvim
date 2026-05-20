@@ -1,3 +1,4 @@
+-- easytasks/toml/parser.lua
 local M = {}
 
 ---@class easytasks.Range4
@@ -229,6 +230,7 @@ local function parse(tokens)
         return t
     end
 
+    -- skip_trivia only skips formatting whitespace and newlines, allowing comments to be parsed explicitly
     local function skip_trivia()
         while true do
             local t = peek()
@@ -237,10 +239,7 @@ local function parse(tokens)
                 return
             end
 
-            if t.type == "WHITESPACE"
-                or t.type == "NEWLINE"
-                or t.type == "COMMENT"
-            then
+            if t.type == "WHITESPACE" or t.type == "NEWLINE" then
                 idx = idx + 1
             else
                 return
@@ -248,7 +247,6 @@ local function parse(tokens)
         end
     end
 
-    -- Forward declarations to handle recursive inline collections nested inside keys
     local parse_value
 
     local function parse_array(open_tok)
@@ -258,6 +256,13 @@ local function parse(tokens)
         while true do
             skip_trivia()
             local t = peek()
+
+            -- Inside arrays, we skip inline comments safely to keep values contiguous
+            if t and t.type == "COMMENT" then
+                advance()
+                t = peek()
+            end
+
             if not t or t.type == "RBRACKET" or t.type == "EOF" then
                 break
             end
@@ -270,11 +275,16 @@ local function parse(tokens)
                     message = "Expected value inside array",
                     range = t.range,
                 })
-                advance() -- Avoid infinite cycles
+                advance()
             end
 
             skip_trivia()
             local next_t = peek()
+            if next_t and next_t.type == "COMMENT" then
+                advance()
+                next_t = peek()
+            end
+
             if next_t and next_t.type == "COMMA" then
                 advance()
             elseif next_t and next_t.type == "RBRACKET" then
@@ -425,8 +435,15 @@ local function parse(tokens)
             break
         end
 
-        -- [table]
-        if t.type == "LBRACKET" then
+        -- Handle standalone or leading comments explicitly
+        if t.type == "COMMENT" then
+            table.insert(document.body, {
+                kind = "Comment",
+                token = advance(),
+            })
+
+            -- [table]
+        elseif t.type == "LBRACKET" then
             local open = advance()
 
             skip_trivia()
@@ -483,9 +500,7 @@ local function parse(tokens)
             })
 
             -- key = value
-        elseif t.type == "IDENTIFIER"
-            or t.type == "STRING"
-        then
+        elseif t.type == "IDENTIFIER" or t.type == "STRING" then
             local key = advance()
 
             skip_trivia()

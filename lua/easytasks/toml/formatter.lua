@@ -1,3 +1,4 @@
+-- easytasks/toml/formatter.lua
 local M = {}
 
 ---@class easytasks.FormatOptions
@@ -45,9 +46,47 @@ local function format_key(token)
     return tostring(token.value)
 end
 
-local function format_value(node)
+local format_value
+
+local function format_array(node)
+    local out = {}
+    write(out, "[")
+
+    for i, item in ipairs(node.items) do
+        if i > 1 then
+            write(out, ", ")
+        end
+        write(out, format_value(item))
+    end
+
+    write(out, "]")
+    return table.concat(out)
+end
+
+local function format_inline_table(node)
+    local out = {}
+    write(out, "{")
+
+    for i, pair in ipairs(node.pairs) do
+        if i > 1 then
+            write(out, ", ")
+        end
+        write(out, format_key(pair.key))
+        write(out, " = ")
+        write(out, format_value(pair.value))
+    end
+
+    write(out, "}")
+    return table.concat(out)
+end
+
+format_value = function(node)
     if node.kind == "Literal" then
         return format_literal(node)
+    elseif node.kind == "Array" then
+        return format_array(node)
+    elseif node.kind == "InlineTable" then
+        return format_inline_table(node)
     end
 
     error("Unsupported value node: " .. tostring(node.kind))
@@ -88,16 +127,13 @@ function M.format(ast, opts)
     opts = merge_options(opts)
 
     local nl = opts.newline
-
     local out = {}
-
     local previous_was_table = false
 
     for _, node in ipairs(ast.body) do
         if node.kind == "TableSection" then
             if #out > 0 then
                 write(out, nl)
-
                 if previous_was_table then
                     write(out, nl)
                 end
@@ -111,6 +147,16 @@ function M.format(ast, opts)
             end
 
             write(out, format_key_value(node))
+            previous_was_table = false
+
+            -- Explicitly match, format, and append freestanding comment lines or block structures
+        elseif node.kind == "Comment" or (node.token and node.token.type == "COMMENT") then
+            if #out > 0 then
+                write(out, nl)
+            end
+
+            local comment_text = node.token and node.token.value or node.value or ""
+            write(out, comment_text)
             previous_was_table = false
         end
     end

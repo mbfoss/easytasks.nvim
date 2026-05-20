@@ -1,3 +1,4 @@
+-- easytasks/toml/decoder.lua
 local parser = require("easytasks.toml.parser")
 
 local M = {}
@@ -32,15 +33,55 @@ local function evaluate(ast)
     pointer_map["/"] = { 0, 0, 0, 0 }
 
     local function register(path, range)
-        -- Overwrite or set range context to keep pointers accurate to the latest block mutation
         pointer_map[path] = range
     end
 
-    local function eval_value(node, path)
+    -- Forward declaration to allow mutually recursive evaluation of arrays and inline tables
+    local eval_value
+
+    eval_value = function(node, path)
+        if not node then return nil end
+
         if node.kind == "Literal" then
             path_kinds[path] = "Literal"
             return node.token.value
+        elseif node.kind == "Array" then
+            path_kinds[path] = "Array"
+            local result = {}
+            for index, item_node in ipairs(node.items) do
+                -- JSON pointers for array indices use 0-based indexing per specification standards
+                local item_path = join(path, tostring(index - 1))
+                local val = eval_value(item_node, item_path)
+                table.insert(result, val)
+                register(item_path, item_node.range)
+            end
+            return result
+        elseif node.kind == "InlineTable" then
+            path_kinds[path] = "Table"
+            local result = {}
+            for _, pair in ipairs(node.pairs) do
+                local key = pair.key.value
+                local pair_path = join(path, key)
+
+                if result[key] ~= nil then
+                    table.insert(errors, {
+                        message = "Duplicate key in inline table: " .. key,
+                        range = pair.key.range or pair.value.range,
+                    })
+                else
+                    local val = eval_value(pair.value, pair_path)
+                    result[key] = val
+                    register(pair_path, {
+                        pair.key.range[1],
+                        pair.key.range[2],
+                        pair.value.range[3],
+                        pair.value.range[4],
+                    })
+                end
+            end
+            return result
         end
+
         return nil
     end
 
@@ -57,7 +98,7 @@ local function evaluate(ast)
                 local next_path = join(current_path, key)
                 local kind = path_kinds[next_path]
 
-                if kind == "Literal" then
+                if kind and kind ~= "Table" then
                     table.insert(errors, {
                         message = "Cannot redefine non-table target: " .. key,
                         range = key_token.range or node.range,
@@ -69,25 +110,15 @@ local function evaluate(ast)
                 if current_table[key] == nil then
                     current_table[key] = {}
                     path_kinds[next_path] = "Table"
-                elseif path_kinds[next_path] ~= "Table" then
-                    -- Catch-all for structural type mismatch
-                    table.insert(errors, {
-                        message = "Type mismatch on path: " .. key,
-                        range = key_token.range or node.range,
-                    })
-                    invalid = true
-                    break
                 end
 
                 current_table = current_table[key]
                 current_path = next_path
 
-                -- Register using the token range of the specific key for higher precision
                 register(next_path, key_token.range or node.range)
             end
 
             if invalid then
-                -- Safely sink orphaned properties instead of polluting the document root
                 current_table = dead_end_table
                 current_path = "/_error_sink"
             end
