@@ -431,9 +431,18 @@ local function parse(tokens)
                 token = advance(),
             })
 
-            -- [table]
+            -- [[array_of_tables]] OR [table]
         elseif t.type == "LBRACKET" then
             local open = advance()
+            local next_tok = peek()
+            local is_array_of_tables = false
+
+            -- Check if it's a double bracket matching TOML Array of Tables syntax [[list]]
+            if next_tok and next_tok.type == "LBRACKET" then
+                is_array_of_tables = true
+                advance() -- Consume second '['
+            end
+
             skip_trivia()
 
             local keys = {}
@@ -458,28 +467,56 @@ local function parse(tokens)
             local close = peek()
             local section_id = next_id()
 
-            if close and close.type == "RBRACKET" then
-                advance()
-                tree_ast:add_item(nil, section_id, {
-                    kind = "TableSection",
-                    open_bracket = open,
-                    keys = keys,
-                    close_bracket = close,
-                    range = { open.range[1], open.range[2], close.range[3], close.range[4] },
-                })
+            if is_array_of_tables then
+                -- Match closing double brackets: ]]
+                local close2 = peek(1)
+                if close and close.type == "RBRACKET" and close2 and close2.type == "RBRACKET" then
+                    advance() -- Consume first ']'
+                    advance() -- Consume second ']'
+                    tree_ast:add_item(nil, section_id, {
+                        kind = "ArrayOfTablesSection",
+                        open_bracket = open,
+                        keys = keys,
+                        close_bracket = close2,
+                        range = { open.range[1], open.range[2], close2.range[3], close2.range[4] },
+                    })
+                else
+                    table.insert(errors, {
+                        message = "Expected closing ']]' for array of tables section",
+                        range = close and close.range or open.range,
+                    })
+                    local end_t = peek(-1) or open
+                    tree_ast:add_item(nil, section_id, {
+                        kind = "PartialArrayOfTablesSection",
+                        open_bracket = open,
+                        keys = keys,
+                        range = { open.range[1], open.range[2], end_t.range[3], end_t.range[4] },
+                    })
+                end
             else
-                -- Fault Tolerant Branch: User is actively typing inside a block bracket section header
-                table.insert(errors, {
-                    message = "Expected closing ']'",
-                    range = close and close.range or open.range,
-                })
-                local end_t = peek(-1) or open
-                tree_ast:add_item(nil, section_id, {
-                    kind = "PartialTableSection",
-                    open_bracket = open,
-                    keys = keys,
-                    range = { open.range[1], open.range[2], end_t.range[3], end_t.range[4] },
-                })
+                -- Traditional standard [table]
+                if close and close.type == "RBRACKET" then
+                    advance()
+                    tree_ast:add_item(nil, section_id, {
+                        kind = "TableSection",
+                        open_bracket = open,
+                        keys = keys,
+                        close_bracket = close,
+                        range = { open.range[1], open.range[2], close.range[3], close.range[4] },
+                    })
+                else
+                    table.insert(errors, {
+                        message = "Expected closing ']'",
+                        range = close and close.range or open.range,
+                    })
+                    local end_t = peek(-1) or open
+                    tree_ast:add_item(nil, section_id, {
+                        kind = "PartialTableSection",
+                        open_bracket = open,
+                        keys = keys,
+                        range = { open.range[1], open.range[2], end_t.range[3], end_t.range[4] },
+                    })
+                end
             end
 
             -- Shift subsequent keys into this new container block section context scope

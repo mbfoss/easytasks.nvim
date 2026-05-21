@@ -127,12 +127,29 @@ function M.format(ast, opts)
 
             write(out, "[" .. format_table_section_keys(node.keys) .. "]")
             previous_was_table = true
+        elseif node.kind == "ArrayOfTablesSection" then
+            if #out > 0 then
+                write(out, nl)
+                if previous_was_table then
+                    write(out, nl)
+                end
+            end
+
+            write(out, "[[" .. format_table_section_keys(node.keys) .. "]]")
+            previous_was_table = true
         elseif node.kind == "PartialTableSection" then
             if #out > 0 then
                 write(out, nl)
             end
             -- Output whatever section text has been typed so far
             write(out, "[" .. format_table_section_keys(node.keys))
+            previous_was_table = false
+        elseif node.kind == "PartialArrayOfTablesSection" then
+            if #out > 0 then
+                write(out, nl)
+            end
+            -- Output whatever array-of-tables section text has been typed so far
+            write(out, "[[" .. format_table_section_keys(node.keys))
             previous_was_table = false
         elseif node.kind == "KeyValuePair" then
             if #out > 0 then

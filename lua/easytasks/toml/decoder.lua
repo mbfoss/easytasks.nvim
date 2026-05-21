@@ -125,6 +125,77 @@ local function evaluate(ast)
                 current_path = "/_error_sink"
             end
 
+            -- [[array_of_tables]]
+        elseif node.kind == "ArrayOfTablesSection" then
+            current_table = root
+            current_path = ""
+
+            local invalid = false
+            local num_keys = #node.keys
+
+            for i, key_token in ipairs(node.keys) do
+                local key = key_token.value
+                local next_path = join(current_path, key)
+                local is_last = (i == num_keys)
+
+                if is_last then
+                    -- The last key maps to an array containing tables
+                    local kind = path_kinds[next_path]
+                    if kind and kind ~= "ArrayOfTables" then
+                        table.insert(errors, {
+                            message = "Cannot redefine non-array target as array of tables: " .. key,
+                            range = key_token.range or node.range,
+                        })
+                        invalid = true
+                        break
+                    end
+
+                    if current_table[key] == nil then
+                        current_table[key] = {}
+                        path_kinds[next_path] = "ArrayOfTables"
+                    end
+
+                    -- Append a brand new table dictionary onto this array stack
+                    local tbl_arr = current_table[key]
+                    local next_tbl = vim.empty_dict()
+                    table.insert(tbl_arr, next_tbl)
+
+                    -- Update pointer mapping targeting this specific array element index
+                    local arr_idx_path = join(next_path, tostring(#tbl_arr - 1))
+                    path_kinds[arr_idx_path] = "Table"
+                    pointer_map[arr_idx_path] = key_token.range or node.range
+
+                    current_table = next_tbl
+                    current_path = arr_idx_path
+                else
+                    -- Intermediate parent traversal paths must be dict tables
+                    local kind = path_kinds[next_path]
+                    if kind and kind ~= "Table" then
+                        table.insert(errors, {
+                            message = "Cannot redefine non-table structural ancestor: " .. key,
+                            range = key_token.range or node.range,
+                        })
+                        invalid = true
+                        break
+                    end
+
+                    if current_table[key] == nil then
+                        current_table[key] = vim.empty_dict()
+                        path_kinds[next_path] = "Table"
+                    end
+
+                    current_table = current_table[key]
+                    current_path = next_path
+                end
+
+                pointer_map[next_path] = key_token.range or node.range
+            end
+
+            if invalid then
+                current_table = dead_end_table
+                current_path = "/_error_sink"
+            end
+
             -- key = value
         elseif node.kind == "KeyValuePair" then
             -- Fallback protection for incomplete key value structural segments
@@ -140,6 +211,8 @@ local function evaluate(ast)
                 local msg = "Duplicate key: " .. key
                 if existing_kind == "Table" then
                     msg = "Cannot overwrite table structure with key: " .. key
+                elseif existing_kind == "ArrayOfTables" then
+                    msg = "Cannot overwrite array of tables structure with key: " .. key
                 end
 
                 table.insert(errors, {
@@ -153,7 +226,9 @@ local function evaluate(ast)
             end
 
             -- Skip any partial structures safely during evaluator analysis loops
-        elseif node.kind == "PartialTableSection" or node.kind == "PartialKeyValuePair" then
+        elseif node.kind == "PartialTableSection" or
+            node.kind == "PartialArrayOfTablesSection" or
+            node.kind == "PartialKeyValuePair" then
             -- Intentional no-op: Ignore non-evaluated intermediate fragments safely
         end
 
