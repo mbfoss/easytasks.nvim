@@ -82,17 +82,6 @@ local function get_context_node(ast, target_row)
       active_node = ndata
     end
 
-    -- Drill directly into block children nodes
-    if ast:have_children(current_id) then
-      local children = ast:get_children(current_id)
-      for _, child in ipairs(children) do
-        local cdata = child.data
-        if cdata and cdata.range and cdata.range[1] == target_row then
-          active_node = cdata
-        end
-      end
-    end
-
     local current_node = ast._nodes[current_id]
     current_id = current_node and current_node.next_sibling or nil
   end
@@ -108,43 +97,27 @@ local function get_sibling_keys_from_ast(ast, target_row)
   local existing_keys = {}
   if not ast or not ast._nodes then return existing_keys end
 
-  local active_table_id = nil
-  local current_id = ast._root_first
+  -- Walk the flat root-level AST in document order.
+  -- Each time we enter a new section we reset the set; this naturally
+  -- scopes the collected keys to the section that contains target_row.
+  local id = ast._root_first
+  while id do
+    local nd = ast:get_data(id)
+    if nd and nd.range then
+      local is_section = nd.kind == "TableSection" or nd.kind == "PartialTableSection"
+        or nd.kind == "ArrayOfTablesSection" or nd.kind == "PartialArrayOfTablesSection"
 
-  while current_id do
-    local ndata = ast:get_data(current_id)
-    if ndata and (ndata.kind == "TableSection" or ndata.kind == "PartialTableSection") and ndata.range then
-      if ndata.range[1] <= target_row then
-        active_table_id = current_id
-      end
-    end
-    local current_node = ast._nodes[current_id]
-    current_id = current_node and current_node.next_sibling or nil
-  end
-
-  if active_table_id and ast:have_children(active_table_id) then
-    local children = ast:get_children(active_table_id)
-    for _, child in ipairs(children) do
-      local cdata = child.data
-      if cdata and (cdata.kind == "KeyValuePair" or cdata.kind == "PartialKeyValuePair") then
-        if cdata.range and cdata.range[1] < target_row and cdata.key and cdata.key.value then
-          existing_keys[cdata.key.value] = true
+      if is_section then
+        if nd.range[1] > target_row then break end
+        existing_keys = {} -- entering a new scope; discard previous section's keys
+      elseif nd.kind == "KeyValuePair" or nd.kind == "PartialKeyValuePair" then
+        if nd.range[1] < target_row and nd.key and nd.key.value then
+          existing_keys[nd.key.value] = true
         end
       end
     end
-  else
-    -- Collect keys sitting directly on root level nodes
-    local root_id = ast._root_first
-    while root_id do
-      local rdata = ast:get_data(root_id)
-      if rdata and (rdata.kind == "KeyValuePair" or rdata.kind == "PartialKeyValuePair") then
-        if rdata.range and rdata.range[1] < target_row and rdata.key and rdata.key.value then
-          existing_keys[rdata.key.value] = true
-        end
-      end
-      local root_node = ast._nodes[root_id]
-      root_id = root_node and root_node.next_sibling or nil
-    end
+    local node = ast._nodes[id]
+    id = node and node.next_sibling or nil
   end
 
   return existing_keys
