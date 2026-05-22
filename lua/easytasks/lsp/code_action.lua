@@ -22,7 +22,7 @@ local function dump_ast_to_string(ast)
 
       if node.range then
         info = info ..
-        string.format(" range: (%d,%d)->(%d,%d)", node.range[1], node.range[2], node.range[3], node.range[4])
+            string.format(" range: (%d,%d)->(%d,%d)", node.range[1], node.range[2], node.range[3], node.range[4])
       end
 
       if node.key then

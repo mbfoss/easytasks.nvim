@@ -105,7 +105,7 @@ local function get_sibling_keys_from_ast(ast, target_row)
     local nd = ast:get_data(id)
     if nd and nd.range then
       local is_section = nd.kind == "TableSection" or nd.kind == "PartialTableSection"
-        or nd.kind == "ArrayOfTablesSection" or nd.kind == "PartialArrayOfTablesSection"
+          or nd.kind == "ArrayOfTablesSection" or nd.kind == "PartialArrayOfTablesSection"
 
       if is_section then
         if nd.range[1] > target_row then break end

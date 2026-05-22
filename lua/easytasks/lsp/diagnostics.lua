@@ -1,8 +1,6 @@
 -- easytasks/lsp/diagnostics.lua
 
 local validator = require("easytasks.toml.validator")
-local parser = require("easytasks.toml.parser")
-local decoder = require("easytasks.toml.decoder")
 local M = {}
 
 local SERVER_NAME = "easytasks-toml"
@@ -10,13 +8,9 @@ local SERVER_NAME = "easytasks-toml"
 M.namespace = vim.api.nvim_create_namespace("easytasks-toml")
 M.debounce_ms = 250
 
----@type table<integer, integer?>
-local debounce_timers = {}
-
 ---@type table<integer, integer[]>
 local autocmd_ids = {}
 
----@param range easytasks.Range4
 ---@return lsp.Range
 local function to_lsp_range(range)
   return {
@@ -25,7 +19,6 @@ local function to_lsp_range(range)
   }
 end
 
----@param range easytasks.Range4|nil
 ---@param bufnr integer
 ---@return lsp.Range
 local function fallback_range(range, bufnr)
@@ -69,12 +62,7 @@ function M.build(bufnr, context)
   local diagnostics = {}
   local accumulated_errors = {}
 
-  -- Always re-parse and ensure our context tracking state is built cleanly
-  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-  local parsed = parser.parse(text)
-  context.ast = parsed.ast
-
-  for _, err in ipairs(parsed.errors or {}) do
+  for _, err in ipairs(context.parse_errors or {}) do
     table.insert(accumulated_errors, err)
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(err.range, bufnr),
@@ -89,10 +77,7 @@ function M.build(bufnr, context)
     return diagnostics
   end
 
-  -- 1. Semantic decode/evaluation using the pre-existing AST tree block
-  local decoded = decoder.decode(context.ast)
-
-  for _, err in ipairs(decoded.errors or {}) do
+  for _, err in ipairs(context.decode_errors or {}) do
     table.insert(accumulated_errors, err)
     diagnostics[#diagnostics + 1] = {
       range = fallback_range(err.range, bufnr),
@@ -103,19 +88,19 @@ function M.build(bufnr, context)
   end
 
   -- Stop if semantic evaluation failed
-  if not decoded.ok or not decoded.data then
-    context.parse_results = { data = nil, pointer_map = decoded.pointer_map, errors = accumulated_errors }
+  if not context.data then
+    context.parse_results = { data = nil, pointer_map = context.pointer_map, errors = accumulated_errors }
     return diagnostics
   end
 
   -- 2. Schema validation running on top of decoded outputs
   if context.schema then
-    local valid, errors = validator.validate(context.schema, decoded.data)
+    local valid, errors = validator.validate(context.schema, context.data)
 
     if not valid then
       for _, err in ipairs(errors) do
         table.insert(accumulated_errors, err)
-        local range = decoded.pointer_map[err.path]
+        local range = context.pointer_map[err.path]
 
         diagnostics[#diagnostics + 1] = {
           range = fallback_range(range, bufnr),
@@ -129,8 +114,8 @@ function M.build(bufnr, context)
 
   -- Safely sync all accumulated state details back to context closure tracking
   context.parse_results = {
-    data = decoded.data,
-    pointer_map = decoded.pointer_map,
+    data = context.data,
+    pointer_map = context.pointer_map,
     errors = accumulated_errors,
   }
 
@@ -171,62 +156,12 @@ end
 ---@param bufnr integer
 ---@param context easytasks.LspBufferContext
 ---@param client_id integer?
-function M.run(bufnr, context, client_id)
+function M.update(bufnr, context, client_id)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local diagnostics = M.build(bufnr, context)
   M.publish(bufnr, diagnostics, client_id)
-end
-
----@param bufnr integer
----@param context easytasks.LspBufferContext
----@param client_id integer?
-local function schedule(bufnr, context, client_id)
-  if debounce_timers[bufnr] then
-    vim.fn.timer_stop(debounce_timers[bufnr])
-  end
-  debounce_timers[bufnr] = vim.fn.timer_start(M.debounce_ms, function()
-    debounce_timers[bufnr] = nil
-    vim.schedule(function()
-      M.run(bufnr, context, client_id)
-    end)
-  end)
-end
-
----@param bufnr integer
-function M.detach(bufnr)
-  if debounce_timers[bufnr] then
-    vim.fn.timer_stop(debounce_timers[bufnr])
-    debounce_timers[bufnr] = nil
-  end
-  for _, id in ipairs(autocmd_ids[bufnr] or {}) do
-    pcall(vim.api.nvim_del_autocmd, id)
-  end
-  autocmd_ids[bufnr] = nil
-  vim.diagnostic.reset(M.namespace, bufnr)
-end
-
----@param bufnr integer
----@param context easytasks.LspBufferContext
----@param client_id integer?
-function M.attach(bufnr, context, client_id)
-  M.detach(bufnr)
-  autocmd_ids[bufnr] = {}
-
-  local group = vim.api.nvim_create_augroup("easytasks_toml_diag_" .. bufnr, { clear = true })
-  local events = { "BufEnter", "TextChanged", "InsertLeave", "BufWritePost" }
-  for _, event in ipairs(events) do
-    autocmd_ids[bufnr][#autocmd_ids[bufnr] + 1] = vim.api.nvim_create_autocmd(event, {
-      group = group,
-      buffer = bufnr,
-      callback = function()
-        schedule(bufnr, context, client_id)
-      end,
-    })
-  end
-
-  M.run(bufnr, context, client_id)
 end
 
 return M
