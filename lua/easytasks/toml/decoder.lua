@@ -20,9 +20,10 @@ local function evaluate(ast, with_type_map)
     local function set_type(p, t) if value_types then value_types[p] = t end end
     local function add_err(e) table.insert(errors, e) end
 
-    local dead_end_table = vim.empty_dict()
-    local current_table  = root
-    local current_path   = ""
+    local dead_end_table    = vim.empty_dict()
+    local current_table     = root
+    local current_path      = ""
+    local inline_table_paths = {}
 
     dt:set_range("", { 0, 0, 0, 0 })
     path_kinds[""] = "Table"
@@ -51,6 +52,7 @@ local function evaluate(ast, with_type_map)
         elseif node.kind == NodeKind.InlineTable then
             path_kinds[path] = "Table"
             set_type(path, "table")
+            if node.explicit then inline_table_paths[path] = true end
             local result = vim.empty_dict()
             for _, pair in ipairs(node.pairs) do
                 local key       = pair.key.value
@@ -101,11 +103,16 @@ local function evaluate(ast, with_type_map)
         local existing_kind = path_kinds[path]
 
         if existing_kind then
-            -- If it's a table expanding an existing table structure via dotted keys
             if existing_kind == "Table" and node.value.kind == NodeKind.InlineTable then
-                local fresh_val = eval_value(node.value, path)
-                merge_values(current_table[key], fresh_val, path)
-                dt:set_range(path, node.range)
+                if inline_table_paths[path] then
+                    add_err({ message = "Cannot extend inline table: " .. key, range = node.key.range or node.range })
+                elseif node.value.explicit then
+                    add_err({ message = "Cannot redefine implicit table as inline table: " .. key, range = node.key.range or node.range })
+                else
+                    local fresh_val = eval_value(node.value, path)
+                    merge_values(current_table[key], fresh_val, path)
+                    dt:set_range(path, node.range)
+                end
             else
                 local msg = "Duplicate key: " .. key
                 if existing_kind == "Table" then
@@ -150,6 +157,14 @@ local function evaluate(ast, with_type_map)
                     invalid = true
                     break
                 else
+                    if inline_table_paths[next_path] then
+                        add_err({
+                            message = "Cannot extend inline table with table header: " .. key,
+                            range   = key_token.range or node.range,
+                        })
+                        invalid = true
+                        break
+                    end
                     if current_table[key] == nil then
                         current_table[key] = vim.empty_dict()
                         path_kinds[next_path] = "Table"
@@ -227,6 +242,14 @@ local function evaluate(ast, with_type_map)
                         invalid = true
                         break
                     else
+                        if inline_table_paths[next_path] then
+                            add_err({
+                                message = "Cannot extend inline table with array-of-tables header: " .. key,
+                                range   = key_token.range or node.range,
+                            })
+                            invalid = true
+                            break
+                        end
                         if current_table[key] == nil then
                             current_table[key] = vim.empty_dict()
                             path_kinds[next_path] = "Table"

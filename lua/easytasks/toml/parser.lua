@@ -468,6 +468,10 @@ function M.parse(text)
         for _, pair in ipairs(existing_pairs) do
             if pair.key.value == new_key.value then
                 if pair.value and pair.value.kind == NodeKind.InlineTable and new_value and new_value.kind == NodeKind.InlineTable then
+                    if pair.value.explicit then
+                        add_err("Cannot extend inline table with dotted key: " .. new_key.value)
+                        return
+                    end
                     for _, incoming in ipairs(new_value.pairs) do
                         merge_inline_table_pairs(pair.value.pairs, incoming.key, incoming.value)
                     end
@@ -531,7 +535,7 @@ function M.parse(text)
         local multiline = row ~= sr
         if char() ~= "}" then add_err("Missing } in inline table") else step() end
         local er, ec = row, col
-        return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, range = mkr(sr, sc, er, ec) }
+        return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, explicit = true, range = mkr(sr, sc, er, ec) }
     end
 
     function parse_value()
