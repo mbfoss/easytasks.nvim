@@ -152,4 +152,57 @@ function M.validate_utf8(s)
     return i > #s
 end
 
+---@param y number
+---@param mo number
+---@param d number
+---@param h number?
+---@param mi number?
+---@param sec number?
+---@param zone number?
+---@return string
+function M.format_date_str(y, mo, d, h, mi, sec, zone)
+    local s = string.format("%04d-%02d-%02d", y, mo, d)
+    if h ~= nil then
+        local si = math.floor(sec or 0)
+        local sf = (sec or 0) - si
+        s = s .. "T" .. string.format("%02d:%02d:%02d", h, mi, si)
+        if sf > 0 then s = s .. tostring(sf):sub(2) end
+        if zone ~= nil then
+            if zone == 0 then
+                s = s .. "Z"
+            else
+                s = s .. string.format("%+03d:00", zone)
+            end
+        end
+    end
+    return s
+end
+
+---@param h number
+---@param mi number
+---@param sec number
+---@return string
+function M.format_time_str(h, mi, sec)
+    local si = math.floor(sec or 0)
+    local sf = (sec or 0) - si
+    local s = string.format("%02d:%02d:%02d", h, mi, si)
+    if sf > 0 then s = s .. tostring(sf):sub(2) end
+    return s
+end
+
+---@param cp integer
+---@return string
+function M.utf8_encode(cp)
+    if cp < 0x80 then
+        return string.char(cp)
+    elseif cp < 0x800 then
+        return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
+    elseif cp < 0x10000 then
+        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
+    else
+        return string.char(0xF0 + math.floor(cp / 262144), 0x80 + math.floor(cp % 262144 / 4096),
+            0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
+    end
+end
+
 return M

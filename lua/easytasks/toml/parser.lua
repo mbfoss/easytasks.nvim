@@ -15,44 +15,6 @@ local NodeKind = util.NodeKind
 
 local M        = {}
 
-local function format_date_str(y, mo, d, h, mi, sec, zone)
-    local s = string.format("%04d-%02d-%02d", y, mo, d)
-    if h ~= nil then
-        local si = math.floor(sec or 0)
-        local sf = (sec or 0) - si
-        s = s .. "T" .. string.format("%02d:%02d:%02d", h, mi, si)
-        if sf > 0 then s = s .. tostring(sf):sub(2) end
-        if zone ~= nil then
-            if zone == 0 then
-                s = s .. "Z"
-            else
-                s = s .. string.format("%+03d:00", zone)
-            end
-        end
-    end
-    return s
-end
-
-local function format_time_str(h, mi, sec)
-    local si = math.floor(sec or 0)
-    local sf = (sec or 0) - si
-    local s = string.format("%02d:%02d:%02d", h, mi, si)
-    if sf > 0 then s = s .. tostring(sf):sub(2) end
-    return s
-end
-
-local function utf8_encode(cp)
-    if cp < 0x80 then
-        return string.char(cp)
-    elseif cp < 0x800 then
-        return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
-    elseif cp < 0x10000 then
-        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
-    else
-        return string.char(0xF0 + math.floor(cp / 262144), 0x80 + math.floor(cp % 262144 / 4096),
-            0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
-    end
-end
 
 function M.parse(text)
     local errors   = {}
@@ -200,7 +162,7 @@ function M.parse(text)
                             elseif cp > 0x10FFFF then
                                 add_err("Invalid Unicode escape: codepoint out of range")
                             else
-                                table.insert(buf, utf8_encode(cp))
+                                table.insert(buf, util.utf8_encode(cp))
                             end
                         end
                     else
@@ -237,7 +199,7 @@ function M.parse(text)
         local mo = tonumber(ahead(2)); step(3)
         local d = tonumber(ahead(2)); step(2)
         local h, mi, sec, zone
-
+        assert(y and mo and d)
         if bounds() and (char():lower() == "t" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
             step()
             if not ahead(2):match("^%d%d$") then
@@ -245,6 +207,7 @@ function M.parse(text)
             else
             h = tonumber(ahead(2)); step(3)
             mi = tonumber(ahead(2)); step(2)
+            assert(mi)
             sec = 0
             if bounds() and char() == ":" then
                 step()
@@ -294,7 +257,7 @@ function M.parse(text)
         local lkind = h ~= nil and (zone ~= nil and "datetime" or "datetime-local") or "date-local"
         return {
             kind = NodeKind.Literal,
-            token = { value = format_date_str(y, mo, d, h, mi, sec, zone), literalkind = lkind, range = mkr(sr, sc, er, ec) },
+            token = { value = util.format_date_str(y, mo, d, h, mi, sec, zone), literalkind = lkind, range = mkr(sr, sc, er, ec) },
             range =
                 mkr(sr, sc, er, ec)
         }
@@ -304,6 +267,7 @@ function M.parse(text)
         local sr, sc = row, col
         local h = tonumber(ahead(2)); step(3)
         local mi = tonumber(ahead(2)); step(2)
+        assert(h and mi)
         local sec = 0
         if bounds() and char() == ":" then
             step()
@@ -323,7 +287,7 @@ function M.parse(text)
         local er, ec = row, col
         return {
             kind = NodeKind.Literal,
-            token = { value = format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) },
+            token = { value = util.format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) },
             range =
                 mkr(sr, sc, er, ec)
         }
