@@ -1,5 +1,3 @@
--- easytasks/toml/parser.lua
-
 ---@alias easytasks.toml.Range {[1]: integer, [2]: integer, [3]: integer, [4]: integer}
 
 ---@class easytasks.toml.ParseError
@@ -25,10 +23,8 @@ local function format_date_str(y, mo, d, h, mi, sec, zone)
         if zone ~= nil then
             if zone == 0 then
                 s = s .. "Z"
-            elseif zone > 0 then
-                s = s .. string.format("+%02d:00", zone)
             else
-                s = s .. string.format("-%02d:00", -zone)
+                s = s .. string.format("%+03d:00", zone)
             end
         end
     end
@@ -49,21 +45,13 @@ local function utf8_encode(cp)
     elseif cp < 0x800 then
         return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
     elseif cp < 0x10000 then
-        return string.char(
-            0xE0 + math.floor(cp / 4096),
-            0x80 + math.floor(cp % 4096 / 64),
-            0x80 + cp % 64)
+        return string.char(0xE0 + math.floor(cp / 4096), 0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
     else
-        return string.char(
-            0xF0 + math.floor(cp / 262144),
-            0x80 + math.floor(cp % 262144 / 4096),
-            0x80 + math.floor(cp % 4096 / 64),
-            0x80 + cp % 64)
+        return string.char(0xF0 + math.floor(cp / 262144), 0x80 + math.floor(cp % 262144 / 4096),
+            0x80 + math.floor(cp % 4096 / 64), 0x80 + cp % 64)
     end
 end
 
----@param text string
----@return easytasks.toml.ParseResult
 function M.parse(text)
     local errors = {}
     local ast = Ast.new()
@@ -71,52 +59,32 @@ function M.parse(text)
     local row, col = 0, 0
     local nid = 0
 
-    ---@return integer
     local function next_id()
         nid = nid + 1; return nid
     end
-
-    ---@param msg string
-    ---@param r easytasks.toml.Range?
-    local function add_err(msg, r)
-        table.insert(errors, { message = msg, range = r or { row, col, row, col } })
-    end
-
-    ---@param sr integer
-    ---@param sc integer
-    ---@param er integer
-    ---@param ec integer
-    ---@return easytasks.toml.Range
+    local function add_err(msg, r) table.insert(errors, { message = msg, range = r or { row, col, row, col } }) end
     local function mkr(sr, sc, er, ec) return { sr, sc, er, ec } end
 
-    ---@param off integer?
-    ---@return string
     local function char(off)
         local i = cursor + (off or 0)
         return i <= #text and text:sub(i, i) or ""
     end
 
-    ---@param n integer
-    ---@param off integer?
-    ---@return string
     local function ahead(n, off)
         local s = cursor + (off or 0)
         return text:sub(s, s + n - 1)
     end
 
-    ---@return boolean
     local function bounds() return cursor <= #text end
 
-    ---@param n integer?
     local function step(n)
         n = n or 1
         for _ = 1, n do
             if cursor <= #text then
                 local c = text:byte(cursor)
-                if c == 10 then -- '\n'
-                    row = row + 1
-                    col = 0
-                elseif c ~= 13 then -- '\r'
+                if c == 10 then
+                    row = row + 1; col = 0
+                elseif c ~= 13 then
                     col = col + 1
                 end
             end
@@ -124,40 +92,43 @@ function M.parse(text)
         end
     end
 
-    ---@return boolean
     local function is_ws()
         local c = char(); return c == " " or c == "\t"
     end
-
-    ---@return boolean
     local function is_nl() return char() == "\n" or (char() == "\r" and char(1) == "\n") end
-
     local function skip_ws() while bounds() and is_ws() do step() end end
-
     local function skip_nl()
-        if char() == "\r" then step() end
-        if char() == "\n" then step() end
+        if char() == "\r" then step() end; if char() == "\n" then step() end
     end
 
-    ---@param s string
-    ---@return string
-    local function trim(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
+    local function skip_wcn()
+        while bounds() do
+            if is_ws() then
+                step()
+            elseif is_nl() then
+                skip_nl()
+            elseif char() == "#" then
+                while bounds() and not is_nl() do step() end
+            else
+                break
+            end
+        end
+    end
 
     -- ===== value parsers =====
+    local parse_value, parse_key_token
 
-    local parse_value
-
-    ---@return easytasks.toml.LiteralNode
     local function parse_string()
         local sr, sc = row, col
         local q = char()
         local ml = char(1) == q and char(2) == q
         step(ml and 3 or 1)
-        local s, closed = "", false
+
+        local buf, closed = {}, false
+        local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", e = "\x1b", ['"'] = '"', ["\\"] = "\\" }
 
         while bounds() do
-            if ml and s == "" and is_nl() then skip_nl() end
-
+            if ml and #buf == 0 and is_nl() then skip_nl() end
             if char() == q then
                 if ml then
                     if char(1) == q and char(2) == q then
@@ -178,76 +149,55 @@ function M.parse(text)
                     step(); skip_nl()
                     while bounds() and is_ws() do step() end
                 else
-                    local esc = {
-                        b = "\b",
-                        t = "\t",
-                        n = "\n",
-                        f = "\f",
-                        r = "\r",
-                        e = "\x1b",
-                        ['"'] = '"',
-                        ["\\"] =
-                        "\\"
-                    }
                     if esc[nc] then
-                        s = s .. esc[nc]; step(2)
-                    elseif nc == "u" then
+                        table.insert(buf, esc[nc]); step(2)
+                    elseif nc == "u" or nc == "U" or nc == "x" then
+                        local len = nc == "u" and 4 or (nc == "U" and 8 or 2)
                         step(2)
-                        local cp = tonumber(ahead(4), 16); step(4)
-                        if cp then s = s .. utf8_encode(cp) else add_err("Invalid unicode escape") end
-                    elseif nc == "U" then
-                        step(2)
-                        local cp = tonumber(ahead(8), 16); step(8)
-                        if cp then s = s .. utf8_encode(cp) else add_err("Invalid unicode escape") end
-                    elseif nc == "x" then
-                        step(2)
-                        local cp = tonumber(ahead(2), 16); step(2)
-                        if cp then s = s .. string.char(cp) else add_err("Invalid hex escape") end
+                        local cp = tonumber(ahead(len), 16); step(len)
+                        if cp then
+                            table.insert(buf, nc == "x" and string.char(cp) or utf8_encode(cp))
+                        else
+                            add_err("Invalid escape sequence")
+                        end
                     else
                         add_err("Invalid escape: \\" .. nc); step()
                     end
                 end
             else
-                s = s .. char(); step()
+                table.insert(buf, char()); step()
             end
         end
 
         if not closed then add_err("Unterminated string") end
         local er, ec = row, col
-        return {
-            kind = NodeKind.Literal,
-            token = { value = s, literalkind = "string", range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        local s = table.concat(buf)
+        return { kind = NodeKind.Literal, token = { value = s, literalkind = "string", range = mkr(sr, sc, er, ec) }, range =
+        mkr(sr, sc, er, ec) }
     end
 
-    ---@return boolean
     local function is_datetime_start() return ahead(10):match("^%d%d%d%d%-%d%d%-%d%d") ~= nil end
-
-    ---@return boolean
     local function is_time_start() return ahead(5):match("^%d%d:%d%d") ~= nil end
 
-    ---@return easytasks.toml.LiteralNode
     local function parse_datetime()
         local sr, sc = row, col
-        local y = tonumber(ahead(4)); step(4); step()  -- year, -
-        local mo = tonumber(ahead(2)); step(2); step() -- month, -
-        local d = tonumber(ahead(2)); step(2)          -- day
+        local y = tonumber(ahead(4)); step(5)
+        local mo = tonumber(ahead(2)); step(3)
+        local d = tonumber(ahead(2)); step(2)
         local h, mi, sec, zone
 
         if bounds() and (char():lower() == "t" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
             step()
-            h = tonumber(ahead(2)); step(2); step() -- hour, :
-            mi = tonumber(ahead(2)); step(2)        -- min
+            h = tonumber(ahead(2)); step(3)
+            mi = tonumber(ahead(2)); step(2)
             sec = 0
             if bounds() and char() == ":" then
                 step()
-                local ss = ""
+                local ss = {}
                 while bounds() and char():match("[%d%.]") do
-                    ss = ss .. char(); step()
+                    table.insert(ss, char()); step()
                 end
-                sec = tonumber(ss) or 0
+                sec = tonumber(table.concat(ss)) or 0
             end
 
             if bounds() and char():lower() == "z" then
@@ -262,181 +212,142 @@ function M.parse(text)
         end
 
         local er, ec = row, col
-        local lkind
-        if h ~= nil then
-            lkind = zone ~= nil and "datetime" or "datetime-local"
-        else
-            lkind = "date-local"
-        end
-        local sv = format_date_str(y, mo, d, h, mi, sec, zone)
-        return {
-            kind = NodeKind.Literal,
-            token = { value = sv, literalkind = lkind, range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        local lkind = h ~= nil and (zone ~= nil and "datetime" or "datetime-local") or "date-local"
+        return { kind = NodeKind.Literal, token = { value = format_date_str(y, mo, d, h, mi, sec, zone), literalkind = lkind, range = mkr(sr, sc, er, ec) }, range =
+        mkr(sr, sc, er, ec) }
     end
 
-    ---@return easytasks.toml.LiteralNode
     local function parse_time()
         local sr, sc = row, col
-        local h = tonumber(ahead(2)); step(2); step() -- hour, :
-        local mi = tonumber(ahead(2)); step(2)        -- min
+        local h = tonumber(ahead(2)); step(3)
+        local mi = tonumber(ahead(2)); step(2)
         local sec = 0
         if bounds() and char() == ":" then
             step()
-            local ss = ""
+            local ss = {}
             while bounds() and char():match("[%d%.]") do
-                ss = ss .. char(); step()
+                table.insert(ss, char()); step()
             end
-            sec = tonumber(ss) or 0
+            sec = tonumber(table.concat(ss)) or 0
         end
         local er, ec = row, col
-        return {
-            kind = NodeKind.Literal,
-            token = { value = format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        return { kind = NodeKind.Literal, token = { value = format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) }, range =
+        mkr(sr, sc, er, ec) }
     end
 
-    ---@return boolean
     local function is_num_term()
-        return not bounds() or is_ws() or is_nl()
-            or char() == "#" or char() == "," or char() == "]" or char() == "}"
+        if not bounds() then return true end
+        local c = char()
+        return c == " " or c == "\t" or c == "\n" or c == "\r" or c == "#" or c == "," or c == "]" or c == "}"
     end
 
-    ---@return easytasks.toml.LiteralNode
     local function parse_number()
         local sr, sc = row, col
-        local s = ""
+        local s_buf, raw_buf = {}, {}
 
         if char() == "+" or char() == "-" then
-            s = s .. char(); step()
+            table.insert(s_buf, char())
+            table.insert(raw_buf, char())
+            step()
         end
 
         if char() == "0" and (char(1) == "x" or char(1) == "o" or char(1) == "b") then
-            local pfx = char(1); step(2)
+            local pfx = char(1)
+            table.insert(raw_buf, ahead(2))
+            step(2)
             local bases = { x = 16, o = 8, b = 2 }
-            local digits = ""
+            local dig_buf = {}
             while bounds() and not is_num_term() do
-                if char() ~= "_" then digits = digits .. char() end; step()
+                table.insert(raw_buf, char())
+                if char() ~= "_" then table.insert(dig_buf, char()) end
+                step()
             end
-            if digits == "" then add_err("Empty based number") end
+            if #dig_buf == 0 then add_err("Empty based number") end
             local er, ec = row, col
-            local v = tonumber(digits, bases[pfx]) or 0
-            return {
-                kind = NodeKind.Literal,
-                token = { value = v, literalkind = "integer", range = mkr(sr, sc, er, ec) },
-                range =
-                    mkr(sr, sc, er, ec)
-            }
+            local v = tonumber(table.concat(dig_buf), bases[pfx]) or 0
+            if table.concat(s_buf) == "-" and v ~= 0 then v = -v end
+            return { kind = NodeKind.Literal, token = { value = v, raw = table.concat(raw_buf), literalkind = "integer", range = mkr(sr, sc, er, ec) }, range =
+            mkr(sr, sc, er, ec) }
         end
 
         while bounds() and not is_num_term() do
             local c = char()
-            if c == "." then
-                s = s .. c; step()
+            table.insert(raw_buf, c)
+            if c == "." or c:match("%d") then
+                table.insert(s_buf, c); step()
             elseif c:lower() == "e" then
-                s = s .. c; step()
+                table.insert(s_buf, c); step()
                 if bounds() and (char() == "+" or char() == "-") then
-                    s = s .. char(); step()
+                    table.insert(s_buf, char())
+                    table.insert(raw_buf, char())
+                    step()
                 end
             elseif c == "_" then
                 step()
-            elseif c:match("[%d]") then
-                s = s .. c; step()
             else
                 break
             end
         end
 
         local er, ec = row, col
-        local v = tonumber(s)
-        if not v then
-            add_err("Invalid number: " .. s); v = 0
+        local s = table.concat(s_buf)
+        local lkind = s:find("[%.eE]") and "float" or "integer"
+        local v = tonumber(s) or 0
+
+        if lkind == "integer" then
+            if v == 0 then v = 0 end -- Normalizes -0 integer expressions
+            return { kind = NodeKind.Literal, token = { value = v, raw = table.concat(raw_buf):gsub("_", ""), literalkind = lkind, range = mkr(sr, sc, er, ec) }, range =
+            mkr(sr, sc, er, ec) }
         end
-        local literalkind = (s:find("[%.eE]") ~= nil) and "float" or "integer"
-        return {
-            kind = NodeKind.Literal,
-            token = { value = v, literalkind = literalkind, range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+
+        return { kind = NodeKind.Literal, token = { value = v, literalkind = lkind, range = mkr(sr, sc, er, ec) }, range =
+        mkr(sr, sc, er, ec) }
     end
 
-    ---@return easytasks.toml.LiteralNode
     local function parse_bool_special()
         local sr, sc = row, col
-        local val, len, literalkind
-        if ahead(5) == "false" then
-            val = false; len = 5; literalkind = "bool"
-        elseif ahead(4) == "true" then
-            val = true; len = 4; literalkind = "bool"
-        elseif ahead(4) == "+inf" then
-            val = math.huge; len = 4; literalkind = "float"
-        elseif ahead(4) == "-inf" then
-            val = -math.huge; len = 4; literalkind = "float"
-        elseif ahead(3) == "inf" then
-            val = math.huge; len = 3; literalkind = "float"
-        elseif ahead(4) == "+nan" then
-            val = 0 / 0; len = 4; literalkind = "float"
-        elseif ahead(4) == "-nan" then
-            val = 0 / 0; len = 4; literalkind = "float"
-        elseif ahead(3) == "nan" then
-            val = 0 / 0; len = 3; literalkind = "float"
-        else
-            add_err("Unexpected value near: " .. ahead(8))
-            while bounds() and not is_num_term() do step() end
-            local er, ec = row, col
-            return {
-                kind = NodeKind.Literal,
-                token = { value = nil, range = mkr(sr, sc, er, ec) },
-                range = mkr(sr, sc,
-                    er, ec)
-            }
-        end
-        step(len)
-        local er, ec = row, col
-        return {
-            kind = NodeKind.Literal,
-            token = { value = val, literalkind = literalkind, range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
+        local matches = {
+            ["false"] = { false, 5, "bool" },
+            ["true"] = { true, 4, "bool" },
+            ["+inf"] = { math.huge, 4, "float" },
+            ["-inf"] = { -math.huge, 4, "float" },
+            ["inf"] = { math.huge, 3, "float" },
+            ["+nan"] = { 0 / 0, 4, "float" },
+            ["-nan"] = { 0 / 0, 4, "float" },
+            ["nan"] = { 0 / 0, 3, "float" }
         }
+
+        for k, v in pairs(matches) do
+            if ahead(#k) == k then
+                step(v[2])
+                local er, ec = row, col
+                return { kind = NodeKind.Literal, token = { value = v[1], literalkind = v[3], range = mkr(sr, sc, er, ec) }, range =
+                mkr(sr, sc, er, ec) }
+            end
+        end
+
+        add_err("Unexpected value near: " .. ahead(8))
+        while bounds() and not is_num_term() do step() end
+        local er, ec = row, col
+        return { kind = NodeKind.Literal, token = { value = nil, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er,
+            ec) }
     end
 
-    ---@return easytasks.toml.ArrayNode
     local function parse_array()
         local sr, sc = row, col
         step() -- [
         local items = {}
 
-        local function skip_wcn()
-            while bounds() do
-                if is_ws() then step()
-                elseif is_nl() then skip_nl()
-                elseif char() == "#" then
-                    while bounds() and not is_nl() do step() end
-                else break end
-            end
-        end
-
         while bounds() do
             skip_wcn()
-            if char() == "]" then
-                break
+            if char() == "]" then break end
+            local before = cursor
+            local item = parse_value()
+            if item then table.insert(items, item) end
+            if cursor == before then
+                add_err("Unexpected character in array: " .. char()); step()
             else
-                local before = cursor
-                local item = parse_value()
-                if item then table.insert(items, item) end
-                if cursor == before then
-                    add_err("Unexpected character in array: " .. char())
-                    step()
-                else
-                    skip_wcn()
-                    if char() == "," then step() end
-                end
+                skip_wcn(); if char() == "," then step() end
             end
         end
 
@@ -446,53 +357,55 @@ function M.parse(text)
         return { kind = NodeKind.Array, items = items, multiline = multiline, range = mkr(sr, sc, er, ec) }
     end
 
-    ---@return easytasks.toml.InlineTableNode
+    local function merge_inline_table_pairs(existing_pairs, new_key, new_value)
+        for _, pair in ipairs(existing_pairs) do
+            if pair.key.value == new_key.value then
+                if pair.value and pair.value.kind == NodeKind.InlineTable and new_value and new_value.kind == NodeKind.InlineTable then
+                    for _, incoming in ipairs(new_value.pairs) do
+                        merge_inline_table_pairs(pair.value.pairs, incoming.key, incoming.value)
+                    end
+                    return
+                end
+            end
+        end
+        table.insert(existing_pairs, { key = new_key, value = new_value })
+    end
+
     local function parse_inline_table()
         local sr, sc = row, col
         step() -- {
         local pairs_list = {}
 
-        while bounds() and char() ~= "}" do
-            -- TOML 1.1: whitespace and newlines are allowed between pairs
-            while bounds() and (is_ws() or is_nl()) do
-                if is_nl() then skip_nl() else step() end
-            end
-            if not bounds() or char() == "}" then break end
+        while bounds() do
+            skip_wcn()
+            if char() == "]" or char() == "}" then break end
 
             local ks_r, ks_c = row, col
             local key_parts = {}
-            repeat
-                local pk_sr, pk_sc = row, col
-                local part_str
-                if char() == '"' or char() == "'" then
-                    local kn = parse_string(); part_str = kn.token.value
-                else
-                    part_str = ""
-                    while bounds() and char() ~= "=" and char() ~= "." and not is_ws() and not is_nl() and char() ~= "}" do
-                        part_str = part_str .. char(); step()
-                    end
-                    part_str = trim(part_str)
+
+            while bounds() do
+                skip_wcn()
+                local kt = parse_key_token()
+                if kt.value == "" then
+                    add_err("Empty key segment in inline table"); break
                 end
-                local pk_er, pk_ec = row, col
-                if part_str == "" then add_err("Empty key segment in inline table"); break end
-                table.insert(key_parts, { value = part_str, range = mkr(pk_sr, pk_sc, pk_er, pk_ec) })
-                skip_ws()
-            until char() ~= "."  or (step() and false) -- step() consumes the dot, always false
+                table.insert(key_parts, kt)
+                skip_wcn()
+                if char() == "." then step() else break end
+            end
 
             if #key_parts == 0 then break end
             local ke_r, ke_c = row, col
 
+            skip_wcn()
             if char() ~= "=" then
                 add_err("Expected = in inline table"); break
             end
             step()
-            -- TOML 1.1: whitespace and newlines allowed after =
-            while bounds() and (is_ws() or is_nl()) do
-                if is_nl() then skip_nl() else step() end
-            end
+            skip_wcn()
 
             local val = parse_value()
-            -- Expand dotted keys: a.b = v → a = { b = v }
+
             for i = #key_parts, 2, -1 do
                 val = {
                     kind = NodeKind.InlineTable,
@@ -501,20 +414,11 @@ function M.parse(text)
                     range = val and val.range or mkr(ks_r, ks_c, ke_r, ke_c),
                 }
             end
-            table.insert(pairs_list, {
-                key = { value = key_parts[1].value, range = mkr(ks_r, ks_c, ke_r, ke_c) },
-                value = val,
-            })
-            -- TOML 1.1: trailing comma and newlines allowed after value
-            while bounds() and (is_ws() or is_nl()) do
-                if is_nl() then skip_nl() else step() end
-            end
-            if char() == "," then
-                step()
-                while bounds() and (is_ws() or is_nl()) do
-                    if is_nl() then skip_nl() else step() end
-                end
-            end
+
+            merge_inline_table_pairs(pairs_list, { value = key_parts[1].value, range = mkr(ks_r, ks_c, ke_r, ke_c) }, val)
+
+            skip_wcn()
+            if char() == "," then step() elseif char() == "}" then break else break end
         end
 
         local multiline = row ~= sr
@@ -523,90 +427,48 @@ function M.parse(text)
         return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, range = mkr(sr, sc, er, ec) }
     end
 
-    ---@return easytasks.toml.ValueNode?
     function parse_value()
         if not bounds() then return nil end
         local c = char()
-        if c == '"' or c == "'" then
-            return parse_string()
-        elseif is_datetime_start() then
-            return parse_datetime()
-        elseif is_time_start() then
-            return parse_time()
-        elseif c == "[" then
-            return parse_array()
-        elseif c == "{" then
-            return parse_inline_table()
-        elseif c:match("[%+%-0-9]") then
+        if c == '"' or c == "'" then return parse_string() end
+        if is_datetime_start() then return parse_datetime() end
+        if is_time_start() then return parse_time() end
+        if c == "[" then return parse_array() end
+        if c == "{" then return parse_inline_table() end
+        if c:match("[%+%-0-9]") then
             local a4 = ahead(4)
-            if a4 == "+inf" or a4 == "-inf" or a4 == "+nan" or a4 == "-nan" then
-                return parse_bool_special()
-            end
+            if a4 == "+inf" or a4 == "-inf" or a4 == "+nan" or a4 == "-nan" then return parse_bool_special() end
             return parse_number()
-        else
-            return parse_bool_special()
         end
+        return parse_bool_special()
     end
 
     -- ===== key parsing =====
-
-    -- TOML 1.1: bare keys may include Unicode letters/numbers (any byte >= 0x80),
-    -- except combining marks U+0300-U+036F (bytes CC:80-CD:AF) as the first character.
-    ---@return boolean
-    local function is_bare_key_start()
-        local b = char():byte()
-        if not b then return false end
-        if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
-            (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
-            return true
-        end
-        if b >= 0x80 then
-            -- exclude U+0300-U+036F (combining marks) as first char
-            if b == 0xCC then
-                local b2 = char(1):byte(); if b2 and b2 >= 0x80 then return false end
-            elseif b == 0xCD then
-                local b2 = char(1):byte(); if b2 and b2 <= 0xAF then return false end
-            end
-            return true
-        end
-        return false
+    local function is_bare_key_char()
+        -- Directly maps to ABNF rules: 1*( ALPHA / DIGIT / %x2D / %x5F )
+        return char():match("[%w%-_]") ~= nil
     end
 
-    ---@return boolean
-    local function is_bare_key_cont()
-        local b = char():byte()
-        if not b then return false end
-        if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
-            (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
-            return true
-        end
-        return b >= 0x80
-    end
-
-    ---@return easytasks.toml.KeyRef
     local function parse_bare_key()
         local sr, sc = row, col
-        local k = ""
-        if bounds() and is_bare_key_start() then
-            k = k .. char(); step()
-            while bounds() and is_bare_key_cont() do
-                k = k .. char(); step()
-            end
+        local buf = {}
+        while bounds() and is_bare_key_char() do
+            table.insert(buf, char())
+            step()
         end
         local er, ec = row, col
-        return { value = k, range = mkr(sr, sc, er, ec) }
+        return { value = table.concat(buf), range = mkr(sr, sc, er, ec) }
     end
 
-    ---@return easytasks.toml.KeyRef
-    local function parse_key_token()
-        if char() == '"' or char() == "'" then
+    function parse_key_token()
+        local c = char()
+        if c == '"' or c == "'" then
             local n = parse_string()
             return { value = n.token.value, range = n.range }
         end
         return parse_bare_key()
     end
 
-    ---@return easytasks.toml.KeyRef[]
     local function parse_key_list()
         local keys = {}
         while bounds() do
@@ -622,43 +484,33 @@ function M.parse(text)
         return keys
     end
 
-    -- ===== document-level loop =====
-
-    ---@return string?
+    -- ===== document loop =====
     local function read_trailing_comment()
         skip_ws()
         if char() ~= "#" then return nil end
-        local cmt = ""
+        local buf = {}
         while bounds() and not is_nl() do
-            cmt = cmt .. char(); step()
+            table.insert(buf, char())
+            step()
         end
-        return cmt
+        return table.concat(buf)
     end
 
-    -- Recursively add inline-table pairs and array-of-inline-table items as Tree
-    -- children so the full value structure is visible in the tree.
     local expand_value
     expand_value = function(parent_id, value_node)
         if not value_node then return end
         if value_node.kind == NodeKind.InlineTable then
             for _, pair in ipairs(value_node.pairs) do
                 local pair_id = next_id()
-                ast:add_item(parent_id, pair_id, {
-                    kind = NodeKind.KeyValuePair,
-                    key = pair.key,
-                    value = pair.value,
-                    range = pair.key.range,
-                })
+                ast:add_item(parent_id, pair_id,
+                    { kind = NodeKind.KeyValuePair, key = pair.key, value = pair.value, range = pair.key.range })
                 expand_value(pair_id, pair.value)
             end
         elseif value_node.kind == NodeKind.Array then
-            for _, item in ipairs(value_node.items) do
-                expand_value(parent_id, item)
-            end
+            for _, item in ipairs(value_node.items) do expand_value(parent_id, item) end
         end
     end
 
-    -- nil means top-level (before any section header)
     local current_section_id = nil
 
     while bounds() do
@@ -669,22 +521,20 @@ function M.parse(text)
             skip_nl()
         elseif char() == "#" then
             local sr, sc = row, col
-            local ctext = ""
+            local buf = {}
             while bounds() and not is_nl() do
-                ctext = ctext .. char(); step()
+                table.insert(buf, char()); step()
             end
-            local er, ec = row, col
             ast:add_item(current_section_id, next_id(),
-                { kind = NodeKind.Comment, text = ctext, range = mkr(sr, sc, er, ec) })
+                { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(sr, sc, row, col) })
         elseif char() == "[" then
             local sr, sc = row, col
-            step() -- first [
+            step()
             local is_aot = char() == "["
             if is_aot then step() end
             skip_ws()
 
             local keys, valid = {}, true
-
             while bounds() and char() ~= "]" and not is_nl() do
                 skip_ws()
                 if char() == "]" then break end
@@ -720,26 +570,14 @@ function M.parse(text)
                 end
             end
 
-            local er, ec = row, col
-            local kind
-            if valid then
-                kind = is_aot and NodeKind.ArrayOfTablesSection or NodeKind.TableSection
-            else
-                kind = is_aot and NodeKind.PartialArrayOfTablesSection or NodeKind.PartialTableSection
-            end
-
-            local trail = read_trailing_comment()
+            local kind = valid and (is_aot and NodeKind.ArrayOfTablesSection or NodeKind.TableSection) or
+            (is_aot and NodeKind.PartialArrayOfTablesSection or NodeKind.PartialTableSection)
             local section_id = next_id()
-            ast:add_item(nil, section_id, {
-                kind = kind,
-                keys = keys,
-                trailing_comment = trail,
-                range = mkr(sr, sc, er, ec),
-            })
+            ast:add_item(nil, section_id,
+                { kind = kind, keys = keys, trailing_comment = read_trailing_comment(), range = mkr(sr, sc, row, col) })
             current_section_id = section_id
             if bounds() and is_nl() then skip_nl() end
         else
-            -- key = value
             local sr, sc = row, col
             local keys = parse_key_list()
             skip_ws()
@@ -749,34 +587,22 @@ function M.parse(text)
                 while bounds() and not is_nl() do step() end
                 if bounds() then skip_nl() end
             else
-                step() -- =
+                step()
                 skip_ws()
                 local val = parse_value()
-                local er, ec = row, col
-
-                -- Expand dotted keys: a.b.c = v → a = { b = { c = v } }
                 local node_val = val
+
                 if #keys > 1 then
                     for i = #keys, 2, -1 do
-                        local k = keys[i]
-                        node_val = {
-                            kind = NodeKind.InlineTable,
-                            pairs = { { key = k, value = node_val } },
-                            multiline = false,
-                            range = node_val and node_val.range or mkr(sr, sc, er, ec),
-                        }
+                        node_val = { kind = NodeKind.InlineTable, pairs = { { key = keys[i], value = node_val } }, multiline = false, range =
+                        node_val and node_val.range or mkr(sr, sc, row, col) }
                     end
                 end
 
-                local trail = read_trailing_comment()
                 local kvp_id = next_id()
-                ast:add_item(current_section_id, kvp_id, {
-                    kind = NodeKind.KeyValuePair,
-                    key = keys[1],
-                    value = node_val,
-                    trailing_comment = trail,
-                    range = mkr(sr, sc, er, ec),
-                })
+                ast:add_item(current_section_id, kvp_id,
+                    { kind = NodeKind.KeyValuePair, key = keys[1], value = node_val, trailing_comment =
+                    read_trailing_comment(), range = mkr(sr, sc, row, col) })
                 expand_value(kvp_id, node_val)
                 if bounds() and is_nl() then skip_nl() end
             end
