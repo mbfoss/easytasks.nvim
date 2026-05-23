@@ -156,8 +156,10 @@ function M.parse(text)
 
             if q == '"' and char() == "\\" then
                 local nc = char(1)
-                if ml and (nc == "\n" or (nc == "\r" and char(2) == "\n")) then
-                    step(); skip_nl()
+                local j = 1
+                while char(j) == " " or char(j) == "\t" do j = j + 1 end
+                if ml and (char(j) == "\n" or (char(j) == "\r" and char(j + 1) == "\n")) then
+                    step(j); skip_nl()
                     while bounds() do
                         if is_ws() then step()
                         elseif is_nl() then skip_nl()

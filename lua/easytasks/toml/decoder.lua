@@ -212,23 +212,29 @@ local function evaluate(ast, with_type_map)
                     current_path  = arr_idx_path
                 else
                     local kind = path_kinds[next_path]
-                    if kind and kind ~= "Table" then
+                    if kind == "ArrayOfTables" then
+                        local arr          = current_table[key]
+                        local idx          = #arr
+                        local arr_idx_path = vu.join_path(next_path, tostring(idx))
+                        current_table      = arr[idx]
+                        current_path       = arr_idx_path
+                    elseif kind and kind ~= "Table" then
                         table.insert(errors, {
                             message = "Cannot redefine non-table structural ancestor: " .. key,
                             range   = key_token.range or node.range,
                         })
                         invalid = true
                         break
-                    end
+                    else
+                        if current_table[key] == nil then
+                            current_table[key] = vim.empty_dict()
+                            path_kinds[next_path] = "Table"
+                        end
+                        set_type(next_path, "table")
 
-                    if current_table[key] == nil then
-                        current_table[key] = vim.empty_dict()
-                        path_kinds[next_path] = "Table"
+                        current_table = current_table[key]
+                        current_path  = next_path
                     end
-                    set_type(next_path, "table")
-
-                    current_table = current_table[key]
-                    current_path  = next_path
                 end
 
                 dt:set_range(next_path, key_token.range or node.range)
