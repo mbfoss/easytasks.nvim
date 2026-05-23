@@ -3,103 +3,140 @@ local parser   = require("easytasks.toml.parser")
 local NodeKind = require("easytasks.toml.NodeKind")
 local M = {}
 
-local function fmt_key(k)
-  if k:match("^[A-Za-z0-9_%-]+$") then return k end
-  return '"' .. k:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+local function needs_quotes(key)
+  return not key:match("^[A-Za-z0-9_%-]+$")
 end
 
-local function fmt_keys(keys)
+local function quote_key(key)
+  if needs_quotes(key) then
+    return '"' .. key:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+  end
+  return key
+end
+
+local function format_keys(keys)
   local parts = {}
-  for _, kt in ipairs(keys) do table.insert(parts, fmt_key(kt.value)) end
+  for _, k in ipairs(keys) do
+    table.insert(parts, quote_key(k.value))
+  end
   return table.concat(parts, ".")
 end
 
-local function fmt_str(s)
-  return '"' .. s
-    :gsub("\\", "\\\\")
-    :gsub('"', '\\"')
-    :gsub("\b", "\\b")
-    :gsub("\t", "\\t")
-    :gsub("\f", "\\f")
-    :gsub("\r", "\\r")
-    :gsub("\n", "\\n")
-    .. '"'
+local function format_string(s)
+  if not s:find("'") and not s:find("[\n\r\t\\]") then
+    return "'" .. s .. "'"
+  end
+  s = s:gsub("\\", "\\\\")
+  s = s:gsub('"', '\\"')
+  s = s:gsub("\b", "\\b")
+  s = s:gsub("\t", "\\t")
+  s = s:gsub("\n", "\\n")
+  s = s:gsub("\f", "\\f")
+  s = s:gsub("\r", "\\r")
+  return '"' .. s .. '"'
 end
 
-local function fmt_num(n)
-  if n ~= n then return "nan"
-  elseif n == math.huge then return "inf"
-  elseif n == -math.huge then return "-inf"
-  else return tostring(n) end
+local format_value
+
+local function format_array(node)
+  if #node.items == 0 then return "[]" end
+  local parts = {}
+  for _, item in ipairs(node.items) do
+    table.insert(parts, format_value(item))
+  end
+  return "[ " .. table.concat(parts, ", ") .. " ]"
 end
 
-local fmt_value
+local function format_inline_table(node)
+  if #node.pairs == 0 then return "{}" end
+  local parts = {}
+  for _, pair in ipairs(node.pairs) do
+    table.insert(parts, quote_key(pair.key.value) .. " = " .. format_value(pair.value))
+  end
+  return "{ " .. table.concat(parts, ", ") .. " }"
+end
 
-fmt_value = function(node)
-  if not node then return "" end
+format_value = function(node)
+  if not node then return '""' end
   if node.kind == NodeKind.Literal then
     local v = node.token.value
-    if type(v) == "string" then return fmt_str(v)
-    elseif type(v) == "boolean" then return tostring(v)
-    elseif type(v) == "number" then return fmt_num(v)
-    elseif parser.is_date(v) then return tostring(v)
-    else return tostring(v or "null") end
-  elseif node.kind == NodeKind.Array then
-    if #node.items == 0 then return "[]" end
-    local parts = {}
-    for _, item in ipairs(node.items) do table.insert(parts, fmt_value(item)) end
-    return "[" .. table.concat(parts, ", ") .. "]"
-  elseif node.kind == NodeKind.InlineTable then
-    if #node.pairs == 0 then return "{}" end
-    local parts = {}
-    for _, pair in ipairs(node.pairs) do
-      table.insert(parts, fmt_key(pair.key.value) .. " = " .. fmt_value(pair.value))
+    if type(v) == "string" then
+      return format_string(v)
+    elseif type(v) == "boolean" then
+      return tostring(v)
+    elseif type(v) == "number" then
+      if v ~= v then return "nan"
+      elseif v == math.huge then return "inf"
+      elseif v == -math.huge then return "-inf"
+      end
+      return tostring(v)
+    elseif parser.is_date(v) then
+      return tostring(v)
+    else
+      return tostring(v)
     end
-    return "{ " .. table.concat(parts, ", ") .. " }"
+  elseif node.kind == NodeKind.Array then
+    return format_array(node)
+  elseif node.kind == NodeKind.InlineTable then
+    return format_inline_table(node)
   end
   return ""
 end
 
-local section_kinds = {
-  [NodeKind.TableSection] = true, [NodeKind.ArrayOfTablesSection] = true,
-  [NodeKind.PartialTableSection] = true, [NodeKind.PartialArrayOfTablesSection] = true,
-}
+local function format_kvp(node)
+  local line = quote_key(node.key.value) .. " = " .. format_value(node.value)
+  if node.trailing_comment then
+    line = line .. " " .. node.trailing_comment
+  end
+  return line
+end
 
+---@param ast easytasks.toml.Ast
 function M.format(ast)
   local out = {}
-  local prev_kind = nil
+  local roots = ast:get_roots()
 
-  ast:walk_tree(function(_, node, _)
-    local k = node.kind
+  for i, root in ipairs(roots) do
+    local node = root.data
+    local id   = root.id
 
-    if section_kinds[k] then
-      if prev_kind ~= nil then
-        -- Insert blank line before the section, pushing back past any
-        -- comment block immediately preceding it so comments stay attached.
-        local pos = #out + 1
-        while pos > 1 and out[pos - 1]:match("^%s*#") do pos = pos - 1 end
-        if pos > 1 and out[pos - 1] ~= "" then table.insert(out, pos, "") end
+    if node.kind == NodeKind.TableSection or node.kind == NodeKind.PartialTableSection then
+      if i > 1 then table.insert(out, "") end
+      local header = "[" .. format_keys(node.keys) .. "]"
+      if node.trailing_comment then header = header .. " " .. node.trailing_comment end
+      table.insert(out, header)
+
+      for _, child in ipairs(ast:get_children(id)) do
+        local cn = child.data
+        if cn.kind == NodeKind.KeyValuePair then
+          table.insert(out, format_kvp(cn))
+        elseif cn.kind == NodeKind.Comment then
+          table.insert(out, cn.text)
+        end
       end
-      local bracket = (k == NodeKind.ArrayOfTablesSection or k == NodeKind.PartialArrayOfTablesSection)
-        and "[[%s]]" or "[%s]"
-      local line = bracket:format(fmt_keys(node.keys))
-      if node.trailing_comment then line = line .. " " .. node.trailing_comment end
-      table.insert(out, line)
 
-    elseif k == NodeKind.Comment then
+    elseif node.kind == NodeKind.ArrayOfTablesSection or node.kind == NodeKind.PartialArrayOfTablesSection then
+      if i > 1 then table.insert(out, "") end
+      local header = "[[" .. format_keys(node.keys) .. "]]"
+      if node.trailing_comment then header = header .. " " .. node.trailing_comment end
+      table.insert(out, header)
+
+      for _, child in ipairs(ast:get_children(id)) do
+        local cn = child.data
+        if cn.kind == NodeKind.KeyValuePair then
+          table.insert(out, format_kvp(cn))
+        elseif cn.kind == NodeKind.Comment then
+          table.insert(out, cn.text)
+        end
+      end
+
+    elseif node.kind == NodeKind.KeyValuePair then
+      table.insert(out, format_kvp(node))
+
+    elseif node.kind == NodeKind.Comment then
       table.insert(out, node.text)
-
-    elseif k == NodeKind.KeyValuePair then
-      if node.key and node.value then
-        local line = fmt_key(node.key.value) .. " = " .. fmt_value(node.value)
-        if node.trailing_comment then line = line .. " " .. node.trailing_comment end
-        table.insert(out, line)
-      end
     end
-
-    prev_kind = k
-    return true
-  end)
+  end
 
   return table.concat(out, "\n")
 end
