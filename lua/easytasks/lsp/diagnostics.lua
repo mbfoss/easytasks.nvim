@@ -25,30 +25,6 @@ local function fallback_range(range, bufnr)
   if range then
     return to_lsp_range(range)
   end
-
-  -- Prioritize locating the active cursor window first
-  local current_win = vim.api.nvim_get_current_win()
-  if current_win and vim.api.nvim_win_is_valid(current_win) and vim.api.nvim_win_get_buf(current_win) == bufnr then
-    local cursor = vim.api.nvim_win_get_cursor(current_win)
-    local row = math.max(0, cursor[1] - 1)
-    return {
-      start = { line = row, character = 0 },
-      ["end"] = { line = row, character = 0 },
-    }
-  end
-
-  -- Loop fallbacks if the main API window state hasn't caught up completely
-  local wins = vim.fn.win_findbuf(bufnr)
-  if wins and #wins > 0 then
-    local cursor = vim.api.nvim_win_get_cursor(wins[1])
-    local row = math.max(0, cursor[1] - 1)
-    return {
-      start = { line = row, character = 0 },
-      ["end"] = { line = row, character = 0 },
-    }
-  end
-
-  -- Safe fallback pointing to line 0 rather than pushing lines to the document end
   return {
     start = { line = 0, character = 0 },
     ["end"] = { line = 0, character = 0 },

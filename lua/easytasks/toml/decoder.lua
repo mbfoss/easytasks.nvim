@@ -48,7 +48,7 @@ local function evaluate(ast)
             path_kinds[path] = "Array"
             local result = {}
             for index, item_node in ipairs(node.items) do
-                local item_path = join(path, tostring(index - 1))
+                local item_path = join(path, tostring(index))
                 local val = eval_value(item_node, item_path)
                 table.insert(result, val)
                 pointer_map[item_path] = item_node.range
@@ -161,7 +161,7 @@ local function evaluate(ast)
                     table.insert(tbl_arr, next_tbl)
 
                     -- Update pointer mapping targeting this specific array element index
-                    local arr_idx_path = join(next_path, tostring(#tbl_arr - 1))
+                    local arr_idx_path = join(next_path, tostring(#tbl_arr))
                     path_kinds[arr_idx_path] = "Table"
                     pointer_map[arr_idx_path] = key_token.range or node.range
 

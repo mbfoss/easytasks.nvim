@@ -131,7 +131,7 @@ local function _validate(schema, data, path, errors, schema_map)
                 end
                 if not handled then
                     if addl == false then
-                        add_error(errors, utils.join_path(path, key), "invalid property name")
+                        add_error(errors, utils.join_path(path, key), "invalid property name: " .. tostring(key))
                     elseif type(addl) == "table" then
                         _validate(addl, value, utils.join_path(path, key), errors, schema_map)
                     end

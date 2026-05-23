@@ -19,22 +19,17 @@ function M.build_edit(context, bufnr)
   end
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local active_ast = context.ast
+  local text = table.concat(lines, "\n")
+  local parsed = parser.parse(text)
 
-  -- Fallback protection: If context doesn't hold an AST tree, parse the text cleanly
-  if not active_ast then
-    local text = table.concat(lines, "\n")
-    local parsed = parser.parse(text)
-
-    if parsed.errors and #parsed.errors > 0 then
-      return nil, parsed.errors[1].message
-    end
-    if not parsed.ok or not parsed.ast then
-      return nil, "nothing to format or invalid document structure"
-    end
-    active_ast = parsed.ast
-    context.ast = parsed.ast
+  if parsed.errors and #parsed.errors > 0 then
+    return nil, parsed.errors[1].message
   end
+  if not parsed.ok or not parsed.ast then
+    return nil, "nothing to format or invalid document structure"
+  end
+  local active_ast = parsed.ast
+  context.ast = parsed.ast
 
   -- Pass the context tree directly into your formatting engine
   local new_text = toml_format.format(active_ast)
