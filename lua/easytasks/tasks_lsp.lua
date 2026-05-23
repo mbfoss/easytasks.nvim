@@ -148,15 +148,19 @@ function M.start(buf, opts)
 
   local context = BufferContext.new(buf)
   context.schema = opts.schema
-  context_map[buf] = context_map
+  context_map[buf] = context
 
   -- Build a direct, loopback interface matching Neovim's expected RPC interface layout
   local dispatch = {
     request = function(method, params, callback)
       local handler = handlers[method]
       if handler then
-        -- FIXED: context is safely passed as the first parameter
-        handler(context, params, callback)
+        local ctx = context
+        if params and params.textDocument then
+          local req_bufnr = vim.uri_to_bufnr(params.textDocument.uri)
+          ctx = context_map[req_bufnr] or context
+        end
+        handler(ctx, params, callback)
         return true, nil
       end
       return false, nil
@@ -201,6 +205,7 @@ function M.stop(buf)
     client:stop(true)
   end
   attached_clients[buf] = nil
+  context_map[buf] = nil
 end
 
 return M

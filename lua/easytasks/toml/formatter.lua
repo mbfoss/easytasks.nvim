@@ -51,8 +51,9 @@ local function format_array(node, indent)
   local inner_pad = string.rep("  ", indent + 1)
   local close_pad = string.rep("  ", indent)
   local lines = { "[" }
-  for _, item in ipairs(node.items) do
-    table.insert(lines, inner_pad .. format_value(item, indent + 1) .. ",")
+  for i, item in ipairs(node.items) do
+    local suffix = i < #node.items and "," or ""
+    table.insert(lines, inner_pad .. format_value(item, indent + 1) .. suffix)
   end
   table.insert(lines, close_pad .. "]")
   return table.concat(lines, "\n")
@@ -71,13 +72,26 @@ local function format_inline_table(node, indent)
 
   local inner_pad = string.rep("  ", indent + 1)
   local close_pad = string.rep("  ", indent)
+  local items = node.ordered_items or node.pairs
+  local last_pair_idx = 0
+  for i, item in ipairs(items) do
+    if item.kind ~= NodeKind.Comment then last_pair_idx = i end
+  end
   local lines = { "{" }
-  for _, item in ipairs(node.ordered_items or node.pairs) do
+  local prev_value_end_row = nil
+  for i, item in ipairs(items) do
     if item.kind == NodeKind.Comment then
-      table.insert(lines, inner_pad .. item.text)
+      local comment_row = item.range and item.range[1]
+      if comment_row and comment_row == prev_value_end_row then
+        lines[#lines] = lines[#lines] .. " " .. item.text
+      else
+        table.insert(lines, inner_pad .. item.text)
+      end
     else
       local v = format_value(item.value, indent + 1)
-      table.insert(lines, inner_pad .. quote_key(item.key.value) .. " = " .. v .. ",")
+      local line = inner_pad .. quote_key(item.key.value) .. " = " .. v .. (i < last_pair_idx and "," or "")
+      table.insert(lines, line)
+      prev_value_end_row = item.value and item.value.range and item.value.range[3]
     end
   end
   table.insert(lines, close_pad .. "}")
