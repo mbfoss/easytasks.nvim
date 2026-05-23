@@ -7,22 +7,18 @@ local M          = {}
 
 ---@param ast easytasks.toml.Ast
 ---@param with_type_map boolean?
----@param strict boolean?
 ---@return any                       data
 ---@return easytasks.toml.DecodeTree decode_tree
 ---@return table[]                   errors
 ---@return table<string,string>?     value_types  path → TOML type, only when with_type_map is true
-local function evaluate(ast, with_type_map, strict)
+local function evaluate(ast, with_type_map)
     local root        = vim.empty_dict()
     local dt          = DecodeTree.new()
     local errors      = {}
     local path_kinds  = {}
     local value_types = with_type_map and {} or nil
     local function set_type(p, t) if value_types then value_types[p] = t end end
-    local function add_err(e)
-        if strict then error(e.message, 2) end
-        table.insert(errors, e)
-    end
+    local function add_err(e) table.insert(errors, e) end
 
     local dead_end_table = vim.empty_dict()
     local current_table  = root
@@ -267,7 +263,7 @@ function M.decode(input, opts)
     local ast
 
     if type(input) == "string" then
-        local parsed = parser.parse(input, opts)
+        local parsed = parser.parse(input)
 
         if not parsed.ok then
             return {
@@ -283,7 +279,7 @@ function M.decode(input, opts)
         ast = input
     end
 
-    local data, dt, errors, value_types = evaluate(ast, opts and opts.type_map, opts and opts.strict)
+    local data, dt, errors, value_types = evaluate(ast, opts and opts.type_map)
 
     if #errors > 0 then
         return {

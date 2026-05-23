@@ -47,7 +47,7 @@ local function tagged_from_data(data, path, type_map)
 end
 
 function M.parse_to_tagged_json(toml_str)
-    local result = decoder.decode(toml_str, { type_map = true, strict = true })
+    local result = decoder.decode(toml_str, { type_map = true })
 
     if not result.ok then
         local msgs = {}
