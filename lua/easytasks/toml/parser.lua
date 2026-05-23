@@ -14,7 +14,7 @@
 ---@field quoted boolean
 
 local Ast      = require("easytasks.toml.Ast")
-local util    = require("easytasks.toml.parser_util")
+local util     = require("easytasks.toml.parser_util")
 local NodeKind = util.NodeKind
 
 local M        = {}
@@ -29,7 +29,7 @@ function M.parse(text)
     local row, col = 0, 0
     local nid      = 0
 
-    local utf8_ok = util.validate_utf8(text)
+    local utf8_ok  = util.validate_utf8(text)
     if not utf8_ok then
         table.insert(errors, { message = "Invalid UTF sequence", range = { 0, 0, 0, 0 } })
         return { ok = false, ast = ast, errors = errors }
@@ -243,44 +243,44 @@ function M.parse(text)
             if not ahead(2):match("^%d%d$") then
                 add_err("Expected time component after date separator")
             else
-            h = tonumber(ahead(2)); step(3)
-            mi = tonumber(ahead(2)); step(2)
-            assert(mi)
-            sec = 0
-            if bounds() and char() == ":" then
-                step()
-                local ss = {}
-                while bounds() and char():match("[%d%.]") do
-                    table.insert(ss, char()); step()
+                h = tonumber(ahead(2)); step(3)
+                mi = tonumber(ahead(2)); step(2)
+                assert(mi)
+                sec = 0
+                if bounds() and char() == ":" then
+                    step()
+                    local ss = {}
+                    while bounds() and char():match("[%d%.]") do
+                        table.insert(ss, char()); step()
+                    end
+                    local sec_str = table.concat(ss)
+                    if sec_str:match("%.$") then add_err("Invalid seconds: trailing dot") end
+                    sec = tonumber(sec_str) or 0
                 end
-                local sec_str = table.concat(ss)
-                if sec_str:match("%.$") then add_err("Invalid seconds: trailing dot") end
-                sec = tonumber(sec_str) or 0
-            end
 
-            if bounds() and char():lower() == "z" then
-                zone = 0; step()
-            elseif bounds() and (char() == "+" or char() == "-") then
-                local sign = char() == "+" and 1 or -1; step()
-                if not ahead(2):match("^%d%d$") then
-                    add_err("Invalid timezone offset: expected 2-digit hour"); zone = 0
-                else
-                    local oh = tonumber(ahead(2)) or 0; step(2)
-                    if char() ~= ":" then
-                        add_err("Invalid timezone offset: expected ':'"); zone = sign * oh
+                if bounds() and char():lower() == "z" then
+                    zone = 0; step()
+                elseif bounds() and (char() == "+" or char() == "-") then
+                    local sign = char() == "+" and 1 or -1; step()
+                    if not ahead(2):match("^%d%d$") then
+                        add_err("Invalid timezone offset: expected 2-digit hour"); zone = 0
                     else
-                        step()
-                        if not ahead(2):match("^%d%d$") then
-                            add_err("Invalid timezone offset: expected 2-digit minute"); zone = sign * oh
+                        local oh = tonumber(ahead(2)) or 0; step(2)
+                        if char() ~= ":" then
+                            add_err("Invalid timezone offset: expected ':'"); zone = sign * oh
                         else
-                            local om = tonumber(ahead(2)) or 0; step(2)
-                            local tz_err = util.validate_offset(oh, om)
-                            if tz_err then add_err(tz_err) end
-                            zone = sign * oh
+                            step()
+                            if not ahead(2):match("^%d%d$") then
+                                add_err("Invalid timezone offset: expected 2-digit minute"); zone = sign * oh
+                            else
+                                local om = tonumber(ahead(2)) or 0; step(2)
+                                local tz_err = util.validate_offset(oh, om)
+                                if tz_err then add_err(tz_err) end
+                                zone = sign * oh
+                            end
                         end
                     end
                 end
-            end
             end -- else: valid time digits follow separator
         end
 
@@ -507,12 +507,15 @@ function M.parse(text)
         for _, pair in ipairs(existing_pairs) do
             if pair.key.value == new_key.value then
                 if pair.value and pair.value.kind == NodeKind.InlineTable and new_value and new_value.kind == NodeKind.InlineTable then
-                    if pair.value.explicit then
+                    local pv = pair.value
+                    ---@cast pv easytasks.toml.InlineTableNode
+                    ---@cast new_value easytasks.toml.InlineTableNode
+                    if pv.explicit then
                         add_err("Cannot extend inline table with dotted key: " .. new_key.value)
                         return
                     end
                     for _, incoming in ipairs(new_value.pairs) do
-                        merge_inline_table_pairs(pair.value.pairs, incoming.key, incoming.value)
+                        merge_inline_table_pairs(pv.pairs, incoming.key, incoming.value)
                     end
                     return
                 end
@@ -575,7 +578,8 @@ function M.parse(text)
         local multiline = row ~= sr
         if char() ~= "}" then add_err("Missing } in inline table") else step() end
         local er, ec = row, col
-        return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, explicit = true, range = mkr(sr, sc, er, ec) }
+        return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, explicit = true, range = mkr(sr,
+        sc, er, ec) }
     end
 
     ---@return easytasks.toml.ValueNode?
