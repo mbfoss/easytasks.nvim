@@ -616,9 +616,14 @@ function M.parse(text)
                     step()
                 else
                     local kt = parse_bare_key()
-                    if kt.value ~= "" then table.insert(keys, kt) end
-                    skip_ws()
-                    if char() == "." then step() end
+                    if kt.value ~= "" then
+                        table.insert(keys, kt)
+                        skip_ws()
+                        if char() == "." then step() end
+                    else
+                        add_err("Unexpected character in section header: " .. char())
+                        step()
+                    end
                 end
             end
 

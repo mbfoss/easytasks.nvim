@@ -12,7 +12,6 @@ local toml = io.read("*a")
 local json, err = helper.parse_to_tagged_json(toml)
 
 if err then
-    io.stderr:write(err .. "\n")
     os.exit(1)
 end
 
