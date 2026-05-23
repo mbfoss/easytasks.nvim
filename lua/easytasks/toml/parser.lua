@@ -373,8 +373,13 @@ function M.parse(text)
             elseif char() == "]" then
                 break
             else
+                local before = cursor
                 local item = parse_value()
                 if item then table.insert(items, item) end
+                if cursor == before then
+                    add_err("Unexpected character in array: " .. char())
+                    step()
+                end
                 skip_ws()
                 if char() == "," then step() end
             end
