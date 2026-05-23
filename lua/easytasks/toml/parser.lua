@@ -295,7 +295,7 @@ function M.parse(text)
         local v = tonumber(s) or 0
 
         if lkind == "integer" then
-            if v == 0 then v = 0 end -- Normalizes -0 integer expressions
+            if v == 0 then v = 0 end
             return { kind = NodeKind.Literal, token = { value = v, raw = table.concat(raw_buf):gsub("_", ""), literalkind = lkind, range = mkr(sr, sc, er, ec) }, range =
             mkr(sr, sc, er, ec) }
         end
@@ -386,7 +386,7 @@ function M.parse(text)
             while bounds() do
                 skip_wcn()
                 local kt = parse_key_token()
-                if kt.value == "" then
+                if kt.is_empty and not kt.quoted then
                     add_err("Empty key segment in inline table"); break
                 end
                 table.insert(key_parts, kt)
@@ -415,7 +415,7 @@ function M.parse(text)
                 }
             end
 
-            merge_inline_table_pairs(pairs_list, { value = key_parts[1].value, range = mkr(ks_r, ks_c, ke_r, ke_c) }, val)
+            merge_inline_table_pairs(pairs_list, key_parts[1], val)
 
             skip_wcn()
             if char() == "," then step() elseif char() == "}" then break else break end
@@ -445,7 +445,6 @@ function M.parse(text)
 
     -- ===== key parsing =====
     local function is_bare_key_char()
-        -- Directly maps to ABNF rules: 1*( ALPHA / DIGIT / %x2D / %x5F )
         return char():match("[%w%-_]") ~= nil
     end
 
@@ -457,14 +456,15 @@ function M.parse(text)
             step()
         end
         local er, ec = row, col
-        return { value = table.concat(buf), range = mkr(sr, sc, er, ec) }
+        local s = table.concat(buf)
+        return { value = s, is_empty = (s == ""), quoted = false, range = mkr(sr, sc, er, ec) }
     end
 
     function parse_key_token()
         local c = char()
         if c == '"' or c == "'" then
             local n = parse_string()
-            return { value = n.token.value, range = n.range }
+            return { value = n.token.value, is_empty = false, quoted = true, range = n.range }
         end
         return parse_bare_key()
     end
@@ -474,7 +474,7 @@ function M.parse(text)
         while bounds() do
             skip_ws()
             local kt = parse_key_token()
-            if kt.value == "" then
+            if kt.is_empty and not kt.quoted then
                 add_err("Empty key segment"); break
             end
             table.insert(keys, kt)
@@ -490,8 +490,7 @@ function M.parse(text)
         if char() ~= "#" then return nil end
         local buf = {}
         while bounds() and not is_nl() do
-            table.insert(buf, char())
-            step()
+            table.insert(buf, char()); step()
         end
         return table.concat(buf)
     end
@@ -538,21 +537,14 @@ function M.parse(text)
             while bounds() and char() ~= "]" and not is_nl() do
                 skip_ws()
                 if char() == "]" then break end
-                if char() == '"' or char() == "'" then
-                    local kn = parse_string()
-                    table.insert(keys, { value = kn.token.value, range = kn.range })
-                elseif char() == "." then
+                local kt = parse_key_token()
+                if kt.is_empty and not kt.quoted then
+                    add_err("Unexpected character in section header: " .. char())
                     step()
                 else
-                    local kt = parse_bare_key()
-                    if kt.value ~= "" then
-                        table.insert(keys, kt)
-                        skip_ws()
-                        if char() == "." then step() end
-                    else
-                        add_err("Unexpected character in section header: " .. char())
-                        step()
-                    end
+                    table.insert(keys, kt)
+                    skip_ws()
+                    if char() == "." then step() end
                 end
             end
 
@@ -582,7 +574,11 @@ function M.parse(text)
             local keys = parse_key_list()
             skip_ws()
 
-            if char() ~= "=" then
+            if #keys == 0 or (keys[1].is_empty and not keys[1].quoted) then
+                add_err("Empty key segment")
+                while bounds() and not is_nl() do step() end
+                if bounds() then skip_nl() end
+            elseif char() ~= "=" then
                 add_err("Expected = after key")
                 while bounds() and not is_nl() do step() end
                 if bounds() then skip_nl() end
@@ -590,12 +586,16 @@ function M.parse(text)
                 step()
                 skip_ws()
                 local val = parse_value()
-                local node_val = val
 
+                local node_val = val
                 if #keys > 1 then
                     for i = #keys, 2, -1 do
-                        node_val = { kind = NodeKind.InlineTable, pairs = { { key = keys[i], value = node_val } }, multiline = false, range =
-                        node_val and node_val.range or mkr(sr, sc, row, col) }
+                        node_val = {
+                            kind = NodeKind.InlineTable,
+                            pairs = { { key = keys[i], value = node_val } },
+                            multiline = false,
+                            range = node_val and node_val.range or mkr(sr, sc, row, col)
+                        }
                     end
                 end
 
