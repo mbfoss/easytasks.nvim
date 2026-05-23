@@ -1,5 +1,4 @@
 -- easytasks/toml/formatter.lua
-local parser   = require("easytasks.toml.parser")
 local NodeKind = require("easytasks.toml.NodeKind")
 local M = {}
 
@@ -85,19 +84,22 @@ format_value = function(node, indent)
   indent = indent or 0
   if not node then return '""' end
   if node.kind == NodeKind.Literal then
-    local v = node.token.value
-    if type(v) == "string" then
+    local v  = node.token.value
+    local lk = node.token.literalkind
+    if lk == "string" then
       return format_string(v)
-    elseif type(v) == "boolean" then
+    elseif lk == "bool" then
       return tostring(v)
-    elseif type(v) == "number" then
+    elseif lk == "float" then
       if v ~= v then return "nan"
       elseif v == math.huge then return "inf"
       elseif v == -math.huge then return "-inf"
       end
       return tostring(v)
-    elseif parser.is_date(v) then
-      return tostring(v)
+    elseif lk == "integer" then
+      return tostring(math.floor(v))
+    elseif lk then
+      return v  -- date types: already a string
     else
       return tostring(v)
     end

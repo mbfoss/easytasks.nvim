@@ -6,15 +6,6 @@ local NodeKind   = require("easytasks.toml.NodeKind")
 
 local M = {}
 
-local function date_toml_type(d)
-    if d.year and d.hour ~= nil then
-        return d.zone ~= nil and "datetime" or "datetime-local"
-    elseif d.year then
-        return "date-local"
-    else
-        return "time-local"
-    end
-end
 
 ---@param ast easytasks.toml.Ast
 ---@return any                       data
@@ -43,16 +34,7 @@ local function evaluate(ast)
         if node.kind == NodeKind.Literal then
             path_kinds[path] = "Literal"
             local v = node.token.value
-            local vt = type(v)
-            if vt == "string" then
-                value_types[path] = "string"
-            elseif vt == "boolean" then
-                value_types[path] = "bool"
-            elseif vt == "number" then
-                value_types[path] = (node.token.numkind == "float") and "float" or "integer"
-            elseif vt == "table" and parser.is_date(v) then
-                value_types[path] = date_toml_type(v)
-            end
+            value_types[path] = node.token.literalkind
             return v
         elseif node.kind == NodeKind.Array then
             path_kinds[path]  = "Array"

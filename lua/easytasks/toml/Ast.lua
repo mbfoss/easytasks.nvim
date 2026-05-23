@@ -2,18 +2,10 @@
 
 local Tree = require("easytasks.util.Tree")
 
----@class easytasks.toml.Date
----@field year integer?
----@field month integer?
----@field day integer?
----@field hour integer?
----@field min integer?
----@field sec number?
----@field zone integer?
 
 ---@class easytasks.toml.Token
 ---@field value any
----@field numkind "integer"|"float"?
+---@field literalkind "string"|"bool"|"integer"|"float"|"datetime"|"datetime-local"|"date-local"|"time-local"?
 ---@field range easytasks.toml.Range
 
 ---@class easytasks.toml.KeyRef

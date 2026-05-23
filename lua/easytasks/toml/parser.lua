@@ -15,40 +15,30 @@ local Ast      = require("easytasks.toml.Ast")
 local NodeKind = require("easytasks.toml.NodeKind")
 local M = {}
 
-local date_mt = {
-    __tostring = function(t)
-        local s = ""
-        if t.year then
-            s = s .. string.format("%04d-%02d-%02d", t.year, t.month, t.day)
-        end
-        if t.hour then
-            if t.year then s = s .. "T" end
-            local si = math.floor(t.sec or 0)
-            local sf = (t.sec or 0) - si
-            s = s .. string.format("%02d:%02d:%02d", t.hour, t.min, si)
-            if sf > 0 then s = s .. tostring(sf):sub(2) end
-        end
-        if t.zone ~= nil then
-            if t.zone == 0 then
-                s = s .. "Z"
-            elseif t.zone > 0 then
-                s = s .. string.format("+%02d:00", t.zone)
-            else
-                s = s .. string.format("-%02d:00", -t.zone)
+local function format_date_str(y, mo, d, h, mi, sec, zone)
+    local s = string.format("%04d-%02d-%02d", y, mo, d)
+    if h ~= nil then
+        local si = math.floor(sec or 0)
+        local sf = (sec or 0) - si
+        s = s .. "T" .. string.format("%02d:%02d:%02d", h, mi, si)
+        if sf > 0 then s = s .. tostring(sf):sub(2) end
+        if zone ~= nil then
+            if zone == 0 then s = s .. "Z"
+            elseif zone > 0 then s = s .. string.format("+%02d:00", zone)
+            else s = s .. string.format("-%02d:00", -zone)
             end
         end
-        return s
-    end,
-}
+    end
+    return s
+end
 
----@type metatable
-M._date_mt = date_mt
-
-local function make_date(t) return setmetatable(t, date_mt) end
-
----@param v any
----@return boolean
-M.is_date = function(v) return type(v) == "table" and getmetatable(v) == date_mt end
+local function format_time_str(h, mi, sec)
+    local si = math.floor(sec or 0)
+    local sf = (sec or 0) - si
+    local s = string.format("%02d:%02d:%02d", h, mi, si)
+    if sf > 0 then s = s .. tostring(sf):sub(2) end
+    return s
+end
 
 local function utf8_encode(cp)
     if cp < 0x80 then
@@ -211,7 +201,7 @@ function M.parse(text)
 
         if not closed then add_err("Unterminated string") end
         local er, ec = row, col
-        return { kind = NodeKind.Literal, token = { value = s, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+        return { kind = NodeKind.Literal, token = { value = s, literalkind = "string", range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
     ---@return boolean
@@ -254,8 +244,14 @@ function M.parse(text)
         end
 
         local er, ec = row, col
-        local dv = make_date({ year = y, month = mo, day = d, hour = h, min = mi, sec = sec, zone = zone })
-        return { kind = NodeKind.Literal, token = { value = dv, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+        local lkind
+        if h ~= nil then
+            lkind = zone ~= nil and "datetime" or "datetime-local"
+        else
+            lkind = "date-local"
+        end
+        local sv = format_date_str(y, mo, d, h, mi, sec, zone)
+        return { kind = NodeKind.Literal, token = { value = sv, literalkind = lkind, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
     ---@return easytasks.toml.LiteralNode
@@ -273,8 +269,7 @@ function M.parse(text)
             sec = tonumber(ss) or 0
         end
         local er, ec = row, col
-        local dv = make_date({ hour = h, min = mi, sec = sec })
-        return { kind = NodeKind.Literal, token = { value = dv, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+        return { kind = NodeKind.Literal, token = { value = format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
     ---@return boolean
@@ -302,7 +297,7 @@ function M.parse(text)
             if digits == "" then add_err("Empty based number") end
             local er, ec = row, col
             local v = tonumber(digits, bases[pfx]) or 0
-            return { kind = NodeKind.Literal, token = { value = v, numkind = "integer", range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+            return { kind = NodeKind.Literal, token = { value = v, literalkind = "integer", range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
         end
 
         while bounds() and not is_num_term() do
@@ -328,30 +323,30 @@ function M.parse(text)
         if not v then
             add_err("Invalid number: " .. s); v = 0
         end
-        local numkind = (s:find("[%.eE]") ~= nil) and "float" or "integer"
-        return { kind = NodeKind.Literal, token = { value = v, numkind = numkind, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+        local literalkind = (s:find("[%.eE]") ~= nil) and "float" or "integer"
+        return { kind = NodeKind.Literal, token = { value = v, literalkind = literalkind, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
     ---@return easytasks.toml.LiteralNode
     local function parse_bool_special()
         local sr, sc = row, col
-        local val, len, numkind
+        local val, len, literalkind
         if ahead(5) == "false" then
-            val = false; len = 5
+            val = false; len = 5; literalkind = "bool"
         elseif ahead(4) == "true" then
-            val = true; len = 4
+            val = true; len = 4; literalkind = "bool"
         elseif ahead(4) == "+inf" then
-            val = math.huge; len = 4; numkind = "float"
+            val = math.huge; len = 4; literalkind = "float"
         elseif ahead(4) == "-inf" then
-            val = -math.huge; len = 4; numkind = "float"
+            val = -math.huge; len = 4; literalkind = "float"
         elseif ahead(3) == "inf" then
-            val = math.huge; len = 3; numkind = "float"
+            val = math.huge; len = 3; literalkind = "float"
         elseif ahead(4) == "+nan" then
-            val = 0 / 0; len = 4; numkind = "float"
+            val = 0 / 0; len = 4; literalkind = "float"
         elseif ahead(4) == "-nan" then
-            val = 0 / 0; len = 4; numkind = "float"
+            val = 0 / 0; len = 4; literalkind = "float"
         elseif ahead(3) == "nan" then
-            val = 0 / 0; len = 3; numkind = "float"
+            val = 0 / 0; len = 3; literalkind = "float"
         else
             add_err("Unexpected value near: " .. ahead(8))
             while bounds() and not is_num_term() do step() end
@@ -360,7 +355,7 @@ function M.parse(text)
         end
         step(len)
         local er, ec = row, col
-        return { kind = NodeKind.Literal, token = { value = val, numkind = numkind, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
+        return { kind = NodeKind.Literal, token = { value = val, literalkind = literalkind, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
     ---@return easytasks.toml.ArrayNode
