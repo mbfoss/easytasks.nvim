@@ -44,11 +44,14 @@ local function evaluate(ast, with_type_map)
             path_kinds[path] = "Array"
             set_type(path, "array")
             local result = {}
-            for index, item_node in ipairs(node.items) do
-                local item_path = vu.join_path(path, tostring(index))
-                local val = eval_value(item_node, item_path)
-                table.insert(result, val)
-                dt:set_range(item_path, item_node.range)
+            for _, item_node in ipairs(node.items) do
+                if item_node.kind ~= NodeKind.Comment then
+                    local index = #result + 1
+                    local item_path = vu.join_path(path, tostring(index))
+                    local val = eval_value(item_node, item_path)
+                    table.insert(result, val)
+                    dt:set_range(item_path, item_node.range)
+                end
             end
             return result
         elseif node.kind == NodeKind.InlineTable then

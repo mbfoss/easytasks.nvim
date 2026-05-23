@@ -11,6 +11,7 @@ local vu           = require("easytasks.toml.validatorutils")
 
 ---@class easytasks.toml.DecodeTree
 ---@field _tree       easytasks.util.Tree
+---@field _path_to_id table<string, integer>
 ---@field _id_seq     integer
 local DecodeTree   = {}
 DecodeTree.__index = DecodeTree

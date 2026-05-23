@@ -105,23 +105,6 @@ function M.parse(text)
         if char() == "\r" then step() end; if char() == "\n" then step() end
     end
 
-    local function skip_wcn()
-        while bounds() do
-            if is_ws() then
-                step()
-            elseif is_nl() then
-                skip_nl()
-            elseif char() == "#" then
-                while bounds() and not is_nl() do
-                    if is_comment_ctrl() then add_err("Control character in comment") end
-                    step()
-                end
-            else
-                break
-            end
-        end
-    end
-
     -- ===== value parsers =====
     ---@type fun(): easytasks.toml.ValueNode?
     local parse_value
@@ -476,8 +459,24 @@ function M.parse(text)
         step() -- [
         local items = {}
 
+        local function collect()
+            while bounds() do
+                if is_ws() then step()
+                elseif is_nl() then skip_nl()
+                elseif char() == "#" then
+                    local cr, cc = row, col
+                    local buf = {}
+                    while bounds() and not is_nl() do
+                        if is_comment_ctrl() then add_err("Control character in comment") end
+                        table.insert(buf, char()); step()
+                    end
+                    table.insert(items, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
+                else break end
+            end
+        end
+
         while bounds() do
-            skip_wcn()
+            collect()
             if char() == "]" then break end
             local before = cursor
             local item = parse_value()
@@ -485,7 +484,7 @@ function M.parse(text)
             if cursor == before then
                 add_err("Unexpected character in array: " .. char()); step()
             else
-                skip_wcn()
+                collect()
                 if char() == "," then
                     step()
                 elseif char() ~= "]" then
@@ -529,34 +528,51 @@ function M.parse(text)
         local sr, sc = row, col
         step() -- {
         local pairs_list = {}
+        local collected_comments = {}
+
+        local function collect()
+            while bounds() do
+                if is_ws() then step()
+                elseif is_nl() then skip_nl()
+                elseif char() == "#" then
+                    local cr, cc = row, col
+                    local buf = {}
+                    while bounds() and not is_nl() do
+                        if is_comment_ctrl() then add_err("Control character in comment") end
+                        table.insert(buf, char()); step()
+                    end
+                    table.insert(collected_comments, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
+                else break end
+            end
+        end
 
         while bounds() do
-            skip_wcn()
+            collect()
             if char() == "]" or char() == "}" then break end
 
             local ks_r, ks_c = row, col
             local key_parts = {}
 
             while bounds() do
-                skip_wcn()
+                collect()
                 local kt = parse_key_token()
                 if kt.is_empty and not kt.quoted then
                     add_err("Empty key segment in inline table"); break
                 end
                 table.insert(key_parts, kt)
-                skip_wcn()
+                collect()
                 if char() == "." then step() else break end
             end
 
             if #key_parts == 0 then break end
             local ke_r, ke_c = row, col
 
-            skip_wcn()
+            collect()
             if char() ~= "=" then
                 add_err("Expected = in inline table"); break
             end
             step()
-            skip_wcn()
+            collect()
 
             local val = parse_value()
 
@@ -571,14 +587,14 @@ function M.parse(text)
 
             merge_inline_table_pairs(pairs_list, key_parts[1], val)
 
-            skip_wcn()
+            collect()
             if char() == "," then step() elseif char() == "}" then break else break end
         end
 
         local multiline = row ~= sr
         if char() ~= "}" then add_err("Missing } in inline table") else step() end
         local er, ec = row, col
-        return { kind = NodeKind.InlineTable, pairs = pairs_list, multiline = multiline, explicit = true, range = mkr(sr,
+        return { kind = NodeKind.InlineTable, pairs = pairs_list, comments = collected_comments, multiline = multiline, explicit = true, range = mkr(sr,
         sc, er, ec) }
     end
 
@@ -671,8 +687,19 @@ function M.parse(text)
                     { kind = NodeKind.KeyValuePair, key = pair.key, value = pair.value, range = pair.key.range })
                 expand_value(pair_id, pair.value)
             end
+            if value_node.comments then
+                for _, comment in ipairs(value_node.comments) do
+                    ast:add_item(parent_id, next_id(), comment)
+                end
+            end
         elseif value_node.kind == NodeKind.Array then
-            for _, item in ipairs(value_node.items) do expand_value(parent_id, item) end
+            for _, item in ipairs(value_node.items) do
+                if item.kind == NodeKind.Comment then
+                    ast:add_item(parent_id, next_id(), item)
+                else
+                    expand_value(parent_id, item)
+                end
+            end
         end
     end
 

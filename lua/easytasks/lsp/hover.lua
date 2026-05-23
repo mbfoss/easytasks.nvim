@@ -1,5 +1,5 @@
 -- easytasks/lsp/hover.lua
-local M = {}
+local M        = {}
 
 local s_util   = require("easytasks.toml.schema_util")
 local utils    = require("easytasks.toml.validatorutils")
@@ -41,70 +41,6 @@ local function hover_text(node)
 end
 
 --------------------------------------------------------------------------------
--- Path Building
---------------------------------------------------------------------------------
-
--- Returns the 1-based index of section_id among root-level AOT nodes sharing
--- the same dot-joined key path.
----@param ast easytasks.toml.Ast
----@param section_id any
----@param section_node easytasks.toml.ArrayOfTablesSectionNode
----@return integer
-local function get_aot_index(ast, section_id, section_node)
-  local target_path = table.concat(
-    vim.tbl_map(function(k) return k.value end, section_node.keys), ".")
-  local idx = 0
-  for id, data in ast:iter_roots() do
-    if data and (data.kind == NodeKind.ArrayOfTablesSection or data.kind == NodeKind.PartialArrayOfTablesSection) then
-      local this_path = table.concat(
-        vim.tbl_map(function(k) return k.value end, data.keys), ".")
-      if this_path == target_path then
-        idx = idx + 1
-        if id == section_id then return idx end
-      end
-    end
-  end
-  return idx
-end
-
--- Build a JSON Pointer path for a tree node by walking up to the root.
--- KeyValuePairs contribute their key, TableSections contribute their key
--- segments, and ArrayOfTablesSections contribute their key segments plus a
--- 1-based array index.
----@param ast easytasks.toml.Ast
----@param node_id any
----@return string|nil
-local function build_path(ast, node_id)
-  local segments = {}
-  local current_id = node_id
-
-  while current_id do
-    local n = ast:get_data(current_id)
-    local parent_id = ast:get_parent_id(current_id)
-
-    if n.kind == NodeKind.KeyValuePair then
-      table.insert(segments, 1, n.key.value)
-    elseif n.kind == NodeKind.TableSection or n.kind == NodeKind.PartialTableSection then
-      for i = #n.keys, 1, -1 do
-        table.insert(segments, 1, n.keys[i].value)
-      end
-    elseif n.kind == NodeKind.ArrayOfTablesSection or n.kind == NodeKind.PartialArrayOfTablesSection then
-      local idx = get_aot_index(ast, current_id, n)
-      table.insert(segments, 1, tostring(idx))
-      for i = #n.keys, 1, -1 do
-        table.insert(segments, 1, n.keys[i].value)
-      end
-    end
-    -- Comments contribute nothing to the path
-
-    current_id = parent_id
-  end
-
-  if #segments == 0 then return nil end
-  return utils.join_path_parts(segments)
-end
-
---------------------------------------------------------------------------------
 -- Hover Request Dispatcher
 --------------------------------------------------------------------------------
 
@@ -126,13 +62,7 @@ function M.handler(context, params, callback)
     return
   end
 
-  local path = build_path(context.ast, result.id)
-  if not path then
-    callback(nil, nil)
-    return
-  end
-
-  local schema_node = context.decode_tree and context.decode_tree:get_schema(path) or nil
+  local schema_node = nil
 
   local contents = hover_text(schema_node)
   if not contents then
