@@ -338,17 +338,24 @@ function M.parse(text)
             local bases    = { x = 16, o = 8, b = 2 }
             local valid_re = { x = "^[0-9A-Fa-f]$", o = "^[0-7]$", b = "^[01]$" }
             local dig_buf  = {}
+            local last_c   = nil
             while bounds() and not is_num_term() do
                 local c = char()
                 table.insert(raw_buf, c)
-                if c ~= "_" then
+                if c == "_" then
+                    if last_c == nil or last_c == "_" then
+                        add_err("Invalid underscore in based integer")
+                    end
+                else
                     if not c:match(valid_re[pfx]) then
                         add_err("Invalid digit for base-" .. bases[pfx] .. " integer: " .. c)
                     end
                     table.insert(dig_buf, c)
                 end
+                last_c = c
                 step()
             end
+            if last_c == "_" then add_err("Trailing underscore in based integer") end
             if #dig_buf == 0 then add_err("Empty based number") end
             local er, ec = row, col
             local v = tonumber(table.concat(dig_buf), bases[pfx]) or 0
