@@ -528,7 +528,7 @@ function M.parse(text)
         local sr, sc = row, col
         step() -- {
         local pairs_list = {}
-        local collected_comments = {}
+        local ordered_items = {}
 
         local function collect()
             while bounds() do
@@ -541,7 +541,7 @@ function M.parse(text)
                         if is_comment_ctrl() then add_err("Control character in comment") end
                         table.insert(buf, char()); step()
                     end
-                    table.insert(collected_comments, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
+                    table.insert(ordered_items, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
                 else break end
             end
         end
@@ -585,7 +585,11 @@ function M.parse(text)
                 }
             end
 
+            local prev_len = #pairs_list
             merge_inline_table_pairs(pairs_list, key_parts[1], val)
+            if #pairs_list > prev_len then
+                table.insert(ordered_items, pairs_list[#pairs_list])
+            end
 
             collect()
             if char() == "," then step() elseif char() == "}" then break else break end
@@ -594,7 +598,7 @@ function M.parse(text)
         local multiline = row ~= sr
         if char() ~= "}" then add_err("Missing } in inline table") else step() end
         local er, ec = row, col
-        return { kind = NodeKind.InlineTable, pairs = pairs_list, comments = collected_comments, multiline = multiline, explicit = true, range = mkr(sr,
+        return { kind = NodeKind.InlineTable, pairs = pairs_list, ordered_items = ordered_items, multiline = multiline, explicit = true, range = mkr(sr,
         sc, er, ec) }
     end
 
@@ -681,15 +685,14 @@ function M.parse(text)
     expand_value = function(parent_id, value_node)
         if not value_node then return end
         if value_node.kind == NodeKind.InlineTable then
-            for _, pair in ipairs(value_node.pairs) do
-                local pair_id = next_id()
-                ast:add_item(parent_id, pair_id,
-                    { kind = NodeKind.KeyValuePair, key = pair.key, value = pair.value, range = pair.key.range })
-                expand_value(pair_id, pair.value)
-            end
-            if value_node.comments then
-                for _, comment in ipairs(value_node.comments) do
-                    ast:add_item(parent_id, next_id(), comment)
+            for _, item in ipairs(value_node.ordered_items or value_node.pairs) do
+                if item.kind == NodeKind.Comment then
+                    ast:add_item(parent_id, next_id(), item)
+                else
+                    local pair_id = next_id()
+                    ast:add_item(parent_id, pair_id,
+                        { kind = NodeKind.KeyValuePair, key = item.key, value = item.value, range = item.key.range })
+                    expand_value(pair_id, item.value)
                 end
             end
         elseif value_node.kind == NodeKind.Array then
