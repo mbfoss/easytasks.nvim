@@ -132,7 +132,18 @@ function M.parse(text)
             if char() == q then
                 if ml then
                     if char(1) == q and char(2) == q then
-                        step(3); closed = true; break
+                        if char(3) == q then
+                            table.insert(buf, q)
+                            if char(4) == q then
+                                table.insert(buf, q)
+                                step(5)
+                            else
+                                step(4)
+                            end
+                        else
+                            step(3)
+                        end
+                        closed = true; break
                     end
                 else
                     step(); closed = true; break
