@@ -1,4 +1,84 @@
 -- easytasks/toml/parser.lua
+
+---@alias easytasks.toml.Range {[1]: integer, [2]: integer, [3]: integer, [4]: integer}
+
+---@class easytasks.toml.ParseError
+---@field message string
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.Date
+---@field year integer?
+---@field month integer?
+---@field day integer?
+---@field hour integer?
+---@field min integer?
+---@field sec number?
+---@field zone integer?
+
+---@class easytasks.toml.Token
+---@field value any
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.KeyRef
+---@field value string
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.Pair
+---@field key easytasks.toml.KeyRef
+---@field value easytasks.toml.ValueNode?
+
+---@class easytasks.toml.LiteralNode
+---@field kind "Literal"
+---@field token easytasks.toml.Token
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.ArrayNode
+---@field kind "Array"
+---@field items easytasks.toml.ValueNode[]
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.InlineTableNode
+---@field kind "InlineTable"
+---@field pairs easytasks.toml.Pair[]
+---@field range easytasks.toml.Range
+
+---@alias easytasks.toml.ValueNode easytasks.toml.LiteralNode|easytasks.toml.ArrayNode|easytasks.toml.InlineTableNode
+
+---@class easytasks.toml.KeyValuePairNode
+---@field kind "KeyValuePair"
+---@field key easytasks.toml.KeyRef
+---@field value easytasks.toml.ValueNode
+---@field trailing_comment string?
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.TableSectionNode
+---@field kind "TableSection"|"PartialTableSection"
+---@field keys easytasks.toml.KeyRef[]
+---@field trailing_comment string?
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.ArrayOfTablesSectionNode
+---@field kind "ArrayOfTablesSection"|"PartialArrayOfTablesSection"
+---@field keys easytasks.toml.KeyRef[]
+---@field trailing_comment string?
+---@field range easytasks.toml.Range
+
+---@class easytasks.toml.CommentNode
+---@field kind "Comment"
+---@field text string
+---@field range easytasks.toml.Range
+
+---@alias easytasks.toml.AstNode
+---| easytasks.toml.KeyValuePairNode
+---| easytasks.toml.TableSectionNode
+---| easytasks.toml.ArrayOfTablesSectionNode
+---| easytasks.toml.CommentNode
+
+---@class easytasks.toml.ParseResult
+---@field ok boolean
+---@field ast easytasks.util.Tree
+---@field errors easytasks.toml.ParseError[]
+
 local Tree = require("easytasks.util.Tree")
 local M = {}
 
@@ -28,9 +108,13 @@ local date_mt = {
     end,
 }
 
+---@type metatable
 M._date_mt = date_mt
 
 local function make_date(t) return setmetatable(t, date_mt) end
+
+---@param v any
+---@return boolean
 M.is_date = function(v) return type(v) == "table" and getmetatable(v) == date_mt end
 
 local function utf8_encode(cp)
@@ -52,6 +136,8 @@ local function utf8_encode(cp)
     end
 end
 
+---@param text string
+---@return easytasks.toml.ParseResult
 function M.parse(text)
     local errors = {}
     local ast = Tree.new()
@@ -59,28 +145,43 @@ function M.parse(text)
     local row, col = 0, 0
     local nid = 0
 
+    ---@return integer
     local function next_id()
         nid = nid + 1; return nid
     end
 
+    ---@param msg string
+    ---@param r easytasks.toml.Range?
     local function add_err(msg, r)
         table.insert(errors, { message = msg, range = r or { row, col, row, col } })
     end
 
+    ---@param sr integer
+    ---@param sc integer
+    ---@param er integer
+    ---@param ec integer
+    ---@return easytasks.toml.Range
     local function mkr(sr, sc, er, ec) return { sr, sc, er, ec } end
 
+    ---@param off integer?
+    ---@return string
     local function char(off)
         local i = cursor + (off or 0)
         return i <= #text and text:sub(i, i) or ""
     end
 
+    ---@param n integer
+    ---@param off integer?
+    ---@return string
     local function ahead(n, off)
         local s = cursor + (off or 0)
         return text:sub(s, s + n - 1)
     end
 
+    ---@return boolean
     local function bounds() return cursor <= #text end
 
+    ---@param n integer?
     local function step(n)
         n = n or 1
         for _ = 1, n do
@@ -96,9 +197,12 @@ function M.parse(text)
         end
     end
 
+    ---@return boolean
     local function is_ws()
         local c = char(); return c == " " or c == "\t"
     end
+
+    ---@return boolean
     local function is_nl() return char() == "\n" or (char() == "\r" and char(1) == "\n") end
 
     local function skip_ws() while bounds() and is_ws() do step() end end
@@ -108,12 +212,15 @@ function M.parse(text)
         if char() == "\n" then step() end
     end
 
+    ---@param s string
+    ---@return string
     local function trim(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
 
     -- ===== value parsers =====
 
     local parse_value
 
+    ---@return easytasks.toml.LiteralNode
     local function parse_string()
         local sr, sc = row, col
         local q = char()
@@ -144,7 +251,7 @@ function M.parse(text)
                     step(); skip_nl()
                     while bounds() and is_ws() do step() end
                 else
-                    local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", ['"'] = '"', ["\\"] = "\\" }
+                    local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", e = "\x1b", ['"'] = '"', ["\\"] = "\\" }
                     if esc[nc] then
                         s = s .. esc[nc]; step(2)
                     elseif nc == "u" then
@@ -155,6 +262,10 @@ function M.parse(text)
                         step(2)
                         local cp = tonumber(ahead(8), 16); step(8)
                         if cp then s = s .. utf8_encode(cp) else add_err("Invalid unicode escape") end
+                    elseif nc == "x" then
+                        step(2)
+                        local cp = tonumber(ahead(2), 16); step(2)
+                        if cp then s = s .. string.char(cp) else add_err("Invalid hex escape") end
                     else
                         add_err("Invalid escape: \\" .. nc); step()
                     end
@@ -169,9 +280,13 @@ function M.parse(text)
         return { kind = "Literal", token = { value = s, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return boolean
     local function is_datetime_start() return ahead(10):match("^%d%d%d%d%-%d%d%-%d%d") ~= nil end
-    local function is_time_start() return ahead(8):match("^%d%d:%d%d:%d%d") ~= nil end
 
+    ---@return boolean
+    local function is_time_start() return ahead(5):match("^%d%d:%d%d") ~= nil end
+
+    ---@return easytasks.toml.LiteralNode
     local function parse_datetime()
         local sr, sc = row, col
         local y = tonumber(ahead(4)); step(4); step() -- year, -
@@ -182,12 +297,16 @@ function M.parse(text)
         if bounds() and (char() == "T" or char() == " ") then
             step()
             h = tonumber(ahead(2)); step(2); step() -- hour, :
-            mi = tonumber(ahead(2)); step(2); step() -- min, :
-            local ss = ""
-            while bounds() and char():match("[%d%.]") do
-                ss = ss .. char(); step()
+            mi = tonumber(ahead(2)); step(2)         -- min
+            sec = 0
+            if bounds() and char() == ":" then
+                step()
+                local ss = ""
+                while bounds() and char():match("[%d%.]") do
+                    ss = ss .. char(); step()
+                end
+                sec = tonumber(ss) or 0
             end
-            sec = tonumber(ss) or 0
 
             if bounds() and char() == "Z" then
                 zone = 0; step()
@@ -205,24 +324,32 @@ function M.parse(text)
         return { kind = "Literal", token = { value = dv, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.LiteralNode
     local function parse_time()
         local sr, sc = row, col
-        local h = tonumber(ahead(2)); step(2); step()
-        local mi = tonumber(ahead(2)); step(2); step()
-        local ss = ""
-        while bounds() and char():match("[%d%.]") do
-            ss = ss .. char(); step()
+        local h = tonumber(ahead(2)); step(2); step() -- hour, :
+        local mi = tonumber(ahead(2)); step(2)         -- min
+        local sec = 0
+        if bounds() and char() == ":" then
+            step()
+            local ss = ""
+            while bounds() and char():match("[%d%.]") do
+                ss = ss .. char(); step()
+            end
+            sec = tonumber(ss) or 0
         end
         local er, ec = row, col
-        local dv = make_date({ hour = h, min = mi, sec = tonumber(ss) or 0 })
+        local dv = make_date({ hour = h, min = mi, sec = sec })
         return { kind = "Literal", token = { value = dv, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return boolean
     local function is_num_term()
         return not bounds() or is_ws() or is_nl()
             or char() == "#" or char() == "," or char() == "]" or char() == "}"
     end
 
+    ---@return easytasks.toml.LiteralNode
     local function parse_number()
         local sr, sc = row, col
         local s = ""
@@ -270,6 +397,7 @@ function M.parse(text)
         return { kind = "Literal", token = { value = v, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.LiteralNode
     local function parse_bool_special()
         local sr, sc = row, col
         local val, len
@@ -300,6 +428,7 @@ function M.parse(text)
         return { kind = "Literal", token = { value = val, range = mkr(sr, sc, er, ec) }, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.ArrayNode
     local function parse_array()
         local sr, sc = row, col
         step() -- [
@@ -326,13 +455,19 @@ function M.parse(text)
         return { kind = "Array", items = items, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.InlineTableNode
     local function parse_inline_table()
         local sr, sc = row, col
         step() -- {
         local pairs_list = {}
-        skip_ws()
 
         while bounds() and char() ~= "}" do
+            -- TOML 1.1: whitespace and newlines are allowed between pairs
+            while bounds() and (is_ws() or is_nl()) do
+                if is_nl() then skip_nl() else step() end
+            end
+            if not bounds() or char() == "}" then break end
+
             local ks_r, ks_c = row, col
             local key_str
             if char() == '"' or char() == "'" then
@@ -350,9 +485,10 @@ function M.parse(text)
             if char() ~= "=" then
                 add_err("Expected = in inline table"); break
             end
-            step(); skip_ws()
-            if is_nl() then
-                add_err("Newline in inline table"); break
+            step()
+            -- TOML 1.1: whitespace and newlines allowed after =
+            while bounds() and (is_ws() or is_nl()) do
+                if is_nl() then skip_nl() else step() end
             end
 
             local val = parse_value()
@@ -360,9 +496,15 @@ function M.parse(text)
                 key = { value = key_str, range = mkr(ks_r, ks_c, ke_r, ke_c) },
                 value = val,
             })
-            skip_ws()
+            -- TOML 1.1: trailing comma and newlines allowed after value
+            while bounds() and (is_ws() or is_nl()) do
+                if is_nl() then skip_nl() else step() end
+            end
             if char() == "," then
-                step(); skip_ws()
+                step()
+                while bounds() and (is_ws() or is_nl()) do
+                    if is_nl() then skip_nl() else step() end
+                end
             end
         end
 
@@ -371,6 +513,7 @@ function M.parse(text)
         return { kind = "InlineTable", pairs = pairs_list, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.ValueNode?
     function parse_value()
         if not bounds() then return nil end
         local c = char()
@@ -397,16 +540,54 @@ function M.parse(text)
 
     -- ===== key parsing =====
 
+    -- TOML 1.1: bare keys may include Unicode letters/numbers (any byte >= 0x80),
+    -- except combining marks U+0300-U+036F (bytes CC:80-CD:AF) as the first character.
+    ---@return boolean
+    local function is_bare_key_start()
+        local b = char():byte()
+        if not b then return false end
+        if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
+           (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
+            return true
+        end
+        if b >= 0x80 then
+            -- exclude U+0300-U+036F (combining marks) as first char
+            if b == 0xCC then
+                local b2 = char(1):byte(); if b2 and b2 >= 0x80 then return false end
+            elseif b == 0xCD then
+                local b2 = char(1):byte(); if b2 and b2 <= 0xAF then return false end
+            end
+            return true
+        end
+        return false
+    end
+
+    ---@return boolean
+    local function is_bare_key_cont()
+        local b = char():byte()
+        if not b then return false end
+        if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
+           (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
+            return true
+        end
+        return b >= 0x80
+    end
+
+    ---@return easytasks.toml.KeyRef
     local function parse_bare_key()
         local sr, sc = row, col
         local k = ""
-        while bounds() and char():match("[A-Za-z0-9_%-]") do
+        if bounds() and is_bare_key_start() then
             k = k .. char(); step()
+            while bounds() and is_bare_key_cont() do
+                k = k .. char(); step()
+            end
         end
         local er, ec = row, col
         return { value = k, range = mkr(sr, sc, er, ec) }
     end
 
+    ---@return easytasks.toml.KeyRef
     local function parse_key_token()
         if char() == '"' or char() == "'" then
             local n = parse_string()
@@ -415,6 +596,7 @@ function M.parse(text)
         return parse_bare_key()
     end
 
+    ---@return easytasks.toml.KeyRef[]
     local function parse_key_list()
         local keys = {}
         while bounds() do
@@ -432,14 +614,15 @@ function M.parse(text)
 
     -- ===== document-level loop =====
 
+    ---@return string?
     local function read_trailing_comment()
         skip_ws()
         if char() ~= "#" then return nil end
-        local text = ""
+        local cmt = ""
         while bounds() and not is_nl() do
-            text = text .. char(); step()
+            cmt = cmt .. char(); step()
         end
-        return text
+        return cmt
     end
 
     while bounds() do
