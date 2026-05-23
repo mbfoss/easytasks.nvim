@@ -1,5 +1,6 @@
 -- easytasks/toml/decoder.lua
 local parser = require("easytasks.toml.parser")
+local Tree = require("easytasks.util.Tree")
 
 local M = {}
 
