@@ -81,6 +81,7 @@ local function build_location(pointer_map)
     return location_tree, pos_to_location, location_to_pos
 end
 
+---@param ast easytasks.util.Tree
 local function evaluate(ast)
     -- Initialize the root table context as an empty dict right away
     local root = vim.empty_dict()
@@ -285,6 +286,10 @@ local function evaluate(ast)
                 current_table[key] = value
                 pointer_map[path] = node.range
             end
+
+            -- eval_value already handles all nested inline-table pairs recursively,
+            -- so the parser-added child nodes must not be re-evaluated at this level.
+            return false
 
             -- Skip any partial structures safely during evaluator analysis loops
         elseif node.kind == "PartialTableSection" or
