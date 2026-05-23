@@ -2,6 +2,8 @@
 local M = {}
 
 local s_util = require("easytasks.toml.schema_util")
+local schema_mapper = require("easytasks.toml.schema_mapper")
+local utils = require("easytasks.toml.validatorutils")
 
 --------------------------------------------------------------------------------
 -- Markdown Formatting Helpers
@@ -10,9 +12,7 @@ local s_util = require("easytasks.toml.schema_util")
 ---@param node table?
 ---@return string|nil
 local function hover_text(node)
-  if not node then
-    return nil
-  end
+  if not node then return nil end
 
   local lines = {}
   if node.title then
@@ -36,17 +36,83 @@ local function hover_text(node)
     lines[#lines + 1] = "Required keys: " .. table.concat(node.required, ", ")
   end
 
-  if #lines == 0 then
-    return nil
-  end
+  if #lines == 0 then return nil end
   return table.concat(lines, "\n\n")
+end
+
+--------------------------------------------------------------------------------
+-- Path Building
+--------------------------------------------------------------------------------
+
+-- Returns the 1-based index of section_id among root-level AOT nodes sharing
+-- the same dot-joined key path.
+---@param ast easytasks.util.Tree
+---@param section_id any
+---@param section_node easytasks.toml.ArrayOfTablesSectionNode
+---@return integer
+local function get_aot_index(ast, section_id, section_node)
+  local target_path = table.concat(
+    vim.tbl_map(function(k) return k.value end, section_node.keys), ".")
+  local idx = 0
+  local done = false
+  ast:walk_tree(function(id, data, depth)
+    if done then return false end
+    if depth ~= 0 then return false end -- only root-level nodes, skip children
+    if data and (data.kind == "ArrayOfTablesSection" or data.kind == "PartialArrayOfTablesSection") then
+      local this_path = table.concat(
+        vim.tbl_map(function(k) return k.value end, data.keys), ".")
+      if this_path == target_path then
+        idx = idx + 1
+        if id == section_id then done = true end
+      end
+    end
+    return false -- never descend; we only care about root-level nodes
+  end)
+  return idx
+end
+
+-- Build a JSON Pointer path for a tree node by walking up to the root.
+-- KeyValuePairs contribute their key, TableSections contribute their key
+-- segments, and ArrayOfTablesSections contribute their key segments plus a
+-- 1-based array index.
+---@param ast easytasks.util.Tree
+---@param node_id any
+---@return string|nil
+local function build_path(ast, node_id)
+  local segments = {}
+  local current_id = node_id
+
+  while current_id do
+    local n = ast:get_data(current_id)
+    local parent_id = ast:get_parent_id(current_id)
+
+    if n.kind == "KeyValuePair" then
+      table.insert(segments, 1, n.key.value)
+    elseif n.kind == "TableSection" or n.kind == "PartialTableSection" then
+      for i = #n.keys, 1, -1 do
+        table.insert(segments, 1, n.keys[i].value)
+      end
+    elseif n.kind == "ArrayOfTablesSection" or n.kind == "PartialArrayOfTablesSection" then
+      local idx = get_aot_index(ast, current_id, n)
+      table.insert(segments, 1, tostring(idx))
+      for i = #n.keys, 1, -1 do
+        table.insert(segments, 1, n.keys[i].value)
+      end
+    end
+    -- Comments contribute nothing to the path
+
+    current_id = parent_id
+  end
+
+  if #segments == 0 then return nil end
+  return utils.join_path_parts(segments)
 end
 
 --------------------------------------------------------------------------------
 -- Hover Request Dispatcher
 --------------------------------------------------------------------------------
 
----@param context easytasks.LspBufferContext buffer context
+---@param context easytasks.LspBufferContext
 ---@param params lsp.HoverParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.Hover)
 function M.handler(context, params, callback)
@@ -58,10 +124,29 @@ function M.handler(context, params, callback)
   local row = params.position.line
   local col = params.position.character
 
+  local result = context.node_at(row, col)
+  if not result then
+    callback(nil, nil)
+    return
+  end
+
+  local path = build_path(context.ast, result.id)
+  if not path then
+    callback(nil, nil)
+    return
+  end
+
+  local schema_map = schema_mapper.build(context.schema, context.data)
+  local schema_node = schema_map[path]
 
   local contents = hover_text(schema_node)
   if not contents then
-    callback(nil, nil)
+    callback(nil, {
+      contents = {
+        kind = "markdown",
+        value = "No documentation for " .. path,
+      },
+    })
     return
   end
 

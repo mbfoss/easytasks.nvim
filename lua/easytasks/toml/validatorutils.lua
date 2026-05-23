@@ -14,7 +14,7 @@ local function _unescape_ptr(token)
 end
 ---@param base string
 ---@param key string
----@return string -- JSON Pointer (defined in RFC 6901)
+---@return string
 function M.join_path(base, key)
     local escaped = _escape_ptr(key)
     if base == "" or base == "/" then
@@ -24,7 +24,7 @@ function M.join_path(base, key)
 end
 
 ---@param parts string[]
----@return string -- JSON Pointer (RFC 6901)
+---@return string
 function M.join_path_parts(parts)
     local arr = {}
     for _, seg in ipairs(parts) do
