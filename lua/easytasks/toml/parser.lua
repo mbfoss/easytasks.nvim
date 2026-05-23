@@ -74,10 +74,15 @@
 ---| easytasks.toml.ArrayOfTablesSectionNode
 ---| easytasks.toml.CommentNode
 
+---@class easytasks.toml.NodeAtResult
+---@field id integer
+---@field node easytasks.toml.AstNode
+
 ---@class easytasks.toml.ParseResult
 ---@field ok boolean
 ---@field ast easytasks.util.Tree
 ---@field errors easytasks.toml.ParseError[]
+---@field node_at fun(r: integer, c: integer): easytasks.toml.NodeAtResult?
 
 local Tree = require("easytasks.util.Tree")
 local M = {}
@@ -251,7 +256,8 @@ function M.parse(text)
                     step(); skip_nl()
                     while bounds() and is_ws() do step() end
                 else
-                    local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", e = "\x1b", ['"'] = '"', ["\\"] = "\\" }
+                    local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", e = "\x1b", ['"'] = '"', ["\\"] =
+                    "\\" }
                     if esc[nc] then
                         s = s .. esc[nc]; step(2)
                     elseif nc == "u" then
@@ -289,15 +295,15 @@ function M.parse(text)
     ---@return easytasks.toml.LiteralNode
     local function parse_datetime()
         local sr, sc = row, col
-        local y = tonumber(ahead(4)); step(4); step() -- year, -
+        local y = tonumber(ahead(4)); step(4); step()  -- year, -
         local mo = tonumber(ahead(2)); step(2); step() -- month, -
-        local d = tonumber(ahead(2)); step(2)      -- day
+        local d = tonumber(ahead(2)); step(2)          -- day
         local h, mi, sec, zone
 
         if bounds() and (char() == "T" or char() == " ") then
             step()
             h = tonumber(ahead(2)); step(2); step() -- hour, :
-            mi = tonumber(ahead(2)); step(2)         -- min
+            mi = tonumber(ahead(2)); step(2)        -- min
             sec = 0
             if bounds() and char() == ":" then
                 step()
@@ -328,7 +334,7 @@ function M.parse(text)
     local function parse_time()
         local sr, sc = row, col
         local h = tonumber(ahead(2)); step(2); step() -- hour, :
-        local mi = tonumber(ahead(2)); step(2)         -- min
+        local mi = tonumber(ahead(2)); step(2)        -- min
         local sec = 0
         if bounds() and char() == ":" then
             step()
@@ -547,7 +553,7 @@ function M.parse(text)
         local b = char():byte()
         if not b then return false end
         if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
-           (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
+            (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
             return true
         end
         if b >= 0x80 then
@@ -567,7 +573,7 @@ function M.parse(text)
         local b = char():byte()
         if not b then return false end
         if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or
-           (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
+            (b >= 0x30 and b <= 0x39) or b == 0x5F or b == 0x2D then
             return true
         end
         return b >= 0x80
@@ -736,7 +742,27 @@ function M.parse(text)
         end
     end
 
-    return { ok = #errors == 0, ast = ast, errors = errors }
+    local function pos_in_range(r, c, range)
+        local sr, sc, er, ec = range[1], range[2], range[3], range[4]
+        if r < sr or r > er then return false end
+        if r == sr and c < sc then return false end
+        if r == er and c > ec then return false end
+        return true
+    end
+
+    local function node_at(r, c)
+        local result = nil
+        ast:walk_tree(function(id, data, _)
+            if result then return true end
+            if data and data.range and pos_in_range(r, c, data.range) then
+                result = { id = id, node = data }
+            end
+            return true
+        end)
+        return result
+    end
+
+    return { ok = #errors == 0, ast = ast, errors = errors, node_at = node_at }
 end
 
 return M
