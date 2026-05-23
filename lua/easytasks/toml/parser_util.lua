@@ -50,6 +50,69 @@ function M.validate_offset(h, mi)
     if mi < 0 or mi > 59 then return "timezone minute out of range" end
 end
 
+---Validates a raw decimal number string (with optional sign and underscores).
+---Hex/oct/bin prefixed numbers are not passed here.
+---@param s string
+---@return string|nil
+function M.validate_number_raw(s)
+    local i = 1
+    local n = #s
+    local function cur() return i <= n and s:sub(i, i) or nil end
+    local function is_digit(c) return c ~= nil and c >= "0" and c <= "9" end
+    local function adv() i = i + 1 end
+
+    if cur() == "+" or cur() == "-" then adv() end
+    if cur() == nil then return "empty number" end
+    if cur() == "." then return "leading decimal point" end
+    if not is_digit(cur()) then return "invalid number" end
+
+    if cur() == "0" then
+        adv()
+        if is_digit(cur()) then return "leading zero" end
+    else
+        adv()
+        while cur() do
+            if is_digit(cur()) then adv()
+            elseif cur() == "_" then
+                adv()
+                if not is_digit(cur()) then return "invalid underscore in number" end
+                adv()
+            else break end
+        end
+    end
+
+    if cur() == "." then
+        adv()
+        if not is_digit(cur()) then return "trailing decimal point" end
+        adv()
+        while cur() do
+            if is_digit(cur()) then adv()
+            elseif cur() == "_" then
+                adv()
+                if not is_digit(cur()) then return "invalid underscore in fraction" end
+                adv()
+            else break end
+        end
+    end
+
+    if cur() ~= nil and cur():lower() == "e" then
+        adv()
+        if cur() == "+" or cur() == "-" then adv() end
+        if not is_digit(cur()) then return "invalid exponent" end
+        adv()
+        while cur() do
+            if is_digit(cur()) then adv()
+            elseif cur() == "_" then
+                adv()
+                if not is_digit(cur()) then return "invalid underscore in exponent" end
+                adv()
+            else break end
+        end
+    end
+
+    if i <= n then return "unexpected character in number" end
+end
+
 ---@param s string
 ---@return boolean
 function M.validate_utf8(s)

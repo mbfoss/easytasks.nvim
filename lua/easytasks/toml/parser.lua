@@ -372,6 +372,9 @@ function M.parse(text)
             end
         end
 
+        local num_err = util.validate_number_raw(table.concat(raw_buf))
+        if num_err then add_err(num_err) end
+
         local er, ec = row, col
         local s = table.concat(s_buf)
         local lkind = s:find("[%.eE]") and "float" or "integer"
