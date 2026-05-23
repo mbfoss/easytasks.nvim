@@ -2,6 +2,7 @@
 ---@field bufnr number
 ---@field ast easytasks.util.Tree
 ---@field parse_errors table
+---@field node_at fun(r: integer, c: integer): easytasks.toml.NodeAtResult?
 ---@field data any
 ---@field decode_errors table
 ---@field pointer_map table

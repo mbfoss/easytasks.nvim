@@ -91,6 +91,7 @@ local function update_context(bufnr, context)
   local parsed = parser.parse(text)
   context.ast = parsed.ast
   context.parse_errors = parsed.errors
+  context.node_at = parsed.node_at
   local decoded = decoder.decode(context.ast)
   context.data = decoded.data
   context.decode_errors = decoded.errors
