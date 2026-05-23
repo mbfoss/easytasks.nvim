@@ -236,7 +236,7 @@ function M.parse(text)
         local d = tonumber(ahead(2)); step(2)          -- day
         local h, mi, sec, zone
 
-        if bounds() and (char() == "T" or char() == " ") then
+        if bounds() and (char() == "T" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
             step()
             h = tonumber(ahead(2)); step(2); step() -- hour, :
             mi = tonumber(ahead(2)); step(2)        -- min
@@ -412,13 +412,19 @@ function M.parse(text)
         step() -- [
         local items = {}
 
+        local function skip_wcn()
+            while bounds() do
+                if is_ws() then step()
+                elseif is_nl() then skip_nl()
+                elseif char() == "#" then
+                    while bounds() and not is_nl() do step() end
+                else break end
+            end
+        end
+
         while bounds() do
-            skip_ws()
-            if is_nl() then
-                skip_nl()
-            elseif char() == "#" then
-                while bounds() and not is_nl() do step() end
-            elseif char() == "]" then
+            skip_wcn()
+            if char() == "]" then
                 break
             else
                 local before = cursor
@@ -427,9 +433,10 @@ function M.parse(text)
                 if cursor == before then
                     add_err("Unexpected character in array: " .. char())
                     step()
+                else
+                    skip_wcn()
+                    if char() == "," then step() end
                 end
-                skip_ws()
-                if char() == "," then step() end
             end
         end
 
