@@ -95,7 +95,7 @@ local function dump_decode_tree_to_string(decode_tree)
   if not decode_tree or type(decode_tree._tree) ~= "table" or type(decode_tree._tree.walk_tree) ~= "function" then
     table.insert(lines, "# No valid DecodeTree instance found.")
   else
-    decode_tree._tree:walk_tree(function(id, data, depth)
+    decode_tree:walk_tree(function(id, data, depth)
       local indent = string.rep("  ", depth or 0)
       local info = string.format("# %s* [id:%s] key: %q", indent, tostring(id), tostring(data.key))
 

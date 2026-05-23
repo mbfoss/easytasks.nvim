@@ -1,7 +1,7 @@
 -- easytasks/toml/DecodeTree.lua
 
-local Tree = require("easytasks.util.Tree")
-local vu   = require("easytasks.toml.validatorutils")
+local Tree         = require("easytasks.util.Tree")
+local vu           = require("easytasks.toml.validatorutils")
 
 ---@class easytasks.toml.DecodeNodeData
 ---@field key    string        path segment ("/" for root, unescaped for all others)
@@ -13,12 +13,12 @@ local vu   = require("easytasks.toml.validatorutils")
 ---@field _tree       easytasks.util.Tree
 ---@field _path_to_id table<string, integer>
 ---@field _id_seq     integer
-local DecodeTree = {}
+local DecodeTree   = {}
 DecodeTree.__index = DecodeTree
 
 ---@return easytasks.toml.DecodeTree
 function DecodeTree.new()
-    local self = setmetatable({}, DecodeTree)
+    local self       = setmetatable({}, DecodeTree)
     self._tree       = Tree.new()
     self._path_to_id = {}
     self._id_seq     = 0
@@ -46,7 +46,7 @@ function DecodeTree:set_range(path, range)
         return
     end
 
-    if path == "/" then return end  -- root always exists from new()
+    if path == "/" then return end -- root always exists from new()
 
     local parts       = vu.split_path(path)
     local key         = parts[#parts]
@@ -96,24 +96,60 @@ function DecodeTree:range_of(path)
     return id and self._tree:get_data(id).range or nil
 end
 
+---@param handler fun(id:any, data:any, depth:number):boolean?
+function DecodeTree:walk_tree(handler)
+    return self._tree:walk_tree(handler)
+end
+
 ---@param row integer  0-indexed
 ---@param col integer  0-indexed
 ---@return string?  JSON Pointer of the deepest node whose range contains (row, col)
 function DecodeTree:pos_to_path(row, col)
-    local best_id, best_depth = nil, -1
-    self._tree:walk_tree(function(id, data, depth)
-        local r = data.range
-        if r then
-            local after_start = row > r[1] or (row == r[1] and col >= r[2])
-            local before_end  = row < r[3] or (row == r[3] and col <= r[4])
-            if after_start and before_end and depth > best_depth then
-                best_depth = depth
-                best_id    = id
+    local function pos_in_range(r)
+        if not r then return false end
+        return (row > r[1] or (row == r[1] and col >= r[2]))
+            and (row < r[3] or (row == r[3] and col <= r[4]))
+    end
+
+    -- Children are in document (range-start) order, so binary search is valid.
+    local function bsearch_match(items)
+        local lo, hi = 1, #items
+        local found
+        while lo <= hi do
+            local mid = math.floor((lo + hi) / 2)
+            local range = items[mid].data and items[mid].data.range
+            if range then
+                if range[1] < row or (range[1] == row and range[2] <= col) then
+                    found = mid
+                    lo = mid + 1
+                else
+                    hi = mid - 1
+                end
+            else
+                lo = mid + 1
             end
         end
-        return true
-    end)
-    return best_id and self:_path_of(best_id) or nil
+        if not found then return nil end
+        local item = items[found]
+        if not pos_in_range(item.data and item.data.range) then return nil end
+        return item
+    end
+
+    local function descend(items)
+        if not items or #items == 0 then return nil end
+        local item = bsearch_match(items)
+        if not item then return nil end
+        if self._tree:have_children(item.id) then
+            local deeper = descend(self._tree:get_children(item.id))
+            if deeper then return deeper end
+        end
+        return item.id
+    end
+
+    -- Root "/" always has range=nil; search its children directly.
+    local root_id = self._path_to_id["/"]
+    local id = descend(self._tree:get_children(root_id))
+    return id and self:_path_of(id) or nil
 end
 
 -- Iterate every validation error in the tree.
