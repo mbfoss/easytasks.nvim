@@ -4,14 +4,13 @@ local Tree         = require("easytasks.util.Tree")
 local vu           = require("easytasks.toml.validatorutils")
 
 ---@class easytasks.toml.DecodeNodeData
----@field key    string        path segment ("" for root, unescaped for all others)
+---@field key    string        path segment ("/" for root, unescaped for all others)
 ---@field range  integer[]?    {r1,c1,r2,c2} source range, nil if not in document
 ---@field schema table?        resolved schema fragment for this path
 ---@field errors string[]      validation error messages at this path
 
 ---@class easytasks.toml.DecodeTree
 ---@field _tree       easytasks.util.Tree
----@field _path_to_id table<string, integer>
 ---@field _id_seq     integer
 local DecodeTree   = {}
 DecodeTree.__index = DecodeTree
@@ -64,15 +63,6 @@ function DecodeTree:set_range(path, range)
     self._path_to_id[path] = new_id
 end
 
----@param path   string
----@param schema table  stored as a reference — callers may mutate to merge
-function DecodeTree:set_schema(path, schema)
-    local id = self._path_to_id[path]
-    if id then
-        self._tree:get_data(id).schema = schema
-    end
-end
-
 ---@param path string
 ---@param msg  string
 function DecodeTree:add_error(path, msg)
@@ -80,13 +70,6 @@ function DecodeTree:add_error(path, msg)
     if id then
         table.insert(self._tree:get_data(id).errors, msg)
     end
-end
-
----@param path string
----@return table?
-function DecodeTree:get_schema(path)
-    local id = self._path_to_id[path]
-    return id and self._tree:get_data(id).schema or nil
 end
 
 ---@param path string
@@ -170,14 +153,13 @@ function DecodeTree:_path_of(id)
     local parts   = {}
     local current = id
     while current do
-        local parent = self._tree:get_parent_id(current)
-        if parent then
-            local data = self._tree:get_data(current)
+        local data = self._tree:get_data(current)
+        if data.key ~= "/" then
             table.insert(parts, 1, data.key)
         end
-        current = parent
+        current = self._tree:get_parent_id(current)
     end
-    if #parts == 0 then return "" end
+    if #parts == 0 then return "/" end
     return vu.join_path_parts(parts)
 end
 

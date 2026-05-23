@@ -1,6 +1,5 @@
 local parser        = require("easytasks.toml.parser")
 local decoder       = require("easytasks.toml.decoder")
-local schema_mapper = require("easytasks.toml.schema_mapper")
 local completion    = require("easytasks.lsp.completion")
 local hover         = require("easytasks.lsp.hover")
 local code_action   = require("easytasks.lsp.code_action")
@@ -96,9 +95,6 @@ local function update_context(bufnr, context)
   context.data         = decoded.data
   context.decode_errors = decoded.errors
   context.decode_tree  = decoded.decode_tree
-  if context.schema and context.data and context.decode_tree then
-    schema_mapper.populate(context.schema, context.data, context.decode_tree)
-  end
 end
 
 ---@param bufnr integer
