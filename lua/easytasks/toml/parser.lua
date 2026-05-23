@@ -61,6 +61,12 @@ function M.parse(text)
     local row, col = 0, 0
     local nid      = 0
 
+    local utf8_ok = util.validate_utf8(text)
+    if not utf8_ok then
+        table.insert(errors, { message = "Invalid UTF sequence", range = { 0, 0, 0, 0 } })
+        return { ok = false, ast = ast, errors = errors }
+    end
+
     local function next_id()
         nid = nid + 1; return nid
     end
@@ -248,7 +254,7 @@ function M.parse(text)
                 if not ahead(2):match("^%d%d$") then
                     add_err("Invalid timezone offset: expected 2-digit hour"); zone = 0
                 else
-                    local oh = tonumber(ahead(2)); step(2)
+                    local oh = tonumber(ahead(2)) or 0; step(2)
                     if char() ~= ":" then
                         add_err("Invalid timezone offset: expected ':'"); zone = sign * oh
                     else
@@ -256,7 +262,7 @@ function M.parse(text)
                         if not ahead(2):match("^%d%d$") then
                             add_err("Invalid timezone offset: expected 2-digit minute"); zone = sign * oh
                         else
-                            local om = tonumber(ahead(2)); step(2)
+                            local om = tonumber(ahead(2)) or 0; step(2)
                             local tz_err = util.validate_offset(oh, om)
                             if tz_err then add_err(tz_err) end
                             zone = sign * oh
