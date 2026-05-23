@@ -63,7 +63,7 @@ function M.parse_to_tagged_json(toml_str)
         return nil, table.concat(msgs, "; ")
     end
 
-    return vim.json.encode(tagged_from_data(result.data, "/", result.type_map)), nil
+    return vim.json.encode(tagged_from_data(result.data, "", result.type_map)), nil
 end
 
 return M

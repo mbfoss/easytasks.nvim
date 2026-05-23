@@ -147,7 +147,12 @@ function M.parse(text)
                 local nc = char(1)
                 if ml and (nc == "\n" or (nc == "\r" and char(2) == "\n")) then
                     step(); skip_nl()
-                    while bounds() and is_ws() do step() end
+                    while bounds() do
+                        if is_ws() then step()
+                        elseif is_nl() then skip_nl()
+                        else break
+                        end
+                    end
                 else
                     if esc[nc] then
                         table.insert(buf, esc[nc]); step(2)
