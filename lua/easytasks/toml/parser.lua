@@ -236,7 +236,7 @@ function M.parse(text)
         local d = tonumber(ahead(2)); step(2)          -- day
         local h, mi, sec, zone
 
-        if bounds() and (char() == "T" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
+        if bounds() and (char():lower() == "t" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
             step()
             h = tonumber(ahead(2)); step(2); step() -- hour, :
             mi = tonumber(ahead(2)); step(2)        -- min
@@ -250,7 +250,7 @@ function M.parse(text)
                 sec = tonumber(ss) or 0
             end
 
-            if bounds() and char() == "Z" then
+            if bounds() and char():lower() == "z" then
                 zone = 0; step()
             elseif bounds() and (char() == "+" or char() == "-") then
                 local sign = char() == "+" and 1 or -1; step()
@@ -460,18 +460,27 @@ function M.parse(text)
             if not bounds() or char() == "}" then break end
 
             local ks_r, ks_c = row, col
-            local key_str
-            if char() == '"' or char() == "'" then
-                local kn = parse_string(); key_str = kn.token.value
-            else
-                key_str = ""
-                while bounds() and char() ~= "=" and char() ~= "." and not is_ws() and not is_nl() and char() ~= "}" do
-                    key_str = key_str .. char(); step()
+            local key_parts = {}
+            repeat
+                local pk_sr, pk_sc = row, col
+                local part_str
+                if char() == '"' or char() == "'" then
+                    local kn = parse_string(); part_str = kn.token.value
+                else
+                    part_str = ""
+                    while bounds() and char() ~= "=" and char() ~= "." and not is_ws() and not is_nl() and char() ~= "}" do
+                        part_str = part_str .. char(); step()
+                    end
+                    part_str = trim(part_str)
                 end
-                key_str = trim(key_str)
-            end
+                local pk_er, pk_ec = row, col
+                if part_str == "" then add_err("Empty key segment in inline table"); break end
+                table.insert(key_parts, { value = part_str, range = mkr(pk_sr, pk_sc, pk_er, pk_ec) })
+                skip_ws()
+            until char() ~= "."  or (step() and false) -- step() consumes the dot, always false
+
+            if #key_parts == 0 then break end
             local ke_r, ke_c = row, col
-            skip_ws()
 
             if char() ~= "=" then
                 add_err("Expected = in inline table"); break
@@ -483,8 +492,17 @@ function M.parse(text)
             end
 
             local val = parse_value()
+            -- Expand dotted keys: a.b = v → a = { b = v }
+            for i = #key_parts, 2, -1 do
+                val = {
+                    kind = NodeKind.InlineTable,
+                    pairs = { { key = key_parts[i], value = val } },
+                    multiline = false,
+                    range = val and val.range or mkr(ks_r, ks_c, ke_r, ke_c),
+                }
+            end
             table.insert(pairs_list, {
-                key = { value = key_str, range = mkr(ks_r, ks_c, ke_r, ke_c) },
+                key = { value = key_parts[1].value, range = mkr(ks_r, ks_c, ke_r, ke_c) },
                 value = val,
             })
             -- TOML 1.1: trailing comma and newlines allowed after value
