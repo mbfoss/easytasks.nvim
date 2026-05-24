@@ -586,10 +586,13 @@ function M.parse(text)
                 break
             end
             step()
+            local vs_r, vs_c = row, col  -- capture before collect() to stay on the = line
             collect()
-            local vs_r, vs_c = row, col
 
             local val = parse_value()
+            if val and val.kind == NodeKind.Literal and val.token.value == nil then
+                val = nil  -- discard error-recovery literals (no real value)
+            end
             local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
 
             for i = #key_parts, 2, -1 do
@@ -710,6 +713,7 @@ function M.parse(text)
     expand_value = function(parent_id, value_node)
         if not value_node then return end
         if value_node.kind == NodeKind.Literal then
+            if value_node.token.value == nil then return end
             ast:add_item(parent_id, next_id(), value_node)
         elseif value_node.kind == NodeKind.InlineTable then
             local tbl_id = next_id()
@@ -838,6 +842,9 @@ function M.parse(text)
                 skip_ws()
                 local vs_r, vs_c = row, col
                 local val = parse_value()
+                if val and val.kind == NodeKind.Literal and val.token.value == nil then
+                    val = nil
+                end
                 local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
 
                 local node_val = val
