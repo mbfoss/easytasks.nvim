@@ -8,21 +8,33 @@ local vu           = require("easytasks.toml.validatorutils")
 ---@field range  integer[]?    {r1,c1,r2,c2} source range, nil if not in document
 ---@field schema table?        resolved schema fragment for this path
 
+---@class easytasks.toml.PosIndexEntry
+---@field r1    integer
+---@field c1    integer
+---@field r2    integer
+---@field c2    integer
+---@field id    integer
+---@field depth integer
+
 ---@class easytasks.toml.DecodeTree
----@field _tree    easytasks.util.Tree
----@field _root_id integer
----@field _id_seq  integer
+---@field _tree        easytasks.util.Tree
+---@field _root_id     integer
+---@field _id_seq      integer
+---@field _pos_index   easytasks.toml.PosIndexEntry[]   flat sorted list, built lazily
+---@field _index_dirty boolean
 local DecodeTree   = {}
 DecodeTree.__index = DecodeTree
 
 ---@return easytasks.toml.DecodeTree
 function DecodeTree.new()
-    local self    = setmetatable({}, DecodeTree)
-    self._tree    = Tree.new()
-    self._id_seq  = 0
-    self._id_seq  = self._id_seq + 1
-    self._root_id = self._id_seq
+    local self        = setmetatable({}, DecodeTree)
+    self._tree        = Tree.new()
+    self._id_seq      = 0
+    self._id_seq      = self._id_seq + 1
+    self._root_id     = self._id_seq
     self._tree:add_item(nil, self._id_seq, { key = "", range = nil, schema = nil })
+    self._pos_index   = {}
+    self._index_dirty = false
     return self
 end
 
@@ -58,6 +70,7 @@ end
 function DecodeTree:add_child(parent_id, key, range)
     local id = self:_next_id()
     self._tree:add_item(parent_id, id, { key = key, range = range, schema = nil })
+    self._index_dirty = true
     return id
 end
 
@@ -66,6 +79,7 @@ end
 ---@param range integer[]?
 function DecodeTree:set_range_by_id(id, range)
     self._tree:get_data(id).range = range
+    self._index_dirty = true
 end
 
 ---@param path string
@@ -80,55 +94,92 @@ function DecodeTree:walk_tree(handler)
     return self._tree:walk_tree(handler)
 end
 
+--------------------------------------------------------------------------------
+-- Position index
+--------------------------------------------------------------------------------
+
+---@private
+-- Rebuild the flat sorted position index from the tree.
+-- Entries are sorted by (r1, c1); depth reflects tree depth so that the deepest
+-- (most specific) containing node wins on lookup.
+function DecodeTree:_rebuild_index()
+    if not self._index_dirty then return end
+
+    local entries = {}
+    self._tree:walk_tree(function(id, data, depth)
+        if id ~= self._root_id and data.range then
+            local r = data.range
+            entries[#entries + 1] = {
+                r1 = r[1], c1 = r[2],
+                r2 = r[3], c2 = r[4],
+                id = id, depth = depth,
+            }
+        end
+        return true
+    end)
+
+    table.sort(entries, function(a, b)
+        if a.r1 ~= b.r1 then return a.r1 < b.r1 end
+        return a.c1 < b.c1
+    end)
+
+    self._pos_index   = entries
+    self._index_dirty = false
+end
+
+---@private
+-- Binary search: returns the index of the rightmost entry whose start ≤ (row, col).
+-- Returns 0 if no such entry exists.
+---@param row integer
+---@param col integer
+---@return integer
+function DecodeTree:_bsearch_start(row, col)
+    local idx = self._pos_index
+    local lo, hi, found = 1, #idx, 0
+    while lo <= hi do
+        local mid = math.floor((lo + hi) / 2)
+        local e   = idx[mid]
+        if e.r1 < row or (e.r1 == row and e.c1 <= col) then
+            found = mid
+            lo    = mid + 1
+        else
+            hi = mid - 1
+        end
+    end
+    return found
+end
+
 ---@param row integer  0-indexed
 ---@param col integer  0-indexed
 ---@return string?  JSON Pointer of the deepest node whose range contains (row, col)
 function DecodeTree:pos_to_path(row, col)
-    local function pos_in_range(r)
-        if not r then return false end
-        return (row > r[1] or (row == r[1] and col >= r[2]))
-            and (row < r[3] or (row == r[3] and col <= r[4]))
-    end
+    self:_rebuild_index()
 
-    -- Children are in document (range-start) order, so binary search is valid.
-    local function bsearch_match(items)
-        local lo, hi = 1, #items
-        local found
-        while lo <= hi do
-            local mid = math.floor((lo + hi) / 2)
-            local range = items[mid].data and items[mid].data.range
-            if range then
-                if range[1] < row or (range[1] == row and range[2] <= col) then
-                    found = mid
-                    lo = mid + 1
-                else
-                    hi = mid - 1
-                end
-            else
-                lo = mid + 1
+    local hi = self:_bsearch_start(row, col)
+    if hi == 0 then return nil end
+
+    -- Walk backward from the boundary.  Every entry with start ≤ (row,col) is a
+    -- candidate; we need them all because a range that began far earlier may still
+    -- span our position.  Pick the deepest (most specific) match.
+    local best_id, best_depth = nil, -1
+    for i = hi, 1, -1 do
+        local e = self._pos_index[i]
+        local r = e
+        if (row > r.r1 or (row == r.r1 and col >= r.c1))
+        and (row < r.r2 or (row == r.r2 and col <= r.c2)) then
+            if e.depth > best_depth then
+                best_depth = e.depth
+                best_id    = e.id
             end
         end
-        if not found then return nil end
-        local item = items[found]
-        if not pos_in_range(item.data and item.data.range) then return nil end
-        return item
     end
 
-    local function descend(items)
-        if not items or #items == 0 then return nil end
-        local item = bsearch_match(items)
-        if not item then return nil end
-        if self._tree:have_children(item.id) then
-            local deeper = descend(self._tree:get_children(item.id))
-            if deeper then return deeper end
-        end
-        return item.id
-    end
-
-    -- Root always has range=nil; search its children directly.
-    local id = descend(self._tree:get_children(self._root_id))
-    return id and self:path_of(id) or nil
+    return best_id and self:path_of(best_id) or nil
 end
+
+--------------------------------------------------------------------------------
+-- Path utilities
+--------------------------------------------------------------------------------
 
 -- Reconstruct the JSON Pointer path for a node by walking up to root.
 ---@param id integer
