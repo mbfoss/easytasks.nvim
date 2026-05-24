@@ -30,25 +30,6 @@ local function key_items(flat)
   return items
 end
 
----@param prop_schema table?
----@return lsp.CompletionItem[]
-local function value_items(prop_schema)
-  if not prop_schema then return {} end
-  local flat  = schema_nav.flatten(prop_schema, nil)
-  local items = {}
-  if flat.enum then
-    for _, v in ipairs(flat.enum) do
-      local text        = type(v) == "string" and v or tostring(v)
-      local insert      = type(v) == "string" and ('"' .. v .. '"') or text
-      items[#items + 1] = { label = text, kind = CK.EnumMember, insertText = insert }
-    end
-  elseif flat.type == "boolean" then
-    items[#items + 1] = { label = "true", kind = CK.Value, insertText = "true" }
-    items[#items + 1] = { label = "false", kind = CK.Value, insertText = "false" }
-  end
-  return items
-end
-
 ---@param context easytasks.LspBufferContext
 ---@param params lsp.CompletionParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
