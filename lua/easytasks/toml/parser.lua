@@ -590,10 +590,10 @@ function M.parse(text)
             collect()
 
             local val = parse_value()
-            if val and val.kind == NodeKind.Literal and val.token.value == nil then
-                val = nil  -- discard error-recovery literals (no real value)
+            if not val or (val.kind == NodeKind.Literal and val.token.value == nil) then
+                val = { kind = NodeKind.MissingValue, range = mkr(vs_r, vs_c, row, col) }
             end
-            local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
+            local val_range = val.range
 
             for i = #key_parts, 2, -1 do
                 val = {
@@ -712,8 +712,11 @@ function M.parse(text)
     local expand_value
     expand_value = function(parent_id, value_node)
         if not value_node then return end
+        if value_node.kind == NodeKind.MissingValue then
+            ast:add_item(parent_id, next_id(), value_node)
+            return
+        end
         if value_node.kind == NodeKind.Literal then
-            if value_node.token.value == nil then return end
             ast:add_item(parent_id, next_id(), value_node)
         elseif value_node.kind == NodeKind.InlineTable then
             local tbl_id = next_id()
@@ -842,10 +845,10 @@ function M.parse(text)
                 skip_ws()
                 local vs_r, vs_c = row, col
                 local val = parse_value()
-                if val and val.kind == NodeKind.Literal and val.token.value == nil then
-                    val = nil
+                if not val or (val.kind == NodeKind.Literal and val.token.value == nil) then
+                    val = { kind = NodeKind.MissingValue, range = mkr(vs_r, vs_c, row, col) }
                 end
-                local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
+                local val_range = val.range
 
                 local node_val = val
                 if #keys > 1 then

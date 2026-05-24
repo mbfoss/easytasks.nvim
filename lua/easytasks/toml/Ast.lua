@@ -39,7 +39,11 @@ local Tree = require("easytasks.util.Tree")
 ---@field explicit boolean?
 ---@field range easytasks.toml.Range
 
----@alias easytasks.toml.ValueNode easytasks.toml.LiteralNode|easytasks.toml.ArrayNode|easytasks.toml.InlineTableNode
+---@class easytasks.toml.MissingValueNode
+---@field kind easytasks.toml.NodeKind
+---@field range easytasks.toml.Range
+
+---@alias easytasks.toml.ValueNode easytasks.toml.LiteralNode|easytasks.toml.ArrayNode|easytasks.toml.InlineTableNode|easytasks.toml.MissingValueNode
 
 ---@class easytasks.toml.KeyNode
 ---@field kind easytasks.toml.NodeKind
@@ -112,6 +116,7 @@ Ast.NodeKind = {
     PartialArrayOfTablesSection = 8,
     Comment                     = 9,
     Key                         = 10,
+    MissingValue                = 11,
 }
 
 ---@param r integer
