@@ -83,12 +83,17 @@ function M.handler(context, params, callback)
     if items then callback(nil, { isIncomplete = false, items = items }); return end
   end
 
-  -- Key completion: cursor is on a key position; walk up from key-only nodes
-  if id then
-    local lookup_id = (dt:is_key_node(id) and dt:get_parent_id(id)) or id
-    if lookup_id then
-      local flat = schema_nav.schema_at(context.schema, context.data, dt, lookup_id)
-      if flat then callback(nil, { isIncomplete = false, items = key_items(flat) }); return end
+  -- Key completion:
+  local key_lookup_id
+  if id and dt:cursor_on_key(id, row, col) then
+    key_lookup_id = dt:get_parent_id(id)
+  else
+    key_lookup_id = id
+  end
+  if key_lookup_id then
+    local flat = schema_nav.schema_at(context.schema, context.data, dt, key_lookup_id)
+    if flat then
+      callback(nil, { isIncomplete = false, items = key_items(flat) }); return
     end
   end
 

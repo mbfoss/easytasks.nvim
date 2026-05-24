@@ -228,6 +228,22 @@ function DecodeTree:cursor_on_value(id, row, col)
     return row > vr[1] or (row == vr[1] and col >= vr[2])
 end
 
+-- Returns true when (row, col) is before the value range start, meaning the
+-- cursor is on the key token or the operator, not on the value. Nodes without
+-- a stored value_range (incomplete pairs without `=`) also return true so the
+-- caller can walk up to the parent for key completions.
+---@param id  integer
+---@param row integer
+---@param col integer
+---@return boolean
+function DecodeTree:cursor_on_key(id, row, col)
+    local data = self._tree:get_data(id)
+    if not data then return false end
+    if not data.value_range then return data.is_key_node == true end
+    local vr = data.value_range
+    return row < vr[1] or (row == vr[1] and col < vr[2])
+end
+
 --------------------------------------------------------------------------------
 -- Path utilities
 --------------------------------------------------------------------------------
