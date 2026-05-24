@@ -15,6 +15,7 @@ local Tree = require("easytasks.util.Tree")
 ---@class easytasks.toml.Pair
 ---@field key easytasks.toml.KeyRef
 ---@field value easytasks.toml.ValueNode?
+---@field value_range easytasks.toml.Range?
 
 ---@class easytasks.toml.LiteralNode
 ---@field kind easytasks.toml.NodeKind
@@ -49,6 +50,7 @@ local Tree = require("easytasks.util.Tree")
 ---@field kind easytasks.toml.NodeKind
 ---@field key easytasks.toml.KeyRef
 ---@field value easytasks.toml.ValueNode
+---@field value_range easytasks.toml.Range?
 ---@field trailing_comment string?
 ---@field range easytasks.toml.Range
 

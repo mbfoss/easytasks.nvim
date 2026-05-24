@@ -587,8 +587,10 @@ function M.parse(text)
             end
             step()
             collect()
+            local vs_r, vs_c = row, col
 
             local val = parse_value()
+            local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
 
             for i = #key_parts, 2, -1 do
                 val = {
@@ -602,6 +604,7 @@ function M.parse(text)
             local prev_len = #pairs_list
             merge_inline_table_pairs(pairs_list, key_parts[1], val)
             if #pairs_list > prev_len then
+                pairs_list[#pairs_list].value_range = val_range
                 table.insert(ordered_items, pairs_list[#pairs_list])
             end
 
@@ -650,11 +653,12 @@ function M.parse(text)
     local function parse_bare_key()
         local sr, sc = row, col
         local buf = {}
+        local er, ec = sr, sc
         while bounds() and is_bare_key_char() do
+            er, ec = row, col
             table.insert(buf, char())
             step()
         end
-        local er, ec = row, col
         local s = table.concat(buf)
         return { value = s, is_empty = (s == ""), quoted = false, range = mkr(sr, sc, er, ec) }
     end
@@ -832,7 +836,9 @@ function M.parse(text)
             else
                 step()
                 skip_ws()
+                local vs_r, vs_c = row, col
                 local val = parse_value()
+                local val_range = val and val.range or mkr(vs_r, vs_c, vs_r, vs_c)
 
                 local node_val = val
                 if #keys > 1 then
@@ -852,6 +858,7 @@ function M.parse(text)
                         kind = NodeKind.KeyValuePair,
                         key = keys[1],
                         value = node_val,
+                        value_range = val_range,
                         trailing_comment =
                             read_trailing_comment(),
                         range = mkr(sr, sc, row, col)
