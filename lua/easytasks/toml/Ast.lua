@@ -40,6 +40,11 @@ local Tree = require("easytasks.util.Tree")
 
 ---@alias easytasks.toml.ValueNode easytasks.toml.LiteralNode|easytasks.toml.ArrayNode|easytasks.toml.InlineTableNode
 
+---@class easytasks.toml.KeyNode
+---@field kind easytasks.toml.NodeKind
+---@field value string
+---@field range easytasks.toml.Range
+
 ---@class easytasks.toml.KeyValuePairNode
 ---@field kind easytasks.toml.NodeKind
 ---@field key easytasks.toml.KeyRef
@@ -65,6 +70,7 @@ local Tree = require("easytasks.util.Tree")
 ---@field range easytasks.toml.Range
 
 ---@alias easytasks.toml.AstNode
+---| easytasks.toml.KeyNode
 ---| easytasks.toml.KeyValuePairNode
 ---| easytasks.toml.TableSectionNode
 ---| easytasks.toml.ArrayOfTablesSectionNode
@@ -103,6 +109,7 @@ Ast.NodeKind = {
     PartialTableSection         = 7,
     PartialArrayOfTablesSection = 8,
     Comment                     = 9,
+    Key                         = 10,
 }
 
 ---@param r integer

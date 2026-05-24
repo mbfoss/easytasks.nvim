@@ -161,19 +161,19 @@ local function evaluate(ast, with_type_map)
         local node = root_item.data
 
         if node.kind == NodeKind.TableSection then
-            current_table = root
-            current_id    = dt:root_id()
-            local invalid = false
+            current_table       = root
+            current_id          = dt:root_id()
+            local invalid       = false
 
-            local nkeys        = #node.keys
+            local nkeys         = #node.keys
             local section_range = full_section_range(id, node)
             for i, key_token in ipairs(node.keys) do
                 if not current_id then
                     invalid = true; break
                 end
-                local key      = key_token.value
-                local next_id  = dt:get_child_id(current_id, key)
-                local kind     = next_id and kind_by_id[next_id]
+                local key       = key_token.value
+                local next_id   = dt:get_child_id(current_id, key)
+                local kind      = next_id and kind_by_id[next_id]
                 local key_range = (i == nkeys) and section_range or (key_token.range or node.range)
 
                 if kind == "ArrayOfTables" then
@@ -247,10 +247,10 @@ local function evaluate(ast, with_type_map)
                 end
             end
         elseif node.kind == NodeKind.ArrayOfTablesSection then
-            current_table  = root
-            current_id     = dt:root_id()
-            local invalid  = false
-            local num_keys = #node.keys
+            current_table       = root
+            current_id          = dt:root_id()
+            local invalid       = false
+            local num_keys      = #node.keys
             local section_range = full_section_range(id, node)
 
             for i, key_token in ipairs(node.keys) do

@@ -705,7 +705,9 @@ function M.parse(text)
     local expand_value
     expand_value = function(parent_id, value_node)
         if not value_node then return end
-        if value_node.kind == NodeKind.InlineTable then
+        if value_node.kind == NodeKind.Literal then
+            ast:add_item(parent_id, next_id(), value_node)
+        elseif value_node.kind == NodeKind.InlineTable then
             local tbl_id = next_id()
             ast:add_item(parent_id, tbl_id, value_node)
             for _, item in ipairs(value_node.ordered_items or value_node.pairs) do
@@ -715,6 +717,8 @@ function M.parse(text)
                     local pair_id = next_id()
                     ast:add_item(tbl_id, pair_id,
                         { kind = NodeKind.KeyValuePair, key = item.key, value = item.value, range = item.key.range })
+                    ast:add_item(pair_id, next_id(),
+                        { kind = NodeKind.Key, value = item.key.value, range = item.key.range })
                     expand_value(pair_id, item.value)
                 end
             end
@@ -852,6 +856,8 @@ function M.parse(text)
                             read_trailing_comment(),
                         range = mkr(sr, sc, row, col)
                     })
+                ast:add_item(kvp_id, next_id(),
+                    { kind = NodeKind.Key, value = keys[1].value, range = keys[1].range })
                 expand_value(kvp_id, node_val)
                 if bounds() and not is_nl() then
                     add_err("Expected newline after key-value pair")

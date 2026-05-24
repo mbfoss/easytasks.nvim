@@ -15,6 +15,7 @@ local node_kind_names = {
   [7] = "PartialTableSection",
   [8] = "PartialArrayOfTablesSection",
   [9] = "Comment",
+  [10] = "Key",
 }
 
 --------------------------------------------------------------------------------
