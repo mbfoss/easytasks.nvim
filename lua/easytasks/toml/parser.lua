@@ -13,12 +13,12 @@
 ---@field is_empty boolean
 ---@field quoted boolean
 
-local Ast      = require("easytasks.toml.Ast")
-local util     = require("easytasks.toml.parser_util")
-local NodeKind = util.NodeKind
-
 local M        = {}
 
+local Ast      = require("easytasks.toml.Ast")
+local util     = require("easytasks.toml.parser_util")
+
+local NodeKind = Ast.NodeKind
 
 ---@param text string
 ---@return easytasks.toml.ParseResult
@@ -461,8 +461,10 @@ function M.parse(text)
 
         local function collect()
             while bounds() do
-                if is_ws() then step()
-                elseif is_nl() then skip_nl()
+                if is_ws() then
+                    step()
+                elseif is_nl() then
+                    skip_nl()
                 elseif char() == "#" then
                     local cr, cc = row, col
                     local buf = {}
@@ -470,8 +472,11 @@ function M.parse(text)
                         if is_comment_ctrl() then add_err("Control character in comment") end
                         table.insert(buf, char()); step()
                     end
-                    table.insert(items, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
-                else break end
+                    table.insert(items,
+                        { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
+                else
+                    break
+                end
             end
         end
 
@@ -532,8 +537,10 @@ function M.parse(text)
 
         local function collect()
             while bounds() do
-                if is_ws() then step()
-                elseif is_nl() then skip_nl()
+                if is_ws() then
+                    step()
+                elseif is_nl() then
+                    skip_nl()
                 elseif char() == "#" then
                     local cr, cc = row, col
                     local buf = {}
@@ -541,8 +548,11 @@ function M.parse(text)
                         if is_comment_ctrl() then add_err("Control character in comment") end
                         table.insert(buf, char()); step()
                     end
-                    table.insert(ordered_items, { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
-                else break end
+                    table.insert(ordered_items,
+                        { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
+                else
+                    break
+                end
             end
         end
 
@@ -598,8 +608,15 @@ function M.parse(text)
         local multiline = row ~= sr
         if char() ~= "}" then add_err("Missing } in inline table") else step() end
         local er, ec = row, col
-        return { kind = NodeKind.InlineTable, pairs = pairs_list, ordered_items = ordered_items, multiline = multiline, explicit = true, range = mkr(sr,
-        sc, er, ec) }
+        return {
+            kind = NodeKind.InlineTable,
+            pairs = pairs_list,
+            ordered_items = ordered_items,
+            multiline = multiline,
+            explicit = true,
+            range = mkr(sr,
+                sc, er, ec)
+        }
     end
 
     ---@return easytasks.toml.ValueNode?

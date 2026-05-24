@@ -1,8 +1,8 @@
--- easytasks/lsp/schema_nav.lua
+-- easytasks/toml/schema_nav.lua
 -- Shared schema navigation: flatten, schema_at, and cursor resolution via DecodeTree.
 local M = {}
 
-local utils     = require("easytasks.toml.validatorutils")
+local utils     = require("easytasks.toml.validator_util")
 local validator = require("easytasks.toml.validator")
 
 -- Merge allOf, resolve if/then/else and oneOf branches against data.
@@ -84,19 +84,11 @@ end
 -- The decode_tree already maps every decoded value (including inline-table fields
 -- and array-of-tables elements) to its source range, so this handles all TOML
 -- structure kinds without re-parsing.
---
--- Returns (path, schema_node): path is the JSON Pointer of the node at (row,col),
--- schema_node is the flattened schema for that path.  Both are nil on miss.
----@param context easytasks.LspBufferContext
----@param row     integer  0-indexed
----@param col     integer  0-indexed
----@return string?  path
----@return table?   schema_node
-function M.resolve_at(context, row, col)
-  if not context.decode_tree or not context.schema then return nil, nil end
-  local path = context.decode_tree:pos_to_path(row, col)
+function M.resolve_at(data, decode_tree, row, col, schema)
+  if not decode_tree or not schema then return nil, nil end
+  local path = decode_tree:pos_to_path(row, col)
   if not path then return nil, nil end
-  return path, M.schema_at(context.schema, context.data, path)
+  return path, M.schema_at(schema, data, path)
 end
 
 return M

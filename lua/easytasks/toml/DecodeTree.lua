@@ -1,7 +1,7 @@
 -- easytasks/toml/DecodeTree.lua
 
 local Tree         = require("easytasks.util.Tree")
-local vu           = require("easytasks.toml.validatorutils")
+local vu           = require("easytasks.toml.validator_util")
 
 ---@class easytasks.toml.DecodeNodeData
 ---@field key    string        path segment (unescaped)

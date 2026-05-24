@@ -1,8 +1,10 @@
+local M          = {}
+
 local parser     = require("easytasks.toml.parser")
 local DecodeTree = require("easytasks.toml.DecodeTree")
-local NodeKind   = require("easytasks.toml.parser_util").NodeKind
+local Ast        = require("easytasks.toml.Ast")
 
-local M          = {}
+local NodeKind   = Ast.NodeKind
 
 ---@param ast easytasks.toml.Ast
 ---@param with_type_map boolean?

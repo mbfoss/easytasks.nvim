@@ -1,18 +1,5 @@
 local M = {}
 
----@enum easytasks.toml.NodeKind
-M.NodeKind = {
-    Literal                     = 1,
-    Array                       = 2,
-    InlineTable                 = 3,
-    KeyValuePair                = 4,
-    TableSection                = 5,
-    ArrayOfTablesSection        = 6,
-    PartialTableSection         = 7,
-    PartialArrayOfTablesSection = 8,
-    Comment                     = 9,
-}
-
 local days_in_month = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
 
 local invalid_utf_seq_msg = "invalid UTF-8 sequence"

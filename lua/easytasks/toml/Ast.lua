@@ -92,6 +92,19 @@ function Ast.new()
     return setmetatable({ _tree = Tree.new() }, Ast)
 end
 
+---@enum easytasks.toml.NodeKind
+Ast.NodeKind = {
+    Literal                     = 1,
+    Array                       = 2,
+    InlineTable                 = 3,
+    KeyValuePair                = 4,
+    TableSection                = 5,
+    ArrayOfTablesSection        = 6,
+    PartialTableSection         = 7,
+    PartialArrayOfTablesSection = 8,
+    Comment                     = 9,
+}
+
 ---@param r integer
 ---@param c integer
 ---@param range easytasks.toml.Range

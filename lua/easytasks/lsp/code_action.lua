@@ -1,8 +1,8 @@
 -- easytasks/lsp/code_actions.lua
-local M        = {}
+local M      = {}
 
-local s_util   = require("easytasks.toml.schema_util")
-local NodeKind = require("easytasks.toml.parser_util").NodeKind
+local s_util = require("easytasks.toml.schema_util")
+local Ast    = require("easytasks.toml.Ast")
 
 
 local node_kind_names = {
@@ -32,7 +32,7 @@ local function dump_ast_to_string(ast)
   else
     ast:walk_tree(function(id, node, depth)
       local indent = string.rep("  ", depth or 0)
-      local kind = node_kind_names[node.kind] or ("NodeKind#" .. tostring(NodeKind))
+      local kind = node_kind_names[node.kind] or ("NodeKind#" .. tostring(Ast.NodeKind))
       local info = string.format("# %s* [%s] id: %s", indent, kind, id)
 
       if node.range then
@@ -48,7 +48,7 @@ local function dump_ast_to_string(ast)
         info = info .. string.format(" keys: [%s]", table.concat(section_keys, "."))
       end
 
-      if node.kind == NodeKind.Literal and node.token then
+      if node.kind == Ast.NodeKind.Literal and node.token then
         info = info .. string.format(" val: %s (%s)", tostring(node.token.value), node.token.type)
       end
 

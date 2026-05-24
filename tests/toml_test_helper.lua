@@ -3,7 +3,7 @@
 -- Uses decoder.decode with opts.type_map=true to get path→literalkind mapping.
 
 local decoder = require("easytasks.toml.decoder")
-local vu      = require("easytasks.toml.validatorutils")
+local vu      = require("easytasks.toml.validator_util")
 
 local M       = {}
 

@@ -1,6 +1,8 @@
 -- easytasks/toml/formatter.lua
-local NodeKind = require("easytasks.toml.parser_util").NodeKind
+local Ast = require("easytasks.toml.Ast")
 local M = {}
+
+local NodeKind = Ast.NodeKind
 
 ---@param key string
 ---@return boolean

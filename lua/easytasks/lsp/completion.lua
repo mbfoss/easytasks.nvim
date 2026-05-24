@@ -1,14 +1,15 @@
 local M          = {}
 
 local s_util     = require("easytasks.toml.schema_util")
-local utils      = require("easytasks.toml.validatorutils")
-local schema_nav = require("easytasks.lsp.schema_nav")
-local NodeKind   = require("easytasks.toml.parser_util").NodeKind
+local utils      = require("easytasks.toml.validator_util")
+local schema_nav = require("easytasks.toml.schema_nav")
+local Ast        = require("easytasks.toml.Ast")
 
+local NodeKind   = Ast.NodeKind
 local CK         = vim.lsp.protocol.CompletionItemKind
 
 --------------------------------------------------------------------------------
--- AST helpers
+-- AST helpers  (section-level context)
 --------------------------------------------------------------------------------
 
 -- Count 1-based position of section_id among same-path [[array-of-tables]] headers.
@@ -53,21 +54,6 @@ local function section_path(ast, section_id, node)
   return utils.join_path_parts(segs)
 end
 
--- Collect key names already defined in a section (nil → root scope).
----@param ast        easytasks.toml.Ast
----@param section_id any
----@return table<string, boolean>
-local function defined_keys(ast, section_id)
-  local keys  = {}
-  local iter = section_id and ast:iter_children(section_id) or ast:iter_roots()
-  for _, data in iter do
-    if data and data.kind == NodeKind.KeyValuePair then
-      keys[data.key.value] = true
-    end
-  end
-  return keys
-end
-
 -- Find the section node that contains `row` (last section header before/at that row).
 ---@param ast easytasks.toml.Ast
 ---@param row integer
@@ -86,6 +72,72 @@ local function section_at_row(ast, row)
     end
   end
   return sec_id, sec_node
+end
+
+--------------------------------------------------------------------------------
+-- Container resolution
+-- Combines AST section detection (reliable for [table]/[[aot]] headers) with
+-- decode_tree lookup (required for inline tables whose structure is invisible
+-- to the section scanner).
+--------------------------------------------------------------------------------
+
+-- Return the keys already present at `container_path` in the decoded data.
+-- Works for both section-based and inline-table containers.
+---@param context        easytasks.LspBufferContext
+---@param container_path string
+---@return table<string, boolean>
+local function defined_keys_at(context, container_path)
+  if not context.data then return {} end
+  local data = utils.get_at_path(context.data, container_path)
+  if type(data) ~= "table" or vim.islist(data) then return {} end
+  local keys = {}
+  for k in pairs(data) do keys[k] = true end
+  return keys
+end
+
+-- Resolve the container object path for the cursor.
+--
+-- Algorithm:
+--   1. AST gives the enclosing [table]/[[aot]] section path (`spath`).
+--      This is correct for top-level sections but misses inline tables.
+--   2. decode_tree gives the deepest decoded node at (row, col) (`dt_path`).
+--      This captures inline table fields that the AST scan cannot see.
+--   3. If dt_path has more path segments than spath, it means the cursor is
+--      inside an inline table (or deeper nesting).  We then walk up dt_path
+--      until we land on an object in the schema, which becomes the container.
+---@param context easytasks.LspBufferContext
+---@param row     integer
+---@param col     integer
+---@return string  JSON Pointer to the container object
+local function resolve_container(context, row, col)
+  local sec_id, sec_node = section_at_row(context.ast, row)
+  local spath            = section_path(context.ast, sec_id, sec_node)
+
+  local dt               = context.decode_tree
+  if not dt then return spath end
+  local dt_path = dt:pos_to_path(row, col)
+  if not dt_path then return spath end
+
+  local dt_parts = utils.split_path(dt_path)
+  local s_parts  = utils.split_path(spath)
+
+  -- decode_tree path not deeper than the AST section — no new information.
+  if #dt_parts <= #s_parts then return spath end
+
+  -- dt_path is deeper; resolve upward to the nearest object/container.
+  local parts = dt_parts
+  while #parts > #s_parts do
+    local path = utils.join_path_parts(parts)
+    local s    = schema_nav.schema_at(context.schema, context.data, path)
+    if s and (s.properties ~= nil or s.additionalProperties ~= nil
+          or s.type == "object"
+          or (type(s.type) == "table" and vim.tbl_contains(s.type, "object"))) then
+      return path
+    end
+    table.remove(parts)
+  end
+
+  return spath
 end
 
 --------------------------------------------------------------------------------
@@ -161,16 +213,6 @@ local function value_items(flat, prefix)
       table.insert(items, { label = "null", kind = CK.Value })
     end
   end
-  if vim.tbl_contains(types, "string") then
-    if s_util.matches_filter(match_pfx, '""') then
-      table.insert(items, {
-        label = '""',
-        kind = CK.Value,
-        insertTextFormat = vim.lsp.protocol.InsertTextFormat.Snippet,
-        insertText = '"$1"',
-      })
-    end
-  end
   return items
 end
 
@@ -182,6 +224,7 @@ end
 ---@param params lsp.CompletionParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
 function M.handler(context, params, callback)
+  callback = vim.schedule_wrap(callback) -- this is important for neovim to accept changes
   local empty = { isIncomplete = false, items = {} }
   if not context.schema then
     callback(nil, empty); return
@@ -219,8 +262,7 @@ function M.handler(context, params, callback)
     return
   end
 
-  local sec_id, sec_node = section_at_row(context.ast, row)
-  local spath = section_path(context.ast, sec_id, sec_node)
+  local container = resolve_container(context, row, col)
 
   -- ── Value context: `=` is present on the line before the cursor ──────────
   if before:match("=") then
@@ -228,7 +270,7 @@ function M.handler(context, params, callback)
     raw_key       = raw_key:gsub("[\"']", ""):match("^%s*(.-)%s*$") or ""
 
     -- Support dotted keys (e.g. `foo.bar = ...`)
-    local kpath   = spath
+    local kpath   = container
     for _, seg in ipairs(vim.split(raw_key, ".", { plain = true })) do
       if seg ~= "" then kpath = utils.join_path(kpath, seg) end
     end
@@ -244,8 +286,8 @@ function M.handler(context, params, callback)
 
   -- ── Key context ───────────────────────────────────────────────────────────
   local prefix   = before:match("^%s*(.-)%s*$") or ""
-  local flat     = schema_nav.schema_at(context.schema, context.data, spath)
-  local existing = defined_keys(context.ast, sec_id)
+  local flat     = schema_nav.schema_at(context.schema, context.data, container)
+  local existing = defined_keys_at(context, container)
   local items    = key_items(flat, existing, prefix)
   callback(nil, { isIncomplete = false, items = items })
 end

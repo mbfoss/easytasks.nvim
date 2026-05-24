@@ -2,7 +2,7 @@
 local M          = {}
 
 local s_util     = require("easytasks.toml.schema_util")
-local schema_nav = require("easytasks.lsp.schema_nav")
+local schema_nav = require("easytasks.toml.schema_nav")
 
 --------------------------------------------------------------------------------
 -- Markdown Formatting
@@ -55,7 +55,7 @@ function M.handler(context, params, callback)
   local row = params.position.line
   local col = params.position.character
 
-  local _, schema_node = schema_nav.resolve_at(context, row, col)
+  local _, schema_node = schema_nav.resolve_at(context.data, context.decode_tree, row, col, context.schema)
   local contents = hover_text(schema_node)
   if not contents then
     callback(nil, nil)
