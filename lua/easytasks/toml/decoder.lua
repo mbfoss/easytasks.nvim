@@ -113,6 +113,17 @@ local function evaluate(ast, with_type_map)
         end
     end
 
+    local function full_section_range(ast_id, header_node)
+        local r = header_node.range or { 0, 0, 0, 0 }
+        local er, ec = r[3], r[4]
+        for _, child in ast:iter_children(ast_id) do
+            if child.range and (child.range[3] > er or (child.range[3] == er and child.range[4] > ec)) then
+                er, ec = child.range[3], child.range[4]
+            end
+        end
+        return { r[1], r[2], er, ec }
+    end
+
     local function process_kvp(node)
         if not current_id then return end
         if not node.key or not node.value then return end
@@ -159,14 +170,16 @@ local function evaluate(ast, with_type_map)
             current_id    = dt:root_id()
             local invalid = false
 
-            local nkeys   = #node.keys
+            local nkeys        = #node.keys
+            local section_range = full_section_range(id, node)
             for i, key_token in ipairs(node.keys) do
                 if not current_id then
                     invalid = true; break
                 end
-                local key     = key_token.value
-                local next_id = dt:get_child_id(current_id, key)
-                local kind    = next_id and kind_by_id[next_id]
+                local key      = key_token.value
+                local next_id  = dt:get_child_id(current_id, key)
+                local kind     = next_id and kind_by_id[next_id]
+                local key_range = (i == nkeys) and section_range or (key_token.range or node.range)
 
                 if kind == "ArrayOfTables" then
                     if i == nkeys then
@@ -205,10 +218,10 @@ local function evaluate(ast, with_type_map)
                     end
                     if not next_id then
                         current_table[key] = vim.empty_dict()
-                        next_id = dt:add_child(current_id, key, key_token.range or node.range)
+                        next_id = dt:add_child(current_id, key, key_range)
                         kind_by_id[next_id] = "Table"
                     else
-                        dt:add_range_by_id(next_id, key_token.range or node.range)
+                        dt:add_range_by_id(next_id, key_range)
                     end
                     set_type(next_id, "table")
                     current_table = current_table[key]
@@ -247,6 +260,7 @@ local function evaluate(ast, with_type_map)
             current_id     = dt:root_id()
             local invalid  = false
             local num_keys = #node.keys
+            local section_range = full_section_range(id, node)
 
             for i, key_token in ipairs(node.keys) do
                 if not current_id then
@@ -269,10 +283,10 @@ local function evaluate(ast, with_type_map)
 
                     if not next_id then
                         current_table[key] = {}
-                        next_id = dt:add_child(current_id, key, key_token.range or node.range)
+                        next_id = dt:add_child(current_id, key, section_range)
                         kind_by_id[next_id] = "ArrayOfTables"
                     else
-                        dt:add_range_by_id(next_id, key_token.range or node.range)
+                        dt:add_range_by_id(next_id, section_range)
                     end
                     set_type(next_id, "array")
 
@@ -280,7 +294,7 @@ local function evaluate(ast, with_type_map)
                     local next_tbl = vim.empty_dict()
                     table.insert(tbl_arr, next_tbl)
 
-                    local arr_elem_id = dt:add_child(next_id, tostring(#tbl_arr), key_token.range or node.range)
+                    local arr_elem_id = dt:add_child(next_id, tostring(#tbl_arr), section_range)
                     kind_by_id[arr_elem_id] = "Table"
                     set_type(arr_elem_id, "table")
 
