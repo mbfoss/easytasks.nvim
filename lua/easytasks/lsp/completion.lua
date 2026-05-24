@@ -8,75 +8,105 @@ local Ast        = require("easytasks.toml.Ast")
 local NodeKind   = Ast.NodeKind
 local CK         = vim.lsp.protocol.CompletionItemKind
 
--- Return the JSON Pointer for the enclosing object at (row, col).
--- Uses the decode_tree to locate the deepest node, then walks up if needed
--- until we find a schema node that has `properties` (i.e. is an object).
+-- Binary-search the AST root list for the innermost section node whose range
+-- contains (row, col).  Root nodes are in document order, so a rightmost-start
+-- search followed by a containment check is sufficient.
+-- Returns nil when the cursor is at the root level (before any section).
 ---@param context easytasks.LspBufferContext
----@param row     integer
----@param col     integer
----@return string
-local function resolve_container(context, row, col)
-  if not context.decode_tree then return "" end
-  local path = context.decode_tree:pos_to_path(row, col)
-  if not path then return "" end
+---@param row integer
+---@param col integer
+---@return easytasks.toml.TableSectionNode|easytasks.toml.ArrayOfTablesSectionNode|nil
+local function section_at(context, row, col)
+  local roots         = context.ast:get_roots()
+  local lo, hi, found = 1, #roots, 0
 
-  local s = schema_nav.schema_at(context.schema, context.data, path)
-  if s and s.properties then return path end
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    local r   = roots[mid].data and roots[mid].data.range
+    if r and (r[1] < row or (r[1] == row and r[2] <= col)) then
+      found = mid; lo = mid + 1
+    else
+      hi = mid - 1
+    end
+  end
 
-  -- Cursor is on/near a leaf; use the parent object instead.
-  local parts = utils.split_path(path)
-  if #parts == 0 then return "" end
-  table.remove(parts)
-  if #parts == 0 then return "" end
-  return utils.join_path_parts(parts)
+  for i = found, 1, -1 do
+    local node = roots[i].data
+    if node and node.range then
+      local r         = node.range
+      local contained = (r[1] < row or (r[1] == row and r[2] <= col))
+          and (r[3] > row or (r[3] == row and r[4] >= col))
+      if contained
+          and (node.kind == NodeKind.TableSection or node.kind == NodeKind.ArrayOfTablesSection) then
+        ---@cast node easytasks.toml.TableSectionNode|easytasks.toml.ArrayOfTablesSectionNode
+        return node
+      end
+    end
+  end
+
+  return nil
 end
 
--- Completion items for object keys in `flat`, filtered by `prefix`.
----@param flat   table
----@param prefix string
+-- Build the JSON Pointer path for a section node from its key list.
+---@param sec easytasks.toml.TableSectionNode|easytasks.toml.ArrayOfTablesSectionNode
+---@return string
+local function section_path(sec)
+  local parts = {}
+  for _, kref in ipairs(sec.keys) do
+    parts[#parts + 1] = kref.value
+  end
+  return #parts > 0 and utils.join_path_parts(parts) or ""
+end
+
+-- Resolve the flattened object schema that owns keys at (row, col).
+---@param context easytasks.LspBufferContext
+---@param row integer
+---@param col integer
+---@return table?
+local function container_schema(context, row, col)
+  local sec = section_at(context, row, col)
+
+  if not sec then return nil end
+
+  local s = schema_nav.schema_at(context.schema, context.data, section_path(sec))
+  if sec.kind == NodeKind.ArrayOfTablesSection then
+    return s and s.items and schema_nav.flatten(s.items, nil)
+  end
+  return s
+end
+
+---@param flat table
 ---@return lsp.CompletionItem[]
-local function key_items(flat, prefix)
+local function key_items(flat)
   local items = {}
   for _, entry in ipairs(s_util.get_ordered_properties(flat)) do
-    local key, prop = entry.key, entry.schema
-    if s_util.matches_filter(prefix, key) then
-      items[#items + 1] = {
-        label         = key,
-        kind          = CK.Field,
-        detail        = s_util.get_type_label(prop),
-        documentation = s_util.get_description(prop),
-        insertText    = key,
-      }
-    end
+    items[#items + 1] = {
+      label         = entry.key,
+      kind          = CK.Field,
+      detail        = s_util.get_type_label(entry.schema),
+      documentation = s_util.get_description(entry.schema),
+      insertText    = entry.key,
+    }
   end
   return items
 end
 
--- Completion items for a value assignment: enums and booleans only.
 ---@param prop_schema table?
----@param prefix      string  text typed after `=`
 ---@return lsp.CompletionItem[]
-local function value_items(prop_schema, prefix)
+local function value_items(prop_schema)
   if not prop_schema then return {} end
   local flat  = schema_nav.flatten(prop_schema, nil)
   local items = {}
-
   if flat.enum then
     for _, v in ipairs(flat.enum) do
-      local text   = type(v) == "string" and v or tostring(v)
-      local insert = type(v) == "string" and ('"' .. v .. '"') or text
-      if s_util.matches_filter(prefix, text) then
-        items[#items + 1] = { label = text, kind = CK.EnumMember, insertText = insert }
-      end
+      local text        = type(v) == "string" and v or tostring(v)
+      local insert      = type(v) == "string" and ('"' .. v .. '"') or text
+      items[#items + 1] = { label = text, kind = CK.EnumMember, insertText = insert }
     end
   elseif flat.type == "boolean" then
-    for _, v in ipairs({ "true", "false" }) do
-      if s_util.matches_filter(prefix, v) then
-        items[#items + 1] = { label = v, kind = CK.Value, insertText = v }
-      end
-    end
+    items[#items + 1] = { label = "true", kind = CK.Value, insertText = "true" }
+    items[#items + 1] = { label = "false", kind = CK.Value, insertText = "false" }
   end
-
   return items
 end
 
@@ -90,31 +120,51 @@ function M.handler(context, params, callback)
     callback(nil, empty); return
   end
 
-  local row       = params.position.line
-  local col       = params.position.character
-  -- ── Key context (section / root level) ───────────────────────────────────
-  local container = resolve_container(context, row, col)
-  local flat      = schema_nav.schema_at(context.schema, context.data, container)
-  if not flat then callback(nil, empty); return end
+  local row = params.position.line
+  local col = params.position.character
 
-  -- Inspect the line up to the cursor to choose key vs value completion.
-  local line   = vim.api.nvim_buf_get_lines(context.bufnr, row, row + 1, false)[1] or ""
-  local prefix = line:sub(1, col)
-  local eq_pos = prefix:find("=", 1, true)
+  local hit = context.ast:node_at(row, col)
 
-  local items
-  if eq_pos then
-    -- Value context: suggest enum/bool values for the key being assigned.
-    local key        = vim.trim(prefix:sub(1, eq_pos - 1))
-    local val_prefix = vim.trim(prefix:sub(eq_pos + 1))
-    local prop       = flat.properties and flat.properties[key]
-    items = value_items(prop, val_prefix)
-  else
-    -- Key context: suggest property names for the current container object.
-    items = key_items(flat, vim.trim(prefix))
+  -- ── No node under cursor ──────────────────────────────────────────────────
+  if not hit then
+    local flat = container_schema(context, row, col)
+    if not flat then
+      callback(nil, empty); return
+    end
+    callback(nil, { isIncomplete = false, items = key_items(flat) }); return
   end
 
-  callback(nil, { isIncomplete = false, items = items })
+  local node = hit.node
+  local kind = node.kind
+
+  -- ── Section header line ───────────────────────────────────────────────────
+  if kind == NodeKind.TableSection or kind == NodeKind.ArrayOfTablesSection
+      or kind == NodeKind.PartialTableSection or kind == NodeKind.PartialArrayOfTablesSection then
+    callback(nil, empty); return
+  end
+
+  -- ── Comment ───────────────────────────────────────────────────────────────
+  if kind == NodeKind.Comment then
+    callback(nil, empty); return
+  end
+
+  -- ── KeyValuePair ──────────────────────────────────────────────────────────
+  if kind == NodeKind.KeyValuePair then
+    local flat = container_schema(context, row, col)
+    if not flat then
+      callback(nil, empty); return
+    end
+
+    -- Value context: cursor is past the end column of the key token.
+    if node.key and node.key.range and col > node.key.range[4] then
+      local prop = flat.properties and flat.properties[node.key.value]
+      callback(nil, { isIncomplete = false, items = value_items(prop) }); return
+    end
+
+    callback(nil, { isIncomplete = false, items = key_items(flat) }); return
+  end
+
+  callback(nil, empty)
 end
 
 return M
