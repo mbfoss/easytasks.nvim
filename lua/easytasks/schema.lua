@@ -10,6 +10,7 @@ return {
             additionalProperties = false,
             items = {
                 type = "object",
+                required = { "name", "type" },
                 ["x-order"] = { "name", "type" },
                 ["x-valueSelector"] = "loop.task.jsonhooks.select_taskobj",
                 description = "Single task definition entry",
@@ -28,6 +29,7 @@ return {
                     {
                         ["if"] = {
                             type = "object",
+                            required = { "type" },
                             properties = { type = { const = "process" } }
                         },
                         ["then"] = {
@@ -102,6 +104,7 @@ return {
                     {
                         ["if"] = {
                             type = "object",
+                            required = { "type" },
                             properties = { type = { const = "composite" } }
                         },
                         ["then"] = {
@@ -149,6 +152,7 @@ return {
                     {
                         ["if"] = {
                             type = "object",
+                            required = { "type" },
                             properties = { type = { const = "debug" } }
                         },
                         ["then"] = {
@@ -230,6 +234,7 @@ return {
                     {
                         ["if"] = {
                             type = "object",
+                            required = { "type" },
                             properties = { type = { const = "build" } }
                         },
                         ["then"] = {

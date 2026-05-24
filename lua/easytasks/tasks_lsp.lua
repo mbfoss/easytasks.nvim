@@ -1,24 +1,24 @@
-local parser        = require("easytasks.toml.parser")
-local decoder       = require("easytasks.toml.decoder")
-local completion    = require("easytasks.lsp.completion")
-local hover         = require("easytasks.lsp.hover")
-local code_action   = require("easytasks.lsp.code_action")
-local BufferContext  = require("easytasks.lsp.BufferContext")
-local diagnostics   = require("easytasks.lsp.diagnostics")
-local format        = require("easytasks.lsp.format")
+local parser            = require("easytasks.toml.parser")
+local decoder           = require("easytasks.toml.decoder")
+local completion        = require("easytasks.lsp.completion")
+local hover             = require("easytasks.lsp.hover")
+local code_action       = require("easytasks.lsp.code_action")
+local BufferContext     = require("easytasks.lsp.BufferContext")
+local diagnostics       = require("easytasks.lsp.diagnostics")
+local format            = require("easytasks.lsp.format")
 
-local M = {}
+local M                 = {}
 
-M.SERVER_NAME = "easytasks-toml"
-M.SERVER_VERSION = "0.1.0"
+M.SERVER_NAME           = "easytasks-toml"
+M.SERVER_VERSION        = "0.1.0"
 
 ---@type table<vim.lsp.protocol.Method, fun(context: table, params: table, callback: fun(err: lsp.ResponseError?, result: any))>
-local handlers = {}
+local handlers          = {}
 
 ---@type table<integer, {client_id:integer, context:easytasks.LspBufferContext,autocmd_ids:table}>
-local attached_clients = {}
+local attached_clients  = {}
 
-local features = {
+local features          = {
   completion = completion,
   hover = hover,
   code_action = code_action,
@@ -26,7 +26,7 @@ local features = {
   format = format,
 }
 
-local ms = vim.lsp.protocol.Methods
+local ms                = vim.lsp.protocol.Methods
 
 ---@type lsp.InitializeResult
 local initialize_result = {
@@ -87,21 +87,20 @@ end
 ---@param context easytasks.LspBufferContext
 local function update_context(bufnr, context)
   -- Always re-parse and ensure our context tracking state is built cleanly
-  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
-  local parsed = parser.parse(text)
-  context.ast          = parsed.ast
-  context.parse_errors = parsed.errors
-  local decoded        = decoder.decode(context.ast)
-  context.data         = decoded.data
+  local text            = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+  local parsed          = parser.parse(text)
+  context.ast           = parsed.ast
+  context.parse_errors  = parsed.errors
+  local decoded         = decoder.decode(context.ast)
+  context.data          = decoded.data
   context.decode_errors = decoded.errors
-  context.decode_tree  = decoded.decode_tree
+  context.decode_tree   = decoded.decode_tree
 end
 
 ---@param bufnr integer
 ---@param context easytasks.LspBufferContext
 ---@param client_id integer?
 local function schedule(bufnr, context, client_id)
-  update_context(bufnr, context)
   if context.debounce_timer then
     vim.fn.timer_stop(context.debounce_timer)
   end
@@ -121,12 +120,13 @@ local function attach(context, client_id, autocmd_ids)
 
   local bufnr = context.bufnr
   local group = vim.api.nvim_create_augroup("easytasks_toml_diag_" .. bufnr, { clear = true })
-  local events = { "BufEnter", "TextChanged", "InsertLeave", "BufWritePost" }
+  local events = { "BufEnter", "TextChanged", "TextChangedI", "InsertLeave", "BufWritePost" }
   for _, event in ipairs(events) do
     autocmd_ids[bufnr][#autocmd_ids[bufnr] + 1] = vim.api.nvim_create_autocmd(event, {
       group = group,
       buffer = bufnr,
       callback = function()
+        update_context(bufnr, context)
         schedule(bufnr, context, client_id)
       end,
     })

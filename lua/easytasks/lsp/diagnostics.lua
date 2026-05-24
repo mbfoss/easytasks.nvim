@@ -6,7 +6,7 @@ local M = {}
 local SERVER_NAME = "easytasks-toml"
 
 M.namespace = vim.api.nvim_create_namespace("easytasks-toml")
-M.debounce_ms = 250
+M.debounce_ms = 1000
 
 ---@type table<integer, integer[]>
 local autocmd_ids = {}
