@@ -28,7 +28,7 @@ local function evaluate(ast, with_type_map)
     local explicit_table_ids = {}
 
     local root_id            = dt:root_id()
-    dt:set_range_by_id(root_id, { 0, 0, 0, 0 })
+    dt:add_range_by_id(root_id, { 0, 0, 0, 0 })
     kind_by_id[root_id] = "Table"
     set_type(root_id, "table")
 
@@ -78,7 +78,7 @@ local function evaluate(ast, with_type_map)
                     }
                     local found_id   = dt:get_child_id(id, key)
                     local pair_id    = found_id or dt:add_child(id, key, pair_range)
-                    if found_id then dt:set_range_by_id(pair_id, pair_range) end
+                    if found_id then dt:add_range_by_id(pair_id, pair_range) end
                     result[key] = eval_value(pair.value, pair_id)
                 end
             end
@@ -133,7 +133,7 @@ local function evaluate(ast, with_type_map)
                 else
                     local fresh_val = eval_value(node.value, existing_id)
                     merge_values(current_table[key], fresh_val, existing_id)
-                    dt:set_range_by_id(existing_id, node.range)
+                    dt:add_range_by_id(existing_id, node.range)
                 end
             else
                 local msg = "Duplicate key: " .. key
@@ -186,7 +186,7 @@ local function evaluate(ast, with_type_map)
                     end
                     current_table = arr[idx]
                     current_id    = arr_elem_id
-                    dt:set_range_by_id(next_id, key_token.range or node.range)
+                    dt:add_range_by_id(next_id, key_token.range or node.range)
                 elseif kind and kind ~= "Table" then
                     add_err({
                         message = "Cannot redefine non-table target: " .. key,
@@ -208,7 +208,7 @@ local function evaluate(ast, with_type_map)
                         next_id = dt:add_child(current_id, key, key_token.range or node.range)
                         kind_by_id[next_id] = "Table"
                     else
-                        dt:set_range_by_id(next_id, key_token.range or node.range)
+                        dt:add_range_by_id(next_id, key_token.range or node.range)
                     end
                     set_type(next_id, "table")
                     current_table = current_table[key]
@@ -272,7 +272,7 @@ local function evaluate(ast, with_type_map)
                         next_id = dt:add_child(current_id, key, key_token.range or node.range)
                         kind_by_id[next_id] = "ArrayOfTables"
                     else
-                        dt:set_range_by_id(next_id, key_token.range or node.range)
+                        dt:add_range_by_id(next_id, key_token.range or node.range)
                     end
                     set_type(next_id, "array")
 
@@ -322,7 +322,7 @@ local function evaluate(ast, with_type_map)
                         current_table = current_table[key]
                         current_id    = next_id
                     end
-                    if next_id then dt:set_range_by_id(next_id, key_token.range or node.range) end
+                    if next_id then dt:add_range_by_id(next_id, key_token.range or node.range) end
                 end
             end
 

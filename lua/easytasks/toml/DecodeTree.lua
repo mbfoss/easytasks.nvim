@@ -5,7 +5,7 @@ local vu           = require("easytasks.toml.validator_util")
 
 ---@class easytasks.toml.DecodeNodeData
 ---@field key    string        path segment (unescaped)
----@field range  integer[]?    {r1,c1,r2,c2} source range, nil if not in document
+---@field ranges integer[][]   list of {r1,c1,r2,c2} source ranges (one per segment/occurrence)
 ---@field schema table?        resolved schema fragment for this path
 
 ---@class easytasks.toml.PosIndexEntry
@@ -32,7 +32,7 @@ function DecodeTree.new()
     self._id_seq  = 0
     self._id_seq  = self._id_seq + 1
     self._root_id = self._id_seq
-    self._tree:add_item(nil, self._id_seq, { key = "", range = nil, schema = nil })
+    self._tree:add_item(nil, self._id_seq, { key = "", ranges = {}, schema = nil })
     self._pos_index   = {}
     self._index_dirty = false
     return self
@@ -69,24 +69,35 @@ end
 ---@return integer
 function DecodeTree:add_child(parent_id, key, range)
     local id = self:_next_id()
-    self._tree:add_item(parent_id, id, { key = key, range = range, schema = nil })
+    self._tree:add_item(parent_id, id, { key = key, ranges = range and { range } or {}, schema = nil })
     self._index_dirty = true
     return id
 end
 
--- Update the range of an existing node.
+-- Append a range to an existing node's range list.
 ---@param id integer
 ---@param range integer[]?
-function DecodeTree:set_range_by_id(id, range)
-    self._tree:get_data(id).range = range
-    self._index_dirty = true
+function DecodeTree:add_range_by_id(id, range)
+    if range then
+        local data = self._tree:get_data(id)
+        data.ranges[#data.ranges + 1] = range
+        self._index_dirty = true
+    end
 end
 
 ---@param path string
+---@return integer[][]
+function DecodeTree:ranges_of(path)
+    local id = self:_find_id(path)
+    return id and self._tree:get_data(id).ranges or {}
+end
+
+-- Convenience: returns the first range for a path, or nil.
+---@param path string
 ---@return integer[]?
 function DecodeTree:range_of(path)
-    local id = self:_find_id(path)
-    return id and self._tree:get_data(id).range or nil
+    local ranges = self:ranges_of(path)
+    return ranges[1]
 end
 
 ---@param handler fun(id:any, data:any, depth:number):boolean?
@@ -107,16 +118,17 @@ function DecodeTree:_rebuild_index()
 
     local entries = {}
     self._tree:walk_tree(function(id, data, depth)
-        if id ~= self._root_id and data.range then
-            local r = data.range
-            entries[#entries + 1] = {
-                r1 = r[1],
-                c1 = r[2],
-                r2 = r[3],
-                c2 = r[4],
-                id = id,
-                depth = depth,
-            }
+        if id ~= self._root_id and data.ranges then
+            for _, r in ipairs(data.ranges) do
+                entries[#entries + 1] = {
+                    r1 = r[1],
+                    c1 = r[2],
+                    r2 = r[3],
+                    c2 = r[4],
+                    id = id,
+                    depth = depth,
+                }
+            end
         end
         return true
     end)

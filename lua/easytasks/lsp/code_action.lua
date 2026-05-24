@@ -114,11 +114,14 @@ local function dump_decode_tree_to_string(decode_tree)
       local indent = string.rep("  ", depth or 0)
       local info = string.format("# %s* [id:%s] key: %q", indent, tostring(id), tostring(data.key))
 
-      if data.range then
-        info = info ..
-            string.format(" range: (%d,%d)->(%d,%d)", data.range[1], data.range[2], data.range[3], data.range[4])
+      if data.ranges and #data.ranges > 0 then
+        local parts = {}
+        for _, r in ipairs(data.ranges) do
+          parts[#parts + 1] = string.format("(%d,%d)->(%d,%d)", r[1], r[2], r[3], r[4])
+        end
+        info = info .. " ranges: [" .. table.concat(parts, ", ") .. "]"
       else
-        info = info .. " range: nil"
+        info = info .. " ranges: []"
       end
 
       if data.schema then
@@ -177,7 +180,7 @@ function M.handler(context, params, callback)
     return
   end
 
-  -- Action 1: Dump structural Tree AST text directly into the file buffer as comments
+  -- Action: Dump structural Tree AST text directly into the file buffer as comments
   local ast_comments = dump_ast_to_string(context.ast)
   table.insert(actions, {
     title = "🔍 Dump Easytasks TOML AST Graph",
@@ -197,7 +200,28 @@ function M.handler(context, params, callback)
     }
   })
 
-  -- Action 2: Dump runtime structural evaluation dictionary maps directly into the file buffer as comments
+
+  -- Action: Dump DecodeTree node layout into the file buffer as comments
+  local decode_tree_comments = dump_decode_tree_to_string(context.decode_tree)
+  table.insert(actions, {
+    title = "🌲 Dump Easytasks DecodeTree",
+    kind = vim.lsp.protocol.CodeActionKind.RefactorExtract,
+    edit = {
+      changes = {
+        [params.textDocument.uri] = {
+          {
+            range = {
+              start = { line = row + 1, character = 0 },
+              ["end"] = { line = row + 1, character = 0 },
+            },
+            newText = decode_tree_comments,
+          }
+        }
+      }
+    }
+  })
+
+  -- Action: Dump runtime structural evaluation dictionary maps directly into the file buffer as comments
   local decoded_data = context.parse_results and context.parse_results.data
   local decoder_comments = dump_decoder_to_string(decoded_data)
   table.insert(actions, {
@@ -218,27 +242,7 @@ function M.handler(context, params, callback)
     }
   })
 
-  -- Action 3: Dump DecodeTree node layout into the file buffer as comments
-  local decode_tree_comments = dump_decode_tree_to_string(context.decode_tree)
-  table.insert(actions, {
-    title = "🌲 Dump Easytasks DecodeTree",
-    kind = vim.lsp.protocol.CodeActionKind.RefactorExtract,
-    edit = {
-      changes = {
-        [params.textDocument.uri] = {
-          {
-            range = {
-              start = { line = row + 1, character = 0 },
-              ["end"] = { line = row + 1, character = 0 },
-            },
-            newText = decode_tree_comments,
-          }
-        }
-      }
-    }
-  })
-
-  -- Action 5: Dump tracking diagnostics array state errors directly into the file buffer as comments
+  -- Action: Dump tracking diagnostics array state errors directly into the file buffer as comments
   local error_comments = dump_errors_to_string(context.parse_results)
   table.insert(actions, {
     title = "❌ Dump Active Diagnostics Pipeline Errors",
