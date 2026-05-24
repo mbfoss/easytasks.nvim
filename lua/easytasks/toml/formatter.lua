@@ -2,10 +2,14 @@
 local NodeKind = require("easytasks.toml.parser_util").NodeKind
 local M = {}
 
+---@param key string
+---@return boolean
 local function needs_quotes(key)
   return not key:match("^[A-Za-z0-9_%-]+$")
 end
 
+---@param key string
+---@return string
 local function quote_key(key)
   if needs_quotes(key) then
     return '"' .. key:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
@@ -13,6 +17,8 @@ local function quote_key(key)
   return key
 end
 
+---@param keys easytasks.toml.KeyRef[]
+---@return string
 local function format_keys(keys)
   local parts = {}
   for _, k in ipairs(keys) do
@@ -21,6 +27,8 @@ local function format_keys(keys)
   return table.concat(parts, ".")
 end
 
+---@param s string
+---@return string
 local function format_string(s)
   if not s:find("'") and not s:find("[\n\r\t\\]") then
     return "'" .. s .. "'"
@@ -35,8 +43,12 @@ local function format_string(s)
   return '"' .. s .. '"'
 end
 
+---@type fun(node: easytasks.toml.ValueNode?, indent: integer?): string
 local format_value
 
+---@param node easytasks.toml.ArrayNode
+---@param indent integer
+---@return string
 local function format_array(node, indent)
   if #node.items == 0 then return "[]" end
 
@@ -59,6 +71,9 @@ local function format_array(node, indent)
   return table.concat(lines, "\n")
 end
 
+---@param node easytasks.toml.InlineTableNode
+---@param indent integer
+---@return string
 local function format_inline_table(node, indent)
   if #node.pairs == 0 then return "{}" end
 
@@ -73,6 +88,7 @@ local function format_inline_table(node, indent)
   local inner_pad = string.rep("  ", indent + 1)
   local close_pad = string.rep("  ", indent)
   local items = node.ordered_items or node.pairs
+  ---@cast items easytasks.toml.InlineTableItem[]
   local last_pair_idx = 0
   for i, item in ipairs(items) do
     if item.kind ~= NodeKind.Comment then last_pair_idx = i end
@@ -81,6 +97,7 @@ local function format_inline_table(node, indent)
   local prev_value_end_row = nil
   for i, item in ipairs(items) do
     if item.kind == NodeKind.Comment then
+      ---@cast item easytasks.toml.CommentNode
       local comment_row = item.range and item.range[1]
       if comment_row and comment_row == prev_value_end_row then
         lines[#lines] = lines[#lines] .. " " .. item.text
@@ -88,6 +105,7 @@ local function format_inline_table(node, indent)
         table.insert(lines, inner_pad .. item.text)
       end
     else
+      ---@cast item easytasks.toml.KeyValuePairNode
       local v = format_value(item.value, indent + 1)
       local line = inner_pad .. quote_key(item.key.value) .. " = " .. v .. (i < last_pair_idx and "," or "")
       table.insert(lines, line)
@@ -98,6 +116,9 @@ local function format_inline_table(node, indent)
   return table.concat(lines, "\n")
 end
 
+---@param node easytasks.toml.ValueNode?
+---@param indent integer?
+---@return string
 format_value = function(node, indent)
   indent = indent or 0
   if not node then return '""' end
@@ -122,13 +143,18 @@ format_value = function(node, indent)
       return tostring(v)
     end
   elseif node.kind == NodeKind.Array then
+    ---@cast node easytasks.toml.ArrayNode
     return format_array(node, indent)
   elseif node.kind == NodeKind.InlineTable then
+    ---@cast node easytasks.toml.InlineTableNode
     return format_inline_table(node, indent)
   end
   return ""
 end
 
+---@param node easytasks.toml.KeyValuePairNode
+---@param indent integer?
+---@return string
 local function format_kvp(node, indent)
   local line = quote_key(node.key.value) .. " = " .. format_value(node.value, indent or 0)
   if node.trailing_comment then
@@ -138,6 +164,7 @@ local function format_kvp(node, indent)
 end
 
 ---@param ast easytasks.toml.Ast
+---@return string
 function M.format(ast)
   local out = {}
   local roots = ast:get_roots()

@@ -2,7 +2,7 @@ local parser     = require("easytasks.toml.parser")
 local DecodeTree = require("easytasks.toml.DecodeTree")
 local NodeKind   = require("easytasks.toml.parser_util").NodeKind
 
-local M = {}
+local M          = {}
 
 ---@param ast easytasks.toml.Ast
 ---@param with_type_map boolean?
@@ -25,7 +25,7 @@ local function evaluate(ast, with_type_map)
     local dotted_key_ids     = {}
     local explicit_table_ids = {}
 
-    local root_id = dt:root_id()
+    local root_id            = dt:root_id()
     dt:set_range_by_id(root_id, { 0, 0, 0, 0 })
     kind_by_id[root_id] = "Table"
     set_type(root_id, "table")
@@ -56,8 +56,11 @@ local function evaluate(ast, with_type_map)
         elseif node.kind == NodeKind.InlineTable then
             kind_by_id[id] = "Table"
             set_type(id, "table")
-            if node.explicit then inline_table_ids[id] = true
-            else dotted_key_ids[id] = true end
+            if node.explicit then
+                inline_table_ids[id] = true
+            else
+                dotted_key_ids[id] = true
+            end
             local result = vim.empty_dict()
             for _, pair in ipairs(node.pairs) do
                 local key = pair.key.value
@@ -71,8 +74,8 @@ local function evaluate(ast, with_type_map)
                         pair.key.range[1], pair.key.range[2],
                         pair.value.range[3], pair.value.range[4],
                     }
-                    local found_id = dt:get_child_id(id, key)
-                    local pair_id  = found_id or dt:add_child(id, key, pair_range)
+                    local found_id   = dt:get_child_id(id, key)
+                    local pair_id    = found_id or dt:add_child(id, key, pair_range)
                     if found_id then dt:set_range_by_id(pair_id, pair_range) end
                     result[key] = eval_value(pair.value, pair_id)
                 end
@@ -111,16 +114,20 @@ local function evaluate(ast, with_type_map)
     local function process_kvp(node)
         if not current_id then return end
         if not node.key or not node.value then return end
-        local key         = node.key.value
-        local existing_id = dt:get_child_id(current_id, key)
+        local key           = node.key.value
+        local existing_id   = dt:get_child_id(current_id, key)
         local existing_kind = existing_id and kind_by_id[existing_id]
 
-        if existing_kind then
+        if existing_id and existing_kind then
             if existing_kind == "Table" and node.value.kind == NodeKind.InlineTable then
                 if inline_table_ids[existing_id] then
                     add_err({ message = "Cannot extend inline table: " .. key, range = node.key.range or node.range })
                 elseif node.value.explicit then
-                    add_err({ message = "Cannot redefine implicit table as inline table: " .. key, range = node.key.range or node.range })
+                    add_err({
+                        message = "Cannot redefine implicit table as inline table: " .. key,
+                        range = node.key
+                            .range or node.range
+                    })
                 else
                     local fresh_val = eval_value(node.value, existing_id)
                     merge_values(current_table[key], fresh_val, existing_id)
@@ -150,9 +157,11 @@ local function evaluate(ast, with_type_map)
             current_id    = dt:root_id()
             local invalid = false
 
-            local nkeys = #node.keys
+            local nkeys   = #node.keys
             for i, key_token in ipairs(node.keys) do
-                if not current_id then invalid = true; break end
+                if not current_id then
+                    invalid = true; break
+                end
                 local key     = key_token.value
                 local next_id = dt:get_child_id(current_id, key)
                 local kind    = next_id and kind_by_id[next_id]
@@ -170,7 +179,9 @@ local function evaluate(ast, with_type_map)
                     local arr         = current_table[key]
                     local idx         = #arr
                     local arr_elem_id = dt:get_child_id(next_id, tostring(idx))
-                    if not arr_elem_id then invalid = true; break end
+                    if not arr_elem_id then
+                        invalid = true; break
+                    end
                     current_table = arr[idx]
                     current_id    = arr_elem_id
                     dt:set_range_by_id(next_id, key_token.range or node.range)
@@ -208,7 +219,11 @@ local function evaluate(ast, with_type_map)
                     add_err({ message = "Duplicate table header: " .. dt:path_of(current_id), range = node.range })
                     invalid = true
                 elseif dotted_key_ids[current_id] then
-                    add_err({ message = "Cannot redefine table created by dotted key: " .. dt:path_of(current_id), range = node.range })
+                    add_err({
+                        message = "Cannot redefine table created by dotted key: " .. dt:path_of(current_id),
+                        range =
+                            node.range
+                    })
                     invalid = true
                 else
                     explicit_table_ids[current_id] = true
@@ -225,15 +240,16 @@ local function evaluate(ast, with_type_map)
                     process_kvp(data)
                 end
             end
-
         elseif node.kind == NodeKind.ArrayOfTablesSection then
-            current_table = root
-            current_id    = dt:root_id()
-            local invalid = false
+            current_table  = root
+            current_id     = dt:root_id()
+            local invalid  = false
             local num_keys = #node.keys
 
             for i, key_token in ipairs(node.keys) do
-                if not current_id then invalid = true; break end
+                if not current_id then
+                    invalid = true; break
+                end
                 local key     = key_token.value
                 local is_last = (i == num_keys)
                 local next_id = dt:get_child_id(current_id, key)
@@ -274,7 +290,9 @@ local function evaluate(ast, with_type_map)
                         local arr         = current_table[key]
                         local idx         = #arr
                         local arr_elem_id = dt:get_child_id(next_id, tostring(idx))
-                        if not arr_elem_id then invalid = true; break end
+                        if not arr_elem_id then
+                            invalid = true; break
+                        end
                         current_table = arr[idx]
                         current_id    = arr_elem_id
                     elseif kind and kind ~= "Table" then
@@ -316,7 +334,6 @@ local function evaluate(ast, with_type_map)
                     process_kvp(data)
                 end
             end
-
         elseif node.kind == NodeKind.KeyValuePair then
             process_kvp(node)
         end
