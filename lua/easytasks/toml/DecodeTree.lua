@@ -27,11 +27,11 @@ DecodeTree.__index = DecodeTree
 
 ---@return easytasks.toml.DecodeTree
 function DecodeTree.new()
-    local self        = setmetatable({}, DecodeTree)
-    self._tree        = Tree.new()
-    self._id_seq      = 0
-    self._id_seq      = self._id_seq + 1
-    self._root_id     = self._id_seq
+    local self    = setmetatable({}, DecodeTree)
+    self._tree    = Tree.new()
+    self._id_seq  = 0
+    self._id_seq  = self._id_seq + 1
+    self._root_id = self._id_seq
     self._tree:add_item(nil, self._id_seq, { key = "", range = nil, schema = nil })
     self._pos_index   = {}
     self._index_dirty = false
@@ -110,9 +110,12 @@ function DecodeTree:_rebuild_index()
         if id ~= self._root_id and data.range then
             local r = data.range
             entries[#entries + 1] = {
-                r1 = r[1], c1 = r[2],
-                r2 = r[3], c2 = r[4],
-                id = id, depth = depth,
+                r1 = r[1],
+                c1 = r[2],
+                r2 = r[3],
+                c2 = r[4],
+                id = id,
+                depth = depth,
             }
         end
         return true
@@ -166,7 +169,7 @@ function DecodeTree:pos_to_path(row, col)
         local e = self._pos_index[i]
         local r = e
         if (row > r.r1 or (row == r.r1 and col >= r.c1))
-        and (row < r.r2 or (row == r.r2 and col <= r.c2)) then
+            and (row < r.r2 or (row == r.r2 and col <= r.c2)) then
             if e.depth > best_depth then
                 best_depth = e.depth
                 best_id    = e.id
@@ -177,10 +180,8 @@ function DecodeTree:pos_to_path(row, col)
     if best_id then
         return self:path_of(best_id)
     end
-
-    -- No containing range found; return the nearest node going backward.
-    local fallback = self._pos_index[hi]
-    return fallback and self:path_of(fallback.id) or nil
+    
+    return
 end
 
 --------------------------------------------------------------------------------
