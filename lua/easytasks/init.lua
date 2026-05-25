@@ -63,6 +63,32 @@ function M.setup(opts)
         M.config.schema = M.runner.build_schema()
     end
 
+    vim.api.nvim_create_user_command("EasyTasksRun", function(cmd_opts)
+        -- resolve the tasks file: explicit arg > tasks.toml searched upward from cwd
+        local path = cmd_opts.args ~= "" and cmd_opts.args
+            or vim.fn.findfile("tasks.toml", vim.fn.getcwd() .. ";") --[[@as string]]
+
+        if path == "" then
+            vim.notify("[easytasks] tasks.toml not found", vim.log.levels.ERROR)
+            return
+        end
+
+        local names, err = M.runner.list_tasks(path)
+        if not names then
+            vim.notify("[easytasks] " .. (err or "failed to load tasks"), vim.log.levels.ERROR)
+            return
+        end
+
+        vim.ui.select(names, { prompt = "Run task:" }, function(choice)
+            if not choice then return end
+            M.runner.run(choice, path)
+        end)
+    end, {
+        nargs = "?",
+        complete = "file",
+        desc = "Run an easytasks task selected from the task list",
+    })
+
     if M.config.enabled then
         M.enable()
     else

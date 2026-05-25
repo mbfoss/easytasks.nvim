@@ -20,6 +20,13 @@ function M.build_schema()
     return schema_mod.build(types)
 end
 
+--- Return the sorted list of task names from a TOML file, or nil + error string.
+---@param toml_path string
+---@return string[]?, string?
+function M.list_tasks(toml_path)
+    return exec.list(toml_path)
+end
+
 --- Run a named task from a TOML config file.
 --- Non-blocking: execution is driven by coroutines and libuv callbacks.
 ---@param task_name  string

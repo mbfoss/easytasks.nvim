@@ -219,6 +219,17 @@ function M.run(task_name, toml_path, types, opts)
     end)
 end
 
+--- Return the ordered list of task names from a TOML file, or nil + error.
+---@param toml_path string
+---@return string[]?, string?
+function M.list(toml_path)
+    local tasks, err = load_tasks(toml_path)
+    if not tasks then return nil, err end
+    local names = vim.tbl_keys(tasks)
+    table.sort(names)
+    return names
+end
+
 --- Stop a running task by killing its jobs.
 --- Note: dep tasks that were started in parallel are not individually tracked here;
 --- killing jobs of the top-level task is sufficient for process tasks.
