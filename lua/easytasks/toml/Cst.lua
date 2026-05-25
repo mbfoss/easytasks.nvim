@@ -113,10 +113,13 @@ function Cst:close(id, r2, c2)
     if d then d.range[3] = r2; d.range[4] = c2 end
 end
 
-function Cst:data(id)   return self._tree:get_data(id) end
-function Cst:kind(id)   local d = self._tree:get_data(id); return d and d.kind end
-function Cst:range(id)  local d = self._tree:get_data(id); return d and d.range end
+function Cst:data(id)      return self._tree:get_data(id) end
+function Cst:kind(id)      local d = self._tree:get_data(id); return d and d.kind end
+function Cst:range(id)     local d = self._tree:get_data(id); return d and d.range end
 function Cst:parent_id(id) return self._tree:get_parent_id(id) end
+
+function Cst:set_tag(id, v) local d = self._tree:get_data(id); if d then d.tag = v end end
+function Cst:get_tag(id)    local d = self._tree:get_data(id); return d and d.tag end
 
 -- Iterate all children of parent_id.
 function Cst:children(parent_id)

@@ -81,20 +81,4 @@ function M.schema_at(root_schema, root_data, dt, id)
   return M.flatten(s, d)
 end
 
--- Resolve the schema node at a cursor position using the buffer's decode_tree.
--- Returns (node_id, schema) where node_id is the DecodeTree node at (row, col).
----@param data        any
----@param decode_tree easytasks.toml.DecodeTree
----@param row         integer
----@param col         integer
----@param schema      table
----@return integer? node_id
----@return table?   schema
-function M.resolve_at(data, decode_tree, row, col, schema)
-  if not decode_tree or not schema then return nil, nil end
-  local id = decode_tree:pos_to_id(row, col)
-  if not id then return nil, nil end
-  return id, M.schema_at(schema, data, decode_tree, id)
-end
-
 return M

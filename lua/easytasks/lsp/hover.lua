@@ -3,6 +3,9 @@ local M          = {}
 
 local s_util     = require("easytasks.toml.schema_util")
 local schema_nav = require("easytasks.toml.schema_nav")
+local Cst        = require("easytasks.toml.Cst")
+
+local K          = Cst.Kind
 
 --------------------------------------------------------------------------------
 -- Markdown Formatting
@@ -47,15 +50,43 @@ end
 ---@param params lsp.HoverParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.Hover)
 function M.handler(context, params, callback)
-  if not context.schema then
+  if not context.schema or not context.cst then
     callback(nil, nil)
     return
   end
 
-  local row = params.position.line
-  local col = params.position.character
+  local row    = params.position.line
+  local col    = params.position.character
+  local cst    = context.cst
+  local dt     = context.decode_tree
+  local schema = context.schema
+  local data   = context.data
 
-  local _, schema_node = schema_nav.resolve_at(context.data, context.decode_tree, row, col, context.schema)
+  if not schema then
+    callback(nil, nil) --[[  ]]
+    return
+  end
+
+  local tok_id = cst:token_at(row, col)
+
+  -- Walk up to find the nearest tagged node (KVP, section, or inline table).
+  local dt_id
+  local cur = tok_id
+  while cur do
+    local tag = cst:get_tag(cur)
+    if tag then
+      dt_id = tag; break
+    end
+    local k = cst:kind(cur)
+    if k == K.Document then break end
+    cur = cst:parent_id(cur)
+  end
+
+  local schema_node
+  if dt_id and dt then
+    schema_node = schema_nav.schema_at(schema, data, dt, dt_id)
+  end
+
   local contents = hover_text(schema_node)
   if not contents then
     callback(nil, nil)

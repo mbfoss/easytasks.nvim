@@ -154,20 +154,21 @@ function M.handler(context, params, callback)
     if kvp_id then
         if cursor_after_equals(cst, kvp_id, row, col) then
             -- value side
-            local dt_id = dt:pos_to_id(row, col)
+            local dt_id = cst:get_tag(kvp_id)
             local sch
             if dt_id then sch = schema_nav.schema_at(schema, data, dt, dt_id) end
             callback(nil, { isIncomplete = false, items = value_items(sch) })
         else
             -- key side — offer sibling keys from enclosing scope
-            local dt_id     = dt:pos_to_id(row, col)
+            local dt_id     = cst:get_tag(kvp_id)
             local parent_id = dt_id and dt:get_parent_id(dt_id)
-            local sch
-            if parent_id then
-                sch = schema_nav.schema_at(schema, data, dt, parent_id)
-            else
-                sch = schema_nav.flatten(schema, data)
+            if not parent_id then
+                -- incomplete/errored KVP has no tag: fall back to enclosing scope
+                local enc_id = ancestor_of_kind(cst, kvp_id, K.TableSection, K.AotSection, K.InlineTable)
+                parent_id = enc_id and cst:get_tag(enc_id) or dt:root_id()
             end
+            local sch = schema_nav.schema_at(schema, data, dt, parent_id)
+                     or schema_nav.flatten(schema, data)
             callback(nil, { isIncomplete = false, items = key_items(sch) })
         end
         return
@@ -177,7 +178,7 @@ function M.handler(context, params, callback)
 
     local itbl_id = ancestor_of_kind(cst, tok_id, K.InlineTable)
     if itbl_id then
-        local dt_id = dt:pos_to_id(row, col)
+        local dt_id = cst:get_tag(itbl_id)
         local sch
         if dt_id then
             sch = schema_nav.schema_at(schema, data, dt, dt_id)
@@ -192,7 +193,7 @@ function M.handler(context, params, callback)
 
     local sec_id = ancestor_of_kind(cst, tok_id, K.TableSection, K.AotSection)
     if sec_id then
-        local dt_id = dt:pos_to_id(row, col)
+        local dt_id = cst:get_tag(sec_id)
         local sch
         if dt_id then
             sch = schema_nav.schema_at(schema, data, dt, dt_id)
@@ -206,13 +207,8 @@ function M.handler(context, params, callback)
     -- ── Document root (before any section) ───────────────────────────────────
 
     if tok_k == K.Document or ancestor_of_kind(cst, tok_id, K.Document) then
-        local dt_id = dt:pos_to_id(row, col)
-        local sch
-        if dt_id then
-            sch = schema_nav.schema_at(schema, data, dt, dt_id)
-        else
-            sch = schema_nav.flatten(schema, data)
-        end
+        local sch = schema_nav.schema_at(schema, data, dt, dt:root_id())
+                 or schema_nav.flatten(schema, data)
         callback(nil, { isIncomplete = false, items = key_items(sch) })
         return
     end

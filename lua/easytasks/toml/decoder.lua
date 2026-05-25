@@ -149,6 +149,7 @@ local function evaluate(cst, with_type_map)
             local child_id = dt:add_child(leaf_id, key, kvp_range)
             dt:set_key_range(child_id, key_range)
             if val_data then dt:set_value_range(child_id, val_data.range) end
+            cst:set_tag(kvp_id, child_id)
             leaf_table[key] = eval_value(val_id, val_data, child_id)
         end
     end
@@ -167,6 +168,7 @@ local function evaluate(cst, with_type_map)
         kind_by_id[dt_id] = "Table"
         set_type(dt_id, "table")
         inline_table_ids[dt_id] = true
+        cst:set_tag(node_id, dt_id)
         local result = vim.empty_dict()
 
         local function process_inline_kvp(kvp_id, scope_tbl, scope_id)
@@ -193,6 +195,7 @@ local function evaluate(cst, with_type_map)
                 local sub_id = dt:add_child(leaf_id, key, kvpr)
                 dt:set_key_range(sub_id, last.range)
                 if vd then dt:set_value_range(sub_id, vd.range) end
+                cst:set_tag(kvp_id, sub_id)
                 leaf_tbl[key] = eval_value(vi, vd, sub_id)
             end
         end
@@ -318,6 +321,7 @@ local function evaluate(cst, with_type_map)
             end
 
             if invalid then current_table = dead_end_table; current_id = nil end
+            if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
 
         elseif d.kind == K.AotSection then
@@ -395,6 +399,7 @@ local function evaluate(cst, with_type_map)
             end
 
             if invalid then current_table = dead_end_table; current_id = nil end
+            if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
 
         elseif d.kind == K.KeyValuePair then

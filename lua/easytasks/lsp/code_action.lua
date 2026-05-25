@@ -18,7 +18,7 @@ local function dump_cst_to_string(cst)
         cst:walk(function(id, data, depth)
             local indent = string.rep("  ", depth or 0)
             local kind   = kind_names[data.kind] or ("Kind#" .. tostring(data.kind))
-            local info   = string.format("# %s* [%s] id:%s", indent, kind, id)
+            local info   = string.format("# %s* [%s] id:%s tag:%s", indent, kind, id, data.tag)
             if data.range then
                 info = info .. string.format(" (%d,%d)->(%d,%d)",
                     data.range[1], data.range[2], data.range[3], data.range[4])
