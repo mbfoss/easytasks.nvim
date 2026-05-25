@@ -1,8 +1,8 @@
-local ordered_util = require("easytasks.util.ordered")
+local table_util = require("easytasks.util.table_util")
 
 local M = {}
 
-M.ordered = ordered_util.ordered
+M.ordered = table_util.ordered
 
 --- Wrap a pre-formatted TOML scalar so the encoder emits it verbatim.
 ---@param s string
@@ -108,7 +108,7 @@ end
 ---@param t table
 ---@return any[]
 local function ordered_or_sorted_keys(t)
-    local order = ordered_util.keys_of(t)
+    local order = table_util.ordered_keys_of(t)
     if not order then return sorted_keys(t) end
     local seen, ks = {}, {}
     for _, k in ipairs(order) do
@@ -173,7 +173,7 @@ local function emit_section(path, data, out)
     local simple_keys = {}
     local subtbl_keys = {}
 
-    for _, k in ipairs(sorted_keys(data)) do
+    for _, k in ipairs(ordered_or_sorted_keys(data)) do
         local v = data[k]
         -- A non-array dict table at section scope becomes a [header]. Everything
         -- else (scalars, arrays, raw wrappers) is a simple inline KVP.

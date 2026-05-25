@@ -12,7 +12,7 @@ end
 --- Returns the key order list if t was created with M.ordered(), otherwise nil.
 ---@param t any
 ---@return string[]?
-function M.keys_of(t)
+function M.ordered_keys_of(t)
     if type(t) ~= "table" then return nil end
     local mt = getmetatable(t)
     return mt and type(mt.__toml_order) == "table" and mt.__toml_order or nil

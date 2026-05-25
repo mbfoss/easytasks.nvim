@@ -1,4 +1,4 @@
-local ordered = require("easytasks.util.ordered").ordered
+local ordered = require("easytasks.util.table_util").ordered
 
 ---@type easytasks.TaskTypeDef
 return {

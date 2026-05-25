@@ -119,7 +119,6 @@ end
 
 ---@class easytasks.TemplateActionEntry
 ---@field bufnr      integer
----@field context    easytasks.LspBufferContext   identity token; guards against bufnr recycling
 ---@field row        integer   0-indexed cursor row at action creation time
 ---@field col        integer   0-indexed cursor col at action creation time
 ---@field kind       "array"|"aot"
@@ -272,7 +271,7 @@ function M.execute_command(context, params, callback)
 
     local id    = params.arguments and params.arguments[1]
     local entry = id and _pending[id]
-    if not entry or entry.context ~= context then
+    if not entry then
         callback(nil, nil); return
     end
     _pending[id] = nil -- consume once
@@ -343,7 +342,6 @@ function M.handler(context, params, callback)
                     _pending_seq = _pending_seq + 1
                     _pending[_pending_seq] = {
                         bufnr     = context.bufnr,
-                        context   = context,
                         row       = row,
                         col       = col,
                         kind      = ins_kind,
