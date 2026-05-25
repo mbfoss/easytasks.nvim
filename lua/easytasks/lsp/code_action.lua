@@ -207,7 +207,9 @@ local function tasks_insertion_ctx(cst, dt, row, col)
                     local kvp_after = false
                     local sib = anchor and cst:next_sibling_id(anchor)
                     while sib do
-                        if cst:kind(sib) == K.KeyValuePair then kvp_after = true; break end
+                        if cst:kind(sib) == K.KeyValuePair then
+                            kvp_after = true; break
+                        end
                         sib = cst:next_sibling_id(sib)
                     end
                     if not kvp_after then return "aot", aot_id end
@@ -216,20 +218,24 @@ local function tasks_insertion_ctx(cst, dt, row, col)
         end
     end
 
-        -- Document root: walk up from tok_id; if every node is trivial
-	-- (Whitespace, Newline, Comment) or Document, the cursor is floating
-	-- at root — covers empty files, blank lines, and comment-only lines.
-	local trivial = {
-		[K.Whitespace] = true, [K.Newline]  = true,
-		[K.Comment]    = true, [K.Document] = true,
-	}
-	---@type integer?
-	local cur, at_root = tok_id, true
-	while cur do
-		if not trivial[cst:kind(cur)] then at_root = false; break end
-		cur = cst:parent_id(cur)
-	end
-	if at_root then return "aot", nil end
+    -- Document root: walk up from tok_id; if every node is trivial
+    -- (Whitespace, Newline, Comment) or Document, the cursor is floating
+    -- at root — covers empty files, blank lines, and comment-only lines.
+    local trivial = {
+        [K.Whitespace] = true,
+        [K.Newline] = true,
+        [K.Comment] = true,
+        [K.Document] = true,
+    }
+    ---@type integer?
+    local cur, at_root = tok_id, true
+    while cur do
+        if not trivial[cst:kind(cur)] then
+            at_root = false; break
+        end
+        cur = cst:parent_id(cur)
+    end
+    if at_root then return "aot", nil end
 
     return nil
 end
@@ -248,7 +254,7 @@ local function apply_template(entry, tmpl)
     if entry.kind == "array" then
         local encoded = encoder.encode_inline(tmpl.task, { multiline = true, indent = entry.indent })
         lines = vim.split(encoded, "\n", { plain = true })
-        lines[#lines] = lines[#lines] .. ","
+        lines[#lines] = lines[#lines]
     else
         local block = encoder.encode_aot_entry("tasks", tmpl.task)
         lines = vim.split(block, "\n", { plain = true })

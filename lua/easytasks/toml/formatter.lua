@@ -13,15 +13,6 @@ local function quote_key(key)
     return key
 end
 
-local function format_string(s)
-    if not s:find("'") and not s:find("[\n\r\t\\]") then
-        return "'" .. s .. "'"
-    end
-    s = s:gsub("\\", "\\\\"):gsub('"', '\\"')
-        :gsub("\b", "\\b"):gsub("\t", "\\t"):gsub("\n", "\\n")
-        :gsub("\f", "\\f"):gsub("\r", "\\r")
-    return '"' .. s .. '"'
-end
 
 ---@param cst easytasks.toml.Cst
 ---@return string
@@ -122,7 +113,7 @@ function M.format(cst)
         if not val_data then return '""' end
         local k = val_data.kind
         if k == K.String then
-            return format_string(val_data.value)
+            return val_data.text
         elseif k == K.Bool then
             return tostring(val_data.value)
         elseif k == K.Float then
