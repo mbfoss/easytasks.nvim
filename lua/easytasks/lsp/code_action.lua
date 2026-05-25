@@ -189,7 +189,8 @@ local function tasks_insertion_ctx(cst, dt, row, col)
     end
 
 
-    -- AoT: inside a [[tasks]] section body, not inside any key-value pair.
+    -- AoT: inside a [[tasks]] section body, not inside any key-value pair,
+    -- and no KVP in the section starts after the cursor (cursor is at the tail).
     if not cst:ancestor_of_kind(tok_id, K.KeyValuePair) then
         local aot_id = cst:ancestor_of_kind(tok_id, K.AotSection)
         if aot_id then
@@ -197,11 +198,24 @@ local function tasks_insertion_ctx(cst, dt, row, col)
             if hdr_id then
                 local keys = cst:get_keys(hdr_id)
                 if #keys == 1 and keys[1].value == "tasks" then
-                    return "aot", aot_id
+                    -- Find the direct child of aot_id that contains tok_id,
+                    -- then walk forward via next_sibling_id for any KVP.
+                    ---@type integer?
+                    local anchor = tok_id
+                    while anchor and cst:parent_id(anchor) ~= aot_id do
+                        anchor = cst:parent_id(anchor)
+                    end
+                    local kvp_after = false
+                    local sib = anchor and cst:next_sibling_id(anchor)
+                    while sib do
+                        if cst:kind(sib) == K.KeyValuePair then kvp_after = true; break end
+                        sib = cst:next_sibling_id(sib)
+                    end
+                    if not kvp_after then return "aot", aot_id end
                 end
             end
         end
-	end
+    end
 
         -- Document root: walk up from tok_id; if every node is trivial
 	-- (Whitespace, Newline, Comment) or Document, the cursor is floating
