@@ -204,18 +204,23 @@ function M.run(task_name, toml_path, opts)
     ---@type easytasks.RunEntry
     running[task_name] = { state = "running", bufnr = bufnr, job_ids = {} }
 
+    vim.notify("[easytasks] starting: " .. task_name, vim.log.levels.INFO)
+
     async.go(function()
         return run_task_coro(task_name, tasks)
     end, function(co_ok, result)
         local final_entry = running[task_name]
         if final_entry then
             if not co_ok then
-                -- coroutine itself errored (Lua error, not task failure)
                 final_entry.state = "failed"
-                vim.notify("[easytasks] error in task " .. task_name .. ": " .. tostring(result), vim.log.levels.ERROR)
-            elseif final_entry.state == "running" then
-                -- run_task_coro returned without setting state (shouldn't happen normally)
+                vim.notify("[easytasks] error: " .. task_name .. ": " .. tostring(result), vim.log.levels.ERROR)
+            else
                 final_entry.state = result and "ok" or "failed"
+                if result then
+                    vim.notify("[easytasks] done: " .. task_name, vim.log.levels.INFO)
+                else
+                    vim.notify("[easytasks] failed: " .. task_name, vim.log.levels.WARN)
+                end
             end
         end
     end)
