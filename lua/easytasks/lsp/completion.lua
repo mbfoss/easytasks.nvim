@@ -169,7 +169,26 @@ function M.handler(context, params, callback)
             -- value side
             local dt_id = cst:get_tag(kvp_id)
             local sch
-            if dt_id then sch = schema_nav.schema_at(schema, data, dt, dt_id) end
+            if dt_id then
+                sch = schema_nav.schema_at(schema, data, dt, dt_id)
+            else
+                -- KVP not yet decoded (value absent/incomplete): navigate via parent scope + key name
+                local enc_id      = ancestor_of_kind(cst, kvp_id, K.TableSection, K.AotSection, K.InlineTable)
+                local parent_dt_id = enc_id and cst:get_tag(enc_id) or dt:root_id()
+                local parent_sch  = schema_nav.schema_at(schema, data, dt, parent_dt_id)
+                                 or schema_nav.flatten(schema, data)
+                local keys = cst:get_keys(kvp_id)
+                if parent_sch and #keys > 0 then
+                    sch = parent_sch
+                    for _, kd in ipairs(keys) do
+                        if sch and sch.properties and sch.properties[kd.value] then
+                            sch = schema_nav.flatten(sch.properties[kd.value], nil)
+                        else
+                            sch = nil; break
+                        end
+                    end
+                end
+            end
             callback(nil, { isIncomplete = false, items = value_items(sch) })
         else
             -- key side — offer sibling keys from enclosing scope
