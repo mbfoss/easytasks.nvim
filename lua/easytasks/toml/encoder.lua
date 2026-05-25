@@ -1,4 +1,8 @@
+local ordered_util = require("easytasks.util.ordered")
+
 local M = {}
+
+M.ordered = ordered_util.ordered
 
 --- Wrap a pre-formatted TOML scalar so the encoder emits it verbatim.
 ---@param s string
@@ -15,6 +19,7 @@ local function raw_value(v)
     local mt = getmetatable(v)
     return mt and type(mt.__toml_raw) == "string" and mt.__toml_raw or nil
 end
+
 
 ---@param key string
 ---@return boolean
@@ -98,6 +103,24 @@ local function sorted_keys(t)
     return ks
 end
 
+--- Like sorted_keys but honours M.ordered() metadata: listed keys come first
+--- in order, remaining keys are appended sorted.
+---@param t table
+---@return any[]
+local function ordered_or_sorted_keys(t)
+    local order = ordered_util.keys_of(t)
+    if not order then return sorted_keys(t) end
+    local seen, ks = {}, {}
+    for _, k in ipairs(order) do
+        if t[k] ~= nil then ks[#ks+1] = k; seen[k] = true end
+    end
+    local rest = {}
+    for k in pairs(t) do if not seen[k] then rest[#rest+1] = k end end
+    table.sort(rest, function(a, b) return tostring(a) < tostring(b) end)
+    for _, k in ipairs(rest) do ks[#ks+1] = k end
+    return ks
+end
+
 local encode_value  -- forward decl
 
 ---@param arr table
@@ -117,7 +140,7 @@ end
 ---@return string
 local function encode_inline_table(tbl)
     local parts = {}
-    for _, k in ipairs(sorted_keys(tbl)) do
+    for _, k in ipairs(ordered_or_sorted_keys(tbl)) do
         parts[#parts+1] = quote_key(tostring(k)) .. " = " .. encode_value(tbl[k])
     end
     if #parts == 0 then return "{}" end
@@ -185,7 +208,7 @@ end
 local function encode_inline_table_multiline(tbl, indent)
     local inner = indent .. "  "
     local parts = { indent .. "{" }
-    for _, k in ipairs(sorted_keys(tbl)) do
+    for _, k in ipairs(ordered_or_sorted_keys(tbl)) do
         parts[#parts + 1] = inner .. quote_key(tostring(k)) .. " = " .. encode_value(tbl[k]) .. ","
     end
     parts[#parts + 1] = indent .. "}"

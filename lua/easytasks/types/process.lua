@@ -1,3 +1,5 @@
+local ordered = require("easytasks.util.ordered").ordered
+
 ---@type easytasks.TaskTypeDef
 return {
     run = function(task, ctx)
@@ -42,7 +44,15 @@ return {
         },
     },
     templates = {
-        { label = "Shell command", task = { name = "my-cmd", type = "process", cmd = "echo hello" } },
-        { label = "Watch mode",    task = { name = "watch", type = "process", cmd = "npm run watch" } },
+        {
+            label = "Shell command",
+            task  = ordered({ name = "my-cmd", type = "process", command = "echo hello" },
+                { "name", "type", "command" }),
+        },
+        {
+            label = "Watch mode",
+            task  = ordered({ name = "watch", type = "process", command = "npm run watch" },
+                { "name", "type", "command" }),
+        },
     }
 }
