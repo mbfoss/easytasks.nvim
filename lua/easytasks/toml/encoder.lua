@@ -179,10 +179,33 @@ local function emit_section(path, data, out)
     end
 end
 
+---@param tbl    table
+---@param indent string  outer indentation; inner items get two extra spaces
+---@return string        newline-joined block, all lines self-indented
+local function encode_inline_table_multiline(tbl, indent)
+    local inner = indent .. "  "
+    local parts = { indent .. "{" }
+    for _, k in ipairs(sorted_keys(tbl)) do
+        parts[#parts + 1] = inner .. quote_key(tostring(k)) .. " = " .. encode_value(tbl[k]) .. ","
+    end
+    parts[#parts + 1] = indent .. "}"
+    return table.concat(parts, "\n")
+end
+
+---@class easytasks.EncodeInlineOpts
+---@field multiline boolean?  emit as a multiline inline table
+---@field indent    string?   outer indentation prefix (used when multiline = true)
+
 --- Encode a Lua table as a TOML inline table string: { key = val, ... }.
----@param t table
+--- Pass opts.multiline = true for a multiline block; all lines carry their own
+--- indentation so the caller can split("\n") and insert directly.
+---@param t    table
+---@param opts easytasks.EncodeInlineOpts?
 ---@return string
-function M.encode_inline(t)
+function M.encode_inline(t, opts)
+    if opts and opts.multiline then
+        return encode_inline_table_multiline(t, opts.indent or "")
+    end
     return encode_inline_table(t)
 end
 

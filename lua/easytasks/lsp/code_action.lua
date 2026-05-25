@@ -188,6 +188,7 @@ local function tasks_insertion_ctx(cst, dt, row, col)
         if is_tasks then return "array", anc end
     end
 
+
     -- AoT: inside a [[tasks]] section body, not inside any key-value pair.
     if not cst:ancestor_of_kind(tok_id, K.KeyValuePair) then
         local aot_id = cst:ancestor_of_kind(tok_id, K.AotSection)
@@ -200,7 +201,22 @@ local function tasks_insertion_ctx(cst, dt, row, col)
                 end
             end
         end
-    end
+	end
+
+        -- Document root: walk up from tok_id; if every node is trivial
+	-- (Whitespace, Newline, Comment) or Document, the cursor is floating
+	-- at root — covers empty files, blank lines, and comment-only lines.
+	local trivial = {
+		[K.Whitespace] = true, [K.Newline]  = true,
+		[K.Comment]    = true, [K.Document] = true,
+	}
+	---@type integer?
+	local cur, at_root = tok_id, true
+	while cur do
+		if not trivial[cst:kind(cur)] then at_root = false; break end
+		cur = cst:parent_id(cur)
+	end
+	if at_root then return "aot", nil end
 
     return nil
 end
@@ -217,7 +233,9 @@ local function apply_template(entry, tmpl)
 
     local lines
     if entry.kind == "array" then
-        lines = { entry.indent .. encoder.encode_inline(tmpl.task) .. "," }
+        local encoded = encoder.encode_inline(tmpl.task, { multiline = true, indent = entry.indent })
+        lines = vim.split(encoded, "\n", { plain = true })
+        lines[#lines] = lines[#lines] .. ","
     else
         local block = encoder.encode_aot_entry("tasks", tmpl.task)
         lines = vim.split(block, "\n", { plain = true })
@@ -233,7 +251,7 @@ end
 ---@param params   { command: string, arguments?: any[] }
 ---@param callback fun(err?: lsp.ResponseError, result?: any)
 function M.execute_command(context, params, callback)
-    if params.command ~= "easytasks._add_template" then
+    if params.command ~= "easytasks/insertTemplate" then
         callback(nil, nil)
         return
     end
@@ -324,7 +342,7 @@ function M.handler(context, params, callback)
                         kind    = vim.lsp.protocol.CodeActionKind.RefactorExtract,
                         command = {
                             title     = "Add `" .. type_name .. "` task template",
-                            command   = "easytasks._add_template",
+                            command   = "easytasks/insertTemplate",
                             arguments = { _pending_seq },
                         },
                     })

@@ -36,7 +36,7 @@ local initialize_result = {
     codeActionProvider         = { codeActionKinds = { "quickfix", "refactor.extract" } },
     documentFormattingProvider = true,
     documentRangeFormattingProvider = true,
-    executeCommandProvider     = { commands = { "easytasks._add_template" } },
+    executeCommandProvider     = { commands = { "easytasks/insertTemplate" } },
   },
   serverInfo = { name = M.SERVER_NAME, version = M.SERVER_VERSION },
 }
