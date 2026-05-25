@@ -119,8 +119,9 @@ end
 
 ---@class easytasks.TemplateActionEntry
 ---@field bufnr      integer
----@field row        integer   0-indexed; template inserted at row+1
----@field col        integer   0-indexed
+---@field context    easytasks.LspBufferContext   identity token; guards against bufnr recycling
+---@field row        integer   0-indexed cursor row at action creation time
+---@field col        integer   0-indexed cursor col at action creation time
 ---@field kind       "array"|"aot"
 ---@field type_name  string
 ---@field templates  easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[])
@@ -211,24 +212,27 @@ end
 ---@param entry easytasks.TemplateActionEntry
 ---@param tmpl  easytasks.TaskTemplate
 local function apply_template(entry, tmpl)
+    if not vim.api.nvim_buf_is_valid(entry.bufnr) then return end
+    vim.api.nvim_win_set_cursor(0, { entry.row + 1, entry.col })
+
+    local lines
     if entry.kind == "array" then
-        local line = entry.indent .. encoder.encode_inline(tmpl.task) .. ","
-        vim.api.nvim_buf_set_lines(entry.bufnr, entry.row, entry.row, false, { line })
+        lines = { entry.indent .. encoder.encode_inline(tmpl.task) .. "," }
     else
         local block = encoder.encode_aot_entry("tasks", tmpl.task)
-        local lines = vim.split(block, "\n", { plain = true })
-        vim.api.nvim_buf_set_lines(entry.bufnr, entry.row, entry.row, false, lines)
+        lines = vim.split(block, "\n", { plain = true })
     end
+    vim.api.nvim_put(lines, "l", false, true)
 end
 
 --------------------------------------------------------------------------------
 -- Execute command handler
 --------------------------------------------------------------------------------
 
----@param _ easytasks.LspBufferContext
+---@param context  easytasks.LspBufferContext
 ---@param params   { command: string, arguments?: any[] }
 ---@param callback fun(err?: lsp.ResponseError, result?: any)
-function M.execute_command(_, params, callback)
+function M.execute_command(context, params, callback)
     if params.command ~= "easytasks._add_template" then
         callback(nil, nil)
         return
@@ -236,7 +240,7 @@ function M.execute_command(_, params, callback)
 
     local id    = params.arguments and params.arguments[1]
     local entry = id and _pending[id]
-    if not entry then
+    if not entry or entry.context ~= context then
         callback(nil, nil); return
     end
     _pending[id] = nil -- consume once
@@ -307,7 +311,9 @@ function M.handler(context, params, callback)
                     _pending_seq = _pending_seq + 1
                     _pending[_pending_seq] = {
                         bufnr     = context.bufnr,
+                        context   = context,
                         row       = row,
+                        col       = col,
                         kind      = ins_kind,
                         type_name = type_name,
                         templates = type_def.templates,
