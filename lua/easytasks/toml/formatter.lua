@@ -1,217 +1,171 @@
--- easytasks/toml/formatter.lua
-local Ast = require("easytasks.toml.Ast")
-local M = {}
+local M   = {}
+local Cst = require("easytasks.toml.Cst")
+local K   = Cst.Kind
 
-local NodeKind = Ast.NodeKind
-
----@param key string
----@return boolean
 local function needs_quotes(key)
-  return not key:match("^[A-Za-z0-9_%-]+$")
+    return not key:match("^[A-Za-z0-9_%-]+$")
 end
 
----@param key string
----@return string
 local function quote_key(key)
-  if needs_quotes(key) then
-    return '"' .. key:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
-  end
-  return key
+    if needs_quotes(key) then
+        return '"' .. key:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+    end
+    return key
 end
 
----@param keys easytasks.toml.KeyRef[]
----@return string
-local function format_keys(keys)
-  local parts = {}
-  for _, k in ipairs(keys) do
-    table.insert(parts, quote_key(k.value))
-  end
-  return table.concat(parts, ".")
-end
-
----@param s string
----@return string
 local function format_string(s)
-  if not s:find("'") and not s:find("[\n\r\t\\]") then
-    return "'" .. s .. "'"
-  end
-  s = s:gsub("\\", "\\\\")
-  s = s:gsub('"', '\\"')
-  s = s:gsub("\b", "\\b")
-  s = s:gsub("\t", "\\t")
-  s = s:gsub("\n", "\\n")
-  s = s:gsub("\f", "\\f")
-  s = s:gsub("\r", "\\r")
-  return '"' .. s .. '"'
-end
-
----@type fun(node: easytasks.toml.ValueNode?, indent: integer?): string
-local format_value
-
----@param node easytasks.toml.ArrayNode
----@param indent integer
----@return string
-local function format_array(node, indent)
-  if #node.items == 0 then return "[]" end
-
-  if not node.multiline then
-    local parts = {}
-    for _, item in ipairs(node.items) do
-      table.insert(parts, format_value(item, indent))
+    if not s:find("'") and not s:find("[\n\r\t\\]") then
+        return "'" .. s .. "'"
     end
-    return "[ " .. table.concat(parts, ", ") .. " ]"
-  end
-
-  local inner_pad = string.rep("  ", indent + 1)
-  local close_pad = string.rep("  ", indent)
-  local lines = { "[" }
-  for i, item in ipairs(node.items) do
-    local suffix = i < #node.items and "," or ""
-    table.insert(lines, inner_pad .. format_value(item, indent + 1) .. suffix)
-  end
-  table.insert(lines, close_pad .. "]")
-  return table.concat(lines, "\n")
+    s = s:gsub("\\", "\\\\"):gsub('"', '\\"')
+        :gsub("\b", "\\b"):gsub("\t", "\\t"):gsub("\n", "\\n")
+        :gsub("\f", "\\f"):gsub("\r", "\\r")
+    return '"' .. s .. '"'
 end
 
----@param node easytasks.toml.InlineTableNode
----@param indent integer
+---@param cst easytasks.toml.Cst
 ---@return string
-local function format_inline_table(node, indent)
-  if #node.pairs == 0 then return "{}" end
+function M.format(cst)
+    local format_value  -- forward decl
 
-  if not node.multiline then
-    local parts = {}
-    for _, pair in ipairs(node.pairs) do
-      table.insert(parts, quote_key(pair.key.value) .. " = " .. format_value(pair.value, indent))
-    end
-    return "{ " .. table.concat(parts, ", ") .. " }"
-  end
-
-  local inner_pad = string.rep("  ", indent + 1)
-  local close_pad = string.rep("  ", indent)
-  local items = node.ordered_items or node.pairs
-  ---@cast items easytasks.toml.InlineTableItem[]
-  local last_pair_idx = 0
-  for i, item in ipairs(items) do
-    if item.kind ~= NodeKind.Comment then last_pair_idx = i end
-  end
-  local lines = { "{" }
-  local prev_value_end_row = nil
-  for i, item in ipairs(items) do
-    if item.kind == NodeKind.Comment then
-      ---@cast item easytasks.toml.CommentNode
-      local comment_row = item.range and item.range[1]
-      if comment_row and comment_row == prev_value_end_row then
-        lines[#lines] = lines[#lines] .. " " .. item.text
-      else
-        table.insert(lines, inner_pad .. item.text)
-      end
-    else
-      ---@cast item easytasks.toml.KeyValuePairNode
-      local v = format_value(item.value, indent + 1)
-      local line = inner_pad .. quote_key(item.key.value) .. " = " .. v .. (i < last_pair_idx and "," or "")
-      table.insert(lines, line)
-      prev_value_end_row = item.value and item.value.range and item.value.range[3]
-    end
-  end
-  table.insert(lines, close_pad .. "}")
-  return table.concat(lines, "\n")
-end
-
----@param node easytasks.toml.ValueNode?
----@param indent integer?
----@return string
-format_value = function(node, indent)
-  indent = indent or 0
-  if not node then return '""' end
-  if node.kind == NodeKind.Literal then
-    local v  = node.token.value
-    local lk = node.token.literalkind
-    if lk == "string" then
-      return format_string(v)
-    elseif lk == "bool" then
-      return tostring(v)
-    elseif lk == "float" then
-      if v ~= v then return "nan"
-      elseif v == math.huge then return "inf"
-      elseif v == -math.huge then return "-inf"
-      end
-      return tostring(v)
-    elseif lk == "integer" then
-      return tostring(math.floor(v))
-    elseif lk then
-      return v  -- date types: already a string
-    else
-      return tostring(v)
-    end
-  elseif node.kind == NodeKind.Array then
-    ---@cast node easytasks.toml.ArrayNode
-    return format_array(node, indent)
-  elseif node.kind == NodeKind.InlineTable then
-    ---@cast node easytasks.toml.InlineTableNode
-    return format_inline_table(node, indent)
-  end
-  return ""
-end
-
----@param node easytasks.toml.KeyValuePairNode
----@param indent integer?
----@return string
-local function format_kvp(node, indent)
-  local line = quote_key(node.key.value) .. " = " .. format_value(node.value, indent or 0)
-  if node.trailing_comment then
-    line = line .. " " .. node.trailing_comment
-  end
-  return line
-end
-
----@param ast easytasks.toml.Ast
----@return string
-function M.format(ast)
-  local out = {}
-  local roots = ast:get_roots()
-
-  for i, root in ipairs(roots) do
-    local node = root.data
-    local id   = root.id
-
-    if node.kind == NodeKind.TableSection or node.kind == NodeKind.PartialTableSection then
-      if i > 1 then table.insert(out, "") end
-      local header = "[" .. format_keys(node.keys) .. "]"
-      if node.trailing_comment then header = header .. " " .. node.trailing_comment end
-      table.insert(out, header)
-
-      for _, cn in ast:iter_children(id) do
-        if cn.kind == NodeKind.KeyValuePair then
-          table.insert(out, format_kvp(cn))
-        elseif cn.kind == NodeKind.Comment then
-          table.insert(out, cn.text)
+    local function format_array(arr_id, arr_range, indent)
+        local items = {}
+        for vid, vd in cst:iter_values(arr_id) do
+            table.insert(items, format_value(vid, vd, indent + 1))
         end
-      end
-
-    elseif node.kind == NodeKind.ArrayOfTablesSection or node.kind == NodeKind.PartialArrayOfTablesSection then
-      if i > 1 then table.insert(out, "") end
-      local header = "[[" .. format_keys(node.keys) .. "]]"
-      if node.trailing_comment then header = header .. " " .. node.trailing_comment end
-      table.insert(out, header)
-
-      for _, cn in ast:iter_children(id) do
-        if cn.kind == NodeKind.KeyValuePair then
-          table.insert(out, format_kvp(cn))
-        elseif cn.kind == NodeKind.Comment then
-          table.insert(out, cn.text)
+        if #items == 0 then return "[]" end
+        local multiline = arr_range[1] ~= arr_range[3]
+        if not multiline then
+            return "[ " .. table.concat(items, ", ") .. " ]"
         end
-      end
-
-    elseif node.kind == NodeKind.KeyValuePair then
-      table.insert(out, format_kvp(node))
-
-    elseif node.kind == NodeKind.Comment then
-      table.insert(out, node.text)
+        local pad   = string.rep("  ", indent + 1)
+        local close = string.rep("  ", indent)
+        local lines = { "[" }
+        for i, item in ipairs(items) do
+            lines[#lines + 1] = pad .. item .. (i < #items and "," or "")
+        end
+        lines[#lines + 1] = close .. "]"
+        return table.concat(lines, "\n")
     end
-  end
 
-  return table.concat(out, "\n")
+    local function format_inline_table(tbl_id, tbl_range, indent)
+        local parts     = {}
+        local multiline = tbl_range[1] ~= tbl_range[3]
+        for kvp_id, d in cst:iter_semantic(tbl_id) do
+            if d.kind == K.KeyValuePair then
+                local keys    = cst:get_keys(kvp_id)
+                local vi, vd  = cst:get_value(kvp_id)
+                if #keys > 0 then
+                    local key_parts = {}
+                    for _, kd in ipairs(keys) do key_parts[#key_parts + 1] = quote_key(kd.value) end
+                    local key_str = table.concat(key_parts, ".")
+                    local val_str = (vd and vd.kind ~= K.MissingValue) and format_value(vi, vd, indent + 1) or '""'
+                    parts[#parts + 1] = key_str .. " = " .. val_str
+                end
+            end
+        end
+        if #parts == 0 then return "{}" end
+        if not multiline then
+            return "{ " .. table.concat(parts, ", ") .. " }"
+        end
+        local pad   = string.rep("  ", indent + 1)
+        local close = string.rep("  ", indent)
+        local lines = { "{" }
+        for i, p in ipairs(parts) do
+            lines[#lines + 1] = pad .. p .. (i < #parts and "," or "")
+        end
+        lines[#lines + 1] = close .. "}"
+        return table.concat(lines, "\n")
+    end
+
+    format_value = function(val_id, val_data, indent)
+        indent = indent or 0
+        if not val_data then return '""' end
+        local k = val_data.kind
+        if k == K.String then
+            return format_string(val_data.value)
+        elseif k == K.Bool then
+            return tostring(val_data.value)
+        elseif k == K.Float then
+            local v = val_data.value
+            if v ~= v then return "nan"
+            elseif v == math.huge then return "inf"
+            elseif v == -math.huge then return "-inf" end
+            return tostring(v)
+        elseif k == K.Integer then
+            return tostring(math.floor(val_data.value))
+        elseif k == K.Datetime or k == K.DatetimeLocal or k == K.DateLocal or k == K.TimeLocal then
+            return val_data.value  -- already a formatted string
+        elseif k == K.Array then
+            return format_array(val_id, val_data.range, indent)
+        elseif k == K.InlineTable then
+            return format_inline_table(val_id, val_data.range, indent)
+        end
+        return '""'
+    end
+
+    local function format_kvp(kvp_id)
+        local keys = cst:get_keys(kvp_id)
+        if #keys == 0 then return nil end
+        local key_parts = {}
+        for _, kd in ipairs(keys) do key_parts[#key_parts + 1] = quote_key(kd.value) end
+        local vi, vd = cst:get_value(kvp_id)
+        local val_str = (vd and vd.kind ~= K.MissingValue) and format_value(vi, vd) or '""'
+        local line = table.concat(key_parts, ".") .. " = " .. val_str
+        -- append trailing comment if present
+        for _, cd in cst:iter_semantic(kvp_id) do
+            if cd.kind == K.Comment then line = line .. " " .. cd.text; break end
+        end
+        return line
+    end
+
+    local out   = {}
+    local first = true
+
+    for sec_id, d in cst:iter_semantic(cst:root_id()) do
+        if d.kind == K.TableSection or d.kind == K.AotSection then
+            if not first then out[#out + 1] = "" end
+            first = false
+
+            -- find header child
+            local hdr_kind = d.kind == K.TableSection and K.TableHeader or K.AotHeader
+            local hdr_id
+            for cid, cd in cst:iter_semantic(sec_id) do
+                if cd.kind == hdr_kind then hdr_id = cid; break end
+            end
+
+            local keys = hdr_id and cst:get_keys(hdr_id) or {}
+            local key_parts = {}
+            for _, kd in ipairs(keys) do key_parts[#key_parts + 1] = quote_key(kd.value) end
+            local header = (d.kind == K.AotSection and "[[" or "[")
+                        .. table.concat(key_parts, ".")
+                        .. (d.kind == K.AotSection and "]]" or "]")
+
+            -- trailing comment from header
+            if hdr_id then
+                for _, cd in cst:iter_semantic(hdr_id) do
+                    if cd.kind == K.Comment then header = header .. " " .. cd.text; break end
+                end
+            end
+            out[#out + 1] = header
+
+            for kvp_id, cd in cst:iter_semantic(sec_id) do
+                if cd.kind == K.KeyValuePair then
+                    local line = format_kvp(kvp_id)
+                    if line then out[#out + 1] = line end
+                end
+            end
+
+        elseif d.kind == K.KeyValuePair then
+            local line = format_kvp(sec_id)
+            if line then out[#out + 1] = line; first = false end
+
+        elseif d.kind == K.Comment then
+            out[#out + 1] = d.text; first = false
+        end
+    end
+
+    return table.concat(out, "\n")
 end
 
 return M

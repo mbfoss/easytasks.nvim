@@ -25,14 +25,12 @@ function M.build_edit(context, bufnr)
   if parsed.errors and #parsed.errors > 0 then
     return nil, parsed.errors[1].message
   end
-  if not parsed.ok or not parsed.ast then
+  if not parsed.ok or not parsed.cst then
     return nil, "nothing to format or invalid document structure"
   end
-  local active_ast = parsed.ast
-  context.ast = parsed.ast
+  context.cst = parsed.cst
 
-  -- Pass the context tree directly into your formatting engine
-  local new_text = toml_format.format(active_ast)
+  local new_text = toml_format.format(parsed.cst)
   local line_count = #lines
   local last_line = lines[line_count] or ""
 

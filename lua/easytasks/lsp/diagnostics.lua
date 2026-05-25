@@ -48,7 +48,7 @@ function M.build(bufnr, context)
     }
   end
 
-  if not context.ast then
+  if not context.cst then
     context.parse_results = { data = nil, errors = accumulated_errors }
     return diagnostics
   end

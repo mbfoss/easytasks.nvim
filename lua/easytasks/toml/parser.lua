@@ -5,121 +5,218 @@
 ---@field range easytasks.toml.Range
 
 ---@class easytasks.toml.ParseResult
----@field ok boolean
----@field ast easytasks.toml.Ast
+---@field ok     boolean
+---@field cst    easytasks.toml.Cst
 ---@field errors easytasks.toml.ParseError[]
 
----@class easytasks.toml.parser.KeyToken : easytasks.toml.KeyRef
----@field is_empty boolean
----@field quoted boolean
-
-local M        = {}
-
-local Ast      = require("easytasks.toml.Ast")
-local util     = require("easytasks.toml.parser_util")
-
-local NodeKind = Ast.NodeKind
+local M    = {}
+local Cst  = require("easytasks.toml.Cst")
+local util = require("easytasks.toml.parser_util")
+local K    = Cst.Kind
 
 ---@param text string
 ---@return easytasks.toml.ParseResult
 function M.parse(text)
     local errors   = {}
-    local ast      = Ast.new()
+    local cst      = Cst.new()
     local cursor   = 1
     local row, col = 0, 0
-    local nid      = 0
 
-    local utf8_ok  = util.validate_utf8(text)
-    if not utf8_ok then
+    if not util.validate_utf8(text) then
         table.insert(errors, { message = "Invalid UTF sequence", range = { 0, 0, 0, 0 } })
-        return { ok = false, ast = ast, errors = errors }
+        return { ok = false, cst = cst, errors = errors }
     end
 
-    ---@return integer
-    local function next_id()
-        nid = nid + 1; return nid
+    local function add_err(msg, r)
+        table.insert(errors, { message = msg, range = r or { row, col, row, col } })
     end
 
-    ---@param msg string
-    ---@param r easytasks.toml.Range?
-    local function add_err(msg, r) table.insert(errors, { message = msg, range = r or { row, col, row, col } }) end
-
-    ---@param sr integer
-    ---@param sc integer
-    ---@param er integer
-    ---@param ec integer
-    ---@return easytasks.toml.Range
-    local function mkr(sr, sc, er, ec) return { sr, sc, er, ec } end
-
-    ---@param off integer?
-    ---@return string
     local function char(off)
         local i = cursor + (off or 0)
         return i <= #text and text:sub(i, i) or ""
     end
 
-    ---@param n integer
-    ---@param off integer?
-    ---@return string
     local function ahead(n, off)
         local s = cursor + (off or 0)
         return text:sub(s, s + n - 1)
     end
 
-    ---@return boolean
     local function bounds() return cursor <= #text end
 
-    ---@param n integer?
     local function step(n)
         n = n or 1
         for _ = 1, n do
             if cursor <= #text then
                 local c = text:byte(cursor)
-                if c == 10 then
-                    row = row + 1; col = 0
-                elseif c ~= 13 then
-                    col = col + 1
-                end
+                if c == 10 then row = row + 1; col = 0
+                elseif c ~= 13 then col = col + 1 end
             end
             cursor = cursor + 1
         end
     end
 
-    ---@return boolean
-    local function is_ws()
-        local c = char(); return c == " " or c == "\t"
-    end
-
-    ---@return boolean
+    local function is_ws()  local c = char(); return c == " " or c == "\t" end
+    local function is_nl()  return char() == "\n" or (char() == "\r" and char(1) == "\n") end
     local function is_comment_ctrl()
         local b = char():byte()
         return b and (b < 0x09 or (b > 0x09 and b < 0x20) or b == 0x7F)
     end
 
-    ---@return boolean
-    local function is_nl() return char() == "\n" or (char() == "\r" and char(1) == "\n") end
-
-    local function skip_ws() while bounds() and is_ws() do step() end end
-
     local function skip_nl()
-        if char() == "\r" then step() end; if char() == "\n" then step() end
+        if char() == "\r" then step() end
+        if char() == "\n" then step() end
+    end
+
+    -- ===== trivia emitters =====
+
+    local function emit_ws(pid)
+        if not is_ws() then return end
+        local sr, sc = row, col
+        while bounds() and is_ws() do step() end
+        cst:token(pid, K.Whitespace, nil, nil, sr, sc, row, col)
+    end
+
+    local function emit_nl(pid)
+        if not is_nl() then return end
+        local sr, sc = row, col
+        skip_nl()
+        cst:token(pid, K.Newline, nil, nil, sr, sc, sr, sc)
+    end
+
+    local function emit_comment(pid)
+        if char() ~= "#" then return end
+        local sr, sc = row, col
+        local buf = {}
+        while bounds() and not is_nl() do
+            if is_comment_ctrl() then add_err("Control character in comment") end
+            table.insert(buf, char()); step()
+        end
+        cst:token(pid, K.Comment, table.concat(buf), nil, sr, sc, row, col)
+    end
+
+    local function emit_trivia(pid)
+        while bounds() do
+            if is_ws() then emit_ws(pid)
+            elseif is_nl() then emit_nl(pid)
+            elseif char() == "#" then emit_comment(pid)
+            else break end
+        end
+    end
+
+    local function emit_inline_ws(pid)
+        if is_ws() then emit_ws(pid) end
+    end
+
+    -- ===== key parsers =====
+
+    -- Parse a quoted key (single or double), emit QuotedKey token, return decoded value.
+    local function parse_quoted_key(pid)
+        local sr, sc = row, col
+        local bs     = cursor
+        local q      = char()
+        if char(1) == q and char(2) == q then
+            add_err("Multiline strings are not allowed as keys")
+        end
+        step()
+        local buf, closed = {}, false
+        local esc = { b="\b", t="\t", n="\n", f="\f", r="\r", e="\x1b", ['"']='"', ["\\"]= "\\" }
+        while bounds() do
+            if char() == q then step(); closed = true; break end
+            if is_nl() then add_err("Newline in key string"); break end
+            if q == '"' and char() == "\\" then
+                local nc = char(1)
+                if esc[nc] then
+                    table.insert(buf, esc[nc]); step(2)
+                elseif nc == "u" or nc == "U" or nc == "x" then
+                    local len = nc == "u" and 4 or (nc == "U" and 8 or 2)
+                    step(2)
+                    local hex_str = ahead(len); step(len)
+                    if #hex_str == len and hex_str:match("^[0-9A-Fa-f]+$") then
+                        local cp = tonumber(hex_str, 16)
+                        if cp >= 0xD800 and cp <= 0xDFFF then
+                            add_err("Invalid Unicode escape: surrogate codepoint")
+                        elseif cp <= 0x10FFFF then
+                            table.insert(buf, util.utf8_encode(cp))
+                        else
+                            add_err("Invalid Unicode escape: codepoint out of range")
+                        end
+                    else
+                        add_err("Invalid escape sequence: bad hex digits")
+                    end
+                else
+                    add_err("Invalid escape: \\" .. nc); step()
+                end
+            else
+                table.insert(buf, char()); step()
+            end
+        end
+        if not closed then add_err("Unterminated string key") end
+        local er, ec = row, col
+        local raw = text:sub(bs, cursor - 1)
+        local val = table.concat(buf)
+        cst:token(pid, K.QuotedKey, raw, val, sr, sc, er, ec)
+        return val
+    end
+
+    -- Parse a bare or quoted key token, emit it, return decoded key string.
+    -- Returns "" if no valid key chars are present.
+    local function parse_key_token(pid)
+        local c = char()
+        if c == '"' or c == "'" then return parse_quoted_key(pid) end
+        local sr, sc = row, col
+        local buf = {}
+        while bounds() and char():match("[%w%-_]") do
+            table.insert(buf, char()); step()
+        end
+        local val = table.concat(buf)
+        if val ~= "" then
+            cst:token(pid, K.BareKey, val, val, sr, sc, row, col)
+        end
+        return val
+    end
+
+    -- Parse `key (. key)*`, emitting key + dot tokens under pid.
+    -- Returns array of decoded key strings.
+    local function parse_dotted_keys(pid)
+        local keys = {}
+        while bounds() do
+            emit_inline_ws(pid)
+            local c = char()
+            local is_quote    = (c == '"' or c == "'")
+            local is_bare_ch  = c:match("[%w%-_]") ~= nil
+            if not is_quote and not is_bare_ch then
+                if #keys > 0 then add_err("Trailing dot in key") end
+                break
+            end
+            local val = parse_key_token(pid)
+            if val == "" and not is_quote then
+                if #keys == 0 then add_err("Empty key segment") end
+                break
+            end
+            table.insert(keys, val)
+            emit_inline_ws(pid)
+            if char() == "." then
+                local dr, dc = row, col
+                step()
+                cst:token(pid, K.Dot, ".", nil, dr, dc, row, col)
+            else
+                break
+            end
+        end
+        return keys
     end
 
     -- ===== value parsers =====
-    ---@type fun(): easytasks.toml.ValueNode?
-    local parse_value
-    ---@type fun(): easytasks.toml.parser.KeyToken
-    local parse_key_token
+    local parse_value -- forward decl
 
-    ---@return easytasks.toml.LiteralNode
-    local function parse_string()
+    local function parse_string(pid)
         local sr, sc = row, col
-        local q = char()
-        local ml = char(1) == q and char(2) == q
+        local bs     = cursor
+        local q      = char()
+        local ml     = char(1) == q and char(2) == q
         step(ml and 3 or 1)
-
         local buf, closed = {}, false
-        local esc = { b = "\b", t = "\t", n = "\n", f = "\f", r = "\r", e = "\x1b", ['"'] = '"', ["\\"] = "\\" }
+        local esc = { b="\b", t="\t", n="\n", f="\f", r="\r", e="\x1b", ['"']='"', ["\\"]= "\\" }
 
         while bounds() do
             if ml and #buf == 0 and is_nl() then skip_nl() end
@@ -128,40 +225,23 @@ function M.parse(text)
                     if char(1) == q and char(2) == q then
                         if char(3) == q then
                             table.insert(buf, q)
-                            if char(4) == q then
-                                table.insert(buf, q)
-                                step(5)
-                            else
-                                step(4)
-                            end
-                        else
-                            step(3)
-                        end
+                            if char(4) == q then table.insert(buf, q); step(5) else step(4) end
+                        else step(3) end
                         closed = true; break
                     end
-                else
-                    step(); closed = true; break
-                end
+                else step(); closed = true; break end
             end
-
-            if not ml and is_nl() then
-                add_err("Newline in single-line string"); break
-            end
-
+            if not ml and is_nl() then add_err("Newline in single-line string"); break end
             if q == '"' and char() == "\\" then
                 local nc = char(1)
-                local j = 1
+                local j  = 1
                 while char(j) == " " or char(j) == "\t" do j = j + 1 end
                 if ml and (char(j) == "\n" or (char(j) == "\r" and char(j + 1) == "\n")) then
                     step(j); skip_nl()
                     while bounds() do
-                        if is_ws() then
-                            step()
-                        elseif is_nl() then
-                            skip_nl()
-                        else
-                            break
-                        end
+                        if is_ws() then step()
+                        elseif is_nl() then skip_nl()
+                        else break end
                     end
                 else
                     if esc[nc] then
@@ -182,9 +262,7 @@ function M.parse(text)
                                 table.insert(buf, util.utf8_encode(cp))
                             end
                         end
-                    else
-                        add_err("Invalid escape: \\" .. nc); step()
-                    end
+                    else add_err("Invalid escape: \\" .. nc); step() end
                 end
             else
                 local b = char():byte()
@@ -195,30 +273,20 @@ function M.parse(text)
                 table.insert(buf, char()); step()
             end
         end
-
         if not closed then add_err("Unterminated string") end
         local er, ec = row, col
-        local s = table.concat(buf)
-        return {
-            kind = NodeKind.Literal,
-            token = { value = s, literalkind = "string", range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        cst:token(pid, K.String, text:sub(bs, cursor - 1), table.concat(buf), sr, sc, er, ec)
     end
 
-    ---@return boolean
     local function is_datetime_start() return ahead(10):match("^%d%d%d%d%-%d%d%-%d%d") ~= nil end
+    local function is_time_start()     return ahead(5):match("^%d%d:%d%d") ~= nil end
 
-    ---@return boolean
-    local function is_time_start() return ahead(5):match("^%d%d:%d%d") ~= nil end
-
-    ---@return easytasks.toml.LiteralNode
-    local function parse_datetime()
+    local function parse_datetime(pid)
         local sr, sc = row, col
+        local bs     = cursor
         local y = tonumber(ahead(4)); step(5)
         local mo = tonumber(ahead(2)); step(3)
-        local d = tonumber(ahead(2)); step(2)
+        local d  = tonumber(ahead(2)); step(2)
         local h, mi, sec, zone
         assert(y and mo and d)
         if bounds() and (char():lower() == "t" or (char() == " " and ahead(3, 1):match("^%d%d:"))) then
@@ -233,14 +301,11 @@ function M.parse(text)
                 if bounds() and char() == ":" then
                     step()
                     local ss = {}
-                    while bounds() and char():match("[%d%.]") do
-                        table.insert(ss, char()); step()
-                    end
+                    while bounds() and char():match("[%d%.]") do table.insert(ss, char()); step() end
                     local sec_str = table.concat(ss)
                     if sec_str:match("%.$") then add_err("Invalid seconds: trailing dot") end
                     sec = tonumber(sec_str) or 0
                 end
-
                 if bounds() and char():lower() == "z" then
                     zone = 0; step()
                 elseif bounds() and (char() == "+" or char() == "-") then
@@ -264,39 +329,33 @@ function M.parse(text)
                         end
                     end
                 end
-            end -- else: valid time digits follow separator
+            end
         end
-
         local date_err = util.validate_date(y, mo, d)
         if date_err then add_err(date_err) end
         if h ~= nil then
             local time_err = util.validate_time(h, mi, sec)
             if time_err then add_err(time_err) end
         end
-
-        local er, ec = row, col
-        local lkind = h ~= nil and (zone ~= nil and "datetime" or "datetime-local") or "date-local"
-        return {
-            kind = NodeKind.Literal,
-            token = { value = util.format_date_str(y, mo, d, h, mi, sec, zone), literalkind = lkind, range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        local er, ec   = row, col
+        local lkind    = h ~= nil and (zone ~= nil and "datetime" or "datetime-local") or "date-local"
+        local ck       = lkind == "datetime" and K.Datetime
+                      or lkind == "datetime-local" and K.DatetimeLocal
+                      or K.DateLocal
+        cst:token(pid, ck, text:sub(bs, cursor - 1), util.format_date_str(y, mo, d, h, mi, sec, zone), sr, sc, er, ec)
     end
 
-    ---@return easytasks.toml.LiteralNode
-    local function parse_time()
+    local function parse_time(pid)
         local sr, sc = row, col
-        local h = tonumber(ahead(2)); step(3)
+        local bs     = cursor
+        local h  = tonumber(ahead(2)); step(3)
         local mi = tonumber(ahead(2)); step(2)
         assert(h and mi)
         local sec = 0
         if bounds() and char() == ":" then
             step()
             local ss = {}
-            while bounds() and char():match("[%d%.]") do
-                table.insert(ss, char()); step()
-            end
+            while bounds() and char():match("[%d%.]") do table.insert(ss, char()); step() end
             local sec_str = table.concat(ss)
             if sec_str:match("%.$") then add_err("Invalid seconds: trailing dot") end
             local int_part = sec_str:match("^(%d+)") or ""
@@ -305,488 +364,314 @@ function M.parse(text)
         end
         local time_err = util.validate_time(h, mi, sec)
         if time_err then add_err(time_err) end
-
         local er, ec = row, col
-        return {
-            kind = NodeKind.Literal,
-            token = { value = util.format_time_str(h, mi, sec), literalkind = "time-local", range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        cst:token(pid, K.TimeLocal, text:sub(bs, cursor - 1), util.format_time_str(h, mi, sec), sr, sc, er, ec)
     end
 
-    ---@return boolean
     local function is_num_term()
         if not bounds() then return true end
         local c = char()
-        return c == " " or c == "\t" or c == "\n" or c == "\r" or c == "#" or c == "," or c == "]" or c == "}"
+        return c==" " or c=="\t" or c=="\n" or c=="\r" or c=="#" or c=="," or c=="]" or c=="}"
     end
 
-    ---@return easytasks.toml.LiteralNode
-    local function parse_number()
+    local function parse_number(pid)
         local sr, sc = row, col
+        local bs     = cursor
         local s_buf, raw_buf = {}, {}
-
         if char() == "+" or char() == "-" then
-            table.insert(s_buf, char())
-            table.insert(raw_buf, char())
-            step()
+            table.insert(s_buf, char()); table.insert(raw_buf, char()); step()
         end
-
         if char() == "0" and (char(1) == "x" or char(1) == "o" or char(1) == "b") then
             local pfx = char(1)
             if #s_buf > 0 then add_err("Sign not allowed on based integer") end
-            table.insert(raw_buf, ahead(2))
-            step(2)
-            local bases    = { x = 16, o = 8, b = 2 }
-            local valid_re = { x = "^[0-9A-Fa-f]$", o = "^[0-7]$", b = "^[01]$" }
+            table.insert(raw_buf, ahead(2)); step(2)
+            local bases    = { x=16, o=8, b=2 }
+            local valid_re = { x="^[0-9A-Fa-f]$", o="^[0-7]$", b="^[01]$" }
             local dig_buf  = {}
             local last_c   = nil
             while bounds() and not is_num_term() do
-                local c = char()
-                table.insert(raw_buf, c)
+                local c = char(); table.insert(raw_buf, c)
                 if c == "_" then
-                    if last_c == nil or last_c == "_" then
-                        add_err("Invalid underscore in based integer")
-                    end
+                    if last_c == nil or last_c == "_" then add_err("Invalid underscore in based integer") end
                 else
                     if not c:match(valid_re[pfx]) then
                         add_err("Invalid digit for base-" .. bases[pfx] .. " integer: " .. c)
                     end
                     table.insert(dig_buf, c)
                 end
-                last_c = c
-                step()
+                last_c = c; step()
             end
             if last_c == "_" then add_err("Trailing underscore in based integer") end
             if #dig_buf == 0 then add_err("Empty based number") end
             local er, ec = row, col
             local v = tonumber(table.concat(dig_buf), bases[pfx]) or 0
-            return {
-                kind = NodeKind.Literal,
-                token = { value = v, literalkind = "integer", range = mkr(sr, sc, er, ec) },
-                range =
-                    mkr(sr, sc, er, ec)
-            }
+            cst:token(pid, K.Integer, text:sub(bs, cursor - 1), v, sr, sc, er, ec)
+            return
         end
-
         while bounds() and not is_num_term() do
-            local c = char()
-            table.insert(raw_buf, c)
+            local c = char(); table.insert(raw_buf, c)
             if c == "." or c:match("%d") then
                 table.insert(s_buf, c); step()
             elseif c:lower() == "e" then
                 table.insert(s_buf, c); step()
                 if bounds() and (char() == "+" or char() == "-") then
-                    table.insert(s_buf, char())
-                    table.insert(raw_buf, char())
-                    step()
+                    table.insert(s_buf, char()); table.insert(raw_buf, char()); step()
                 end
-            elseif c == "_" then
-                step()
-            else
-                break
-            end
+            elseif c == "_" then step()
+            else break end
         end
-
         local num_err = util.validate_number_raw(table.concat(raw_buf))
         if num_err then add_err(num_err) end
-
         local er, ec = row, col
-        local s = table.concat(s_buf)
-        local lkind = s:find("[%.eE]") and "float" or "integer"
-        local v = tonumber(s) or 0
-
-        if lkind == "integer" then
-            if v == 0 then v = 0 end
-            return {
-                kind = NodeKind.Literal,
-                token = { value = v, literalkind = lkind, range = mkr(sr, sc, er, ec) },
-                range =
-                    mkr(sr, sc, er, ec)
-            }
-        end
-
-        return {
-            kind = NodeKind.Literal,
-            token = { value = v, literalkind = lkind, range = mkr(sr, sc, er, ec) },
-            range =
-                mkr(sr, sc, er, ec)
-        }
+        local s      = table.concat(s_buf)
+        local lkind  = s:find("[%.eE]") and "float" or "integer"
+        local v      = tonumber(s) or 0
+        cst:token(pid, lkind == "float" and K.Float or K.Integer, text:sub(bs, cursor - 1), v, sr, sc, er, ec)
     end
 
-    ---@return easytasks.toml.LiteralNode
-    local function parse_bool_special()
+    local function parse_bool_special(pid)
         local sr, sc = row, col
+        local bs     = cursor
         local matches = {
-            ["false"] = { false, 5, "bool" },
-            ["true"] = { true, 4, "bool" },
-            ["+inf"] = { math.huge, 4, "float" },
-            ["-inf"] = { -math.huge, 4, "float" },
-            ["inf"] = { math.huge, 3, "float" },
-            ["+nan"] = { 0 / 0, 4, "float" },
-            ["-nan"] = { 0 / 0, 4, "float" },
-            ["nan"] = { 0 / 0, 3, "float" }
+            ["false"] = { false,       5, K.Bool  },
+            ["true"]  = { true,        4, K.Bool  },
+            ["+inf"]  = { math.huge,   4, K.Float },
+            ["-inf"]  = { -math.huge,  4, K.Float },
+            ["inf"]   = { math.huge,   3, K.Float },
+            ["+nan"]  = { 0/0,         4, K.Float },
+            ["-nan"]  = { 0/0,         4, K.Float },
+            ["nan"]   = { 0/0,         3, K.Float },
         }
-
-        for k, v in pairs(matches) do
-            if ahead(#k) == k then
+        for kw, v in pairs(matches) do
+            if ahead(#kw) == kw then
                 step(v[2])
                 local er, ec = row, col
-                return {
-                    kind = NodeKind.Literal,
-                    token = { value = v[1], literalkind = v[3], range = mkr(sr, sc, er, ec) },
-                    range =
-                        mkr(sr, sc, er, ec)
-                }
+                cst:token(pid, v[3], text:sub(bs, cursor - 1), v[1], sr, sc, er, ec)
+                return
             end
         end
-
         add_err("Unexpected value near: " .. ahead(8))
         while bounds() and not is_num_term() do step() end
         local er, ec = row, col
-        return {
-            kind = NodeKind.Literal,
-            token = { value = nil, range = mkr(sr, sc, er, ec) },
-            range = mkr(sr, sc, er,
-                ec)
-        }
+        cst:token(pid, K.Error, text:sub(bs, cursor - 1), nil, sr, sc, er, ec)
     end
 
-    ---@return easytasks.toml.ArrayNode
-    local function parse_array()
+    local function parse_array(pid)
         local sr, sc = row, col
-        step() -- [
-        local items = {}
-
-        local function collect()
-            while bounds() do
-                if is_ws() then
-                    step()
-                elseif is_nl() then
-                    skip_nl()
-                elseif char() == "#" then
-                    local cr, cc = row, col
-                    local buf = {}
-                    while bounds() and not is_nl() do
-                        if is_comment_ctrl() then add_err("Control character in comment") end
-                        table.insert(buf, char()); step()
-                    end
-                    table.insert(items,
-                        { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
-                else
-                    break
-                end
-            end
-        end
+        local arr_id = cst:open(pid, K.Array, sr, sc)
+        local lb_r, lb_c = row, col; step()
+        cst:token(arr_id, K.LBracket, "[", nil, lb_r, lb_c, row, col)
 
         while bounds() do
-            collect()
+            emit_trivia(arr_id)
             if char() == "]" then break end
             local before = cursor
-            local item = parse_value()
-            if item then table.insert(items, item) end
+            parse_value(arr_id)
             if cursor == before then
-                add_err("Unexpected character in array: " .. char()); step()
+                local er, ec = row, col
+                add_err("Unexpected character in array: " .. char())
+                cst:token(arr_id, K.Error, char(), nil, er, ec, er, ec)
+                step()
             else
-                collect()
+                emit_trivia(arr_id)
                 if char() == "," then
-                    step()
+                    local cr, cc = row, col; step()
+                    cst:token(arr_id, K.Comma, ",", nil, cr, cc, row, col)
                 elseif char() ~= "]" then
                     add_err("Missing , between array elements")
                 end
             end
         end
 
-        local multiline = row ~= sr
-        if char() ~= "]" then add_err("Missing ] in array") else step() end
-        local er, ec = row, col
-        return { kind = NodeKind.Array, items = items, multiline = multiline, range = mkr(sr, sc, er, ec) }
-    end
-
-    ---@param existing_pairs easytasks.toml.Pair[]
-    ---@param new_key easytasks.toml.KeyRef
-    ---@param new_value easytasks.toml.ValueNode?
-    local function merge_inline_table_pairs(existing_pairs, new_key, new_value)
-        for _, pair in ipairs(existing_pairs) do
-            if pair.key.value == new_key.value then
-                if pair.value and pair.value.kind == NodeKind.InlineTable and new_value and new_value.kind == NodeKind.InlineTable then
-                    local pv = pair.value
-                    ---@cast pv easytasks.toml.InlineTableNode
-                    ---@cast new_value easytasks.toml.InlineTableNode
-                    if pv.explicit then
-                        add_err("Cannot extend inline table with dotted key: " .. new_key.value)
-                        return
-                    end
-                    for _, incoming in ipairs(new_value.pairs) do
-                        merge_inline_table_pairs(pv.pairs, incoming.key, incoming.value)
-                    end
-                    return
-                end
-            end
+        if char() ~= "]" then
+            add_err("Missing ] in array")
+        else
+            local cr, cc = row, col; step()
+            cst:token(arr_id, K.RBracket, "]", nil, cr, cc, row, col)
         end
-        table.insert(existing_pairs, { key = new_key, value = new_value })
+        cst:close(arr_id, row, col)
     end
 
-    ---@return easytasks.toml.InlineTableNode
-    local function parse_inline_table()
+    -- Parse a KVP (key = value) and attach it under pid.
+    local function parse_kvp(pid)
         local sr, sc = row, col
-        step() -- {
-        local pairs_list = {}
-        local ordered_items = {}
+        local kvp_id = cst:open(pid, K.KeyValuePair, sr, sc)
+        local keys   = parse_dotted_keys(kvp_id)
+        emit_inline_ws(kvp_id)
 
-        local function collect()
-            while bounds() do
-                if is_ws() then
-                    step()
-                elseif is_nl() then
-                    skip_nl()
-                elseif char() == "#" then
-                    local cr, cc = row, col
-                    local buf = {}
-                    while bounds() and not is_nl() do
-                        if is_comment_ctrl() then add_err("Control character in comment") end
-                        table.insert(buf, char()); step()
-                    end
-                    table.insert(ordered_items,
-                        { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(cr, cc, row, col) })
-                else
-                    break
-                end
+        if #keys == 0 then
+            add_err("Empty key segment")
+            while bounds() and not is_nl() do
+                local er, ec = row, col
+                cst:token(kvp_id, K.Error, char(), nil, er, ec, er, ec); step()
             end
+            cst:close(kvp_id, row, col)
+            return
         end
+
+        if char() ~= "=" then
+            add_err("Expected = after key")
+            while bounds() and not is_nl() do
+                local er, ec = row, col
+                cst:token(kvp_id, K.Error, char(), nil, er, ec, er, ec); step()
+            end
+            cst:close(kvp_id, row, col)
+            return
+        end
+
+        local eq_r, eq_c = row, col; step()
+        cst:token(kvp_id, K.Equals, "=", nil, eq_r, eq_c, row, col)
+        emit_inline_ws(kvp_id)
+
+        if bounds() and not is_nl() and char() ~= "#" then
+            parse_value(kvp_id)
+        else
+            cst:token(kvp_id, K.MissingValue, "", nil, row, col, row, col)
+        end
+
+        emit_inline_ws(kvp_id)
+        if char() == "#" then emit_comment(kvp_id) end
+
+        if bounds() and not is_nl() then
+            add_err("Expected newline after key-value pair")
+            while bounds() and not is_nl() do step() end
+        end
+        cst:close(kvp_id, row, col)
+    end
+
+    local function parse_inline_table(pid)
+        local sr, sc = row, col
+        local tbl_id = cst:open(pid, K.InlineTable, sr, sc)
+        local lb_r, lb_c = row, col; step()
+        cst:token(tbl_id, K.LBrace, "{", nil, lb_r, lb_c, row, col)
 
         while bounds() do
-            collect()
-            if char() == "]" or char() == "}" then break end
+            emit_trivia(tbl_id)
+            if char() == "}" or char() == "]" then break end
 
-            local ks_r, ks_c = row, col
-            local key_parts = {}
+            local kvp_sr, kvp_sc = row, col
+            local kvp_id = cst:open(tbl_id, K.KeyValuePair, kvp_sr, kvp_sc)
+            local keys   = parse_dotted_keys(kvp_id)
+            emit_inline_ws(kvp_id)
 
-            while bounds() do
-                collect()
-                local kt = parse_key_token()
-                if kt.is_empty and not kt.quoted then
-                    add_err("Empty key segment in inline table"); break
-                end
-                table.insert(key_parts, kt)
-                collect()
-                if char() == "." then step() else break end
-            end
-
-            if #key_parts == 0 then break end
-            local ke_r, ke_c = row, col
-
-            collect()
-            if char() ~= "=" then
-                add_err("Expected = in inline table")
-                local incomplete = { key = key_parts[1], value = nil, no_equals = true }
-                table.insert(pairs_list, incomplete)
-                table.insert(ordered_items, incomplete)
+            if #keys == 0 then
+                add_err("Empty key in inline table")
+                cst:close(kvp_id, row, col)
                 break
             end
-            step()
-            local vs_r, vs_c = row, col  -- capture before collect() to stay on the = line
-            collect()
 
-            local val = parse_value()
-            if not val or (val.kind == NodeKind.Literal and val.token.value == nil) then
-                val = { kind = NodeKind.MissingValue, range = mkr(vs_r, vs_c, row, col) }
-            end
-            local val_range = val.range
-
-            for i = #key_parts, 2, -1 do
-                val = {
-                    kind = NodeKind.InlineTable,
-                    pairs = { { key = key_parts[i], value = val } },
-                    multiline = false,
-                    range = val and val.range or mkr(ks_r, ks_c, ke_r, ke_c),
-                }
+            if char() ~= "=" then
+                add_err("Expected = in inline table")
+                cst:close(kvp_id, row, col)
+                break
             end
 
-            local prev_len = #pairs_list
-            merge_inline_table_pairs(pairs_list, key_parts[1], val)
-            if #pairs_list > prev_len then
-                pairs_list[#pairs_list].value_range = val_range
-                table.insert(ordered_items, pairs_list[#pairs_list])
-            end
+            local eq_r, eq_c = row, col; step()
+            cst:token(kvp_id, K.Equals, "=", nil, eq_r, eq_c, row, col)
+            emit_trivia(kvp_id)
 
-            collect()
-            if char() == "," then step() elseif char() == "}" then break else break end
+            if bounds() and char() ~= "," and char() ~= "}" then
+                parse_value(kvp_id)
+            else
+                cst:token(kvp_id, K.MissingValue, "", nil, row, col, row, col)
+            end
+            cst:close(kvp_id, row, col)
+
+            emit_trivia(tbl_id)
+            if char() == "," then
+                local cr, cc = row, col; step()
+                cst:token(tbl_id, K.Comma, ",", nil, cr, cc, row, col)
+            elseif char() == "}" then
+                break
+            else
+                break
+            end
         end
 
-        local multiline = row ~= sr
-        if char() ~= "}" then add_err("Missing } in inline table") else step() end
-        local er, ec = row, col
-        return {
-            kind = NodeKind.InlineTable,
-            pairs = pairs_list,
-            ordered_items = ordered_items,
-            multiline = multiline,
-            explicit = true,
-            range = mkr(sr,
-                sc, er, ec)
-        }
+        if char() ~= "}" then
+            add_err("Missing } in inline table")
+        else
+            local cr, cc = row, col; step()
+            cst:token(tbl_id, K.RBrace, "}", nil, cr, cc, row, col)
+        end
+        cst:close(tbl_id, row, col)
     end
 
-    ---@return easytasks.toml.ValueNode?
-    function parse_value()
-        if not bounds() then return nil end
+    function parse_value(pid)
+        if not bounds() then return end
         local c = char()
-        if c == '"' or c == "'" then return parse_string() end
-        if is_datetime_start() then return parse_datetime() end
-        if is_time_start() then return parse_time() end
-        if c == "[" then return parse_array() end
-        if c == "{" then return parse_inline_table() end
+        if c == '"' or c == "'" then parse_string(pid); return end
+        if is_datetime_start() then parse_datetime(pid); return end
+        if is_time_start() then parse_time(pid); return end
+        if c == "[" then parse_array(pid); return end
+        if c == "{" then parse_inline_table(pid); return end
         if c:match("[%+%-0-9]") then
             local a4 = ahead(4)
-            if a4 == "+inf" or a4 == "-inf" or a4 == "+nan" or a4 == "-nan" then return parse_bool_special() end
-            return parse_number()
-        end
-        return parse_bool_special()
-    end
-
-    -- ===== key parsing =====
-    ---@return boolean
-    local function is_bare_key_char()
-        return char():match("[%w%-_]") ~= nil
-    end
-
-    ---@return easytasks.toml.parser.KeyToken
-    local function parse_bare_key()
-        local sr, sc = row, col
-        local buf = {}
-        local er, ec = sr, sc
-        while bounds() and is_bare_key_char() do
-            er, ec = row, col
-            table.insert(buf, char())
-            step()
-        end
-        local s = table.concat(buf)
-        return { value = s, is_empty = (s == ""), quoted = false, range = mkr(sr, sc, er, ec) }
-    end
-
-    ---@return easytasks.toml.parser.KeyToken
-    function parse_key_token()
-        local c = char()
-        if c == '"' or c == "'" then
-            if char(1) == c and char(2) == c then
-                add_err("Multiline strings are not allowed as keys")
+            if a4 == "+inf" or a4 == "-inf" or a4 == "+nan" or a4 == "-nan" then
+                parse_bool_special(pid); return
             end
-            local n = parse_string()
-            return { value = n.token.value, is_empty = false, quoted = true, range = n.range }
+            parse_number(pid); return
         end
-        return parse_bare_key()
-    end
-
-    ---@return easytasks.toml.parser.KeyToken[]
-    local function parse_key_list()
-        local keys = {}
-        while bounds() do
-            skip_ws()
-            local kt = parse_key_token()
-            if kt.is_empty and not kt.quoted then
-                add_err("Empty key segment"); break
-            end
-            table.insert(keys, kt)
-            skip_ws()
-            if char() == "." then step() else break end
-        end
-        return keys
+        parse_bool_special(pid)
     end
 
     -- ===== document loop =====
-    ---@return string?
-    local function read_trailing_comment()
-        skip_ws()
-        if char() ~= "#" then return nil end
-        local buf = {}
-        while bounds() and not is_nl() do
-            if is_comment_ctrl() then add_err("Control character in comment") end
-            table.insert(buf, char()); step()
-        end
-        return table.concat(buf)
-    end
 
-    ---@type fun(parent_id: integer, value_node: easytasks.toml.ValueNode?)
-    local expand_value
-    expand_value = function(parent_id, value_node)
-        if not value_node then return end
-        if value_node.kind == NodeKind.MissingValue then
-            ast:add_item(parent_id, next_id(), value_node)
-            return
-        end
-        if value_node.kind == NodeKind.Literal then
-            ast:add_item(parent_id, next_id(), value_node)
-        elseif value_node.kind == NodeKind.InlineTable then
-            local tbl_id = next_id()
-            ast:add_item(parent_id, tbl_id, value_node)
-            for _, item in ipairs(value_node.ordered_items or value_node.pairs) do
-                if item.kind == NodeKind.Comment then
-                    ast:add_item(tbl_id, next_id(), item)
-                else
-                    local pair_id = next_id()
-                    ast:add_item(tbl_id, pair_id,
-                        { kind = NodeKind.KeyValuePair, key = item.key, value = item.value, range = item.key.range })
-                    ast:add_item(pair_id, next_id(),
-                        { kind = NodeKind.Key, value = item.key.value, range = item.key.range })
-                    expand_value(pair_id, item.value)
-                end
-            end
-        elseif value_node.kind == NodeKind.Array then
-            local arr_id = next_id()
-            ast:add_item(parent_id, arr_id, value_node)
-            for _, item in ipairs(value_node.items) do
-                if item.kind == NodeKind.Comment then
-                    ast:add_item(arr_id, next_id(), item)
-                else
-                    expand_value(arr_id, item)
-                end
-            end
-        end
-    end
-
-    local current_section_id = nil
+    local doc_id            = cst:root_id()
+    local current_section   = nil  -- nil = document root level
 
     while bounds() do
-        skip_ws()
+        local parent = current_section or doc_id
+        emit_trivia(parent)
         if not bounds() then break end
 
-        if is_nl() then
-            skip_nl()
-        elseif char() == "#" then
-            local sr, sc = row, col
-            local buf = {}
-            while bounds() and not is_nl() do
-                if is_comment_ctrl() then add_err("Control character in comment") end
-                table.insert(buf, char()); step()
-            end
-            ast:add_item(current_section_id, next_id(),
-                { kind = NodeKind.Comment, text = table.concat(buf), range = mkr(sr, sc, row, col) })
-        elseif char() == "[" then
-            local sr, sc = row, col
-            step()
+        if char() == "[" then
+            -- close previous section
+            if current_section then cst:close(current_section, row, col) end
+
+            local sec_sr, sec_sc = row, col
+            step()  -- first [
             local is_aot = char() == "["
             if is_aot then step() end
-            skip_ws()
 
-            local keys, valid = {}, true
+            local sec_kind = is_aot and K.AotSection   or K.TableSection
+            local hdr_kind = is_aot and K.AotHeader    or K.TableHeader
+
+            local sec_id = cst:open(doc_id, sec_kind, sec_sr, sec_sc)
+            local hdr_id = cst:open(sec_id, hdr_kind, sec_sr, sec_sc)
+
+            -- emit opening bracket(s) into header
+            cst:token(hdr_id, K.LBracket, "[", nil, sec_sr, sec_sc, row, col)
+            if is_aot then
+                local b2r, b2c = row, col
+                cst:token(hdr_id, K.LBracket, "[", nil, b2r, b2c, row, col)
+            end
+
+            -- parse header keys
+            local key_count = 0
+            local valid     = true
             while bounds() and char() ~= "]" and not is_nl() do
-                skip_ws()
+                emit_inline_ws(hdr_id)
                 if char() == "]" then break end
-                local kt = parse_key_token()
-                if kt.is_empty and not kt.quoted then
-                    add_err("Unexpected character in section header: " .. char())
-                    step()
+                local c    = char()
+                local is_q = (c == '"' or c == "'")
+                local is_b = c:match("[%w%-_]") ~= nil
+                if not is_q and not is_b then
+                    add_err("Unexpected character in section header: " .. c)
+                    cst:token(hdr_id, K.Error, c, nil, row, col, row, col); step()
+                    valid = false
                 else
-                    table.insert(keys, kt)
-                    skip_ws()
+                    local val = parse_key_token(hdr_id)
+                    if val == "" and not is_q then
+                        add_err("Empty key in section header"); valid = false; break
+                    end
+                    key_count = key_count + 1
+                    emit_inline_ws(hdr_id)
                     if char() == "." then
-                        step()
+                        local dr, dc = row, col; step()
+                        cst:token(hdr_id, K.Dot, ".", nil, dr, dc, row, col)
                         if char() == "]" or not bounds() or is_nl() then
-                            add_err("Trailing dot in section header")
-                            valid = false
-                            break
+                            add_err("Trailing dot in section header"); valid = false; break
                         end
                     elseif char() ~= "]" and bounds() and not is_nl() then
                         add_err("Unexpected character in section header, expected '.' or ']'")
@@ -797,95 +682,49 @@ function M.parse(text)
                 end
             end
 
-            if #keys == 0 and valid then
-                add_err("Empty section header")
-                valid = false
+            if key_count == 0 and valid then
+                add_err("Empty section header"); valid = false
             end
+            _ = valid  -- referenced for correctness; errors already added
 
+            -- closing bracket(s)
             if char() ~= "]" then
-                add_err("Missing ] in section header"); valid = false
+                add_err("Missing ] in section header")
             else
-                step()
+                local cr, cc = row, col; step()
+                cst:token(hdr_id, K.RBracket, "]", nil, cr, cc, row, col)
             end
-
             if is_aot then
                 if char() ~= "]" then
-                    add_err("Missing ]] in array-of-tables header"); valid = false
+                    add_err("Missing ]] in array-of-tables header")
                 else
-                    step()
+                    local cr, cc = row, col; step()
+                    cst:token(hdr_id, K.RBracket, "]", nil, cr, cc, row, col)
                 end
             end
 
-            local kind = valid and (is_aot and NodeKind.ArrayOfTablesSection or NodeKind.TableSection) or
-                (is_aot and NodeKind.PartialArrayOfTablesSection or NodeKind.PartialTableSection)
-            local section_id = next_id()
-            ast:add_item(nil, section_id,
-                { kind = kind, keys = keys, trailing_comment = read_trailing_comment(), range = mkr(sr, sc, row, col) })
-            if bounds() and not is_nl() then
+            emit_inline_ws(hdr_id)
+            if char() == "#" then emit_comment(hdr_id) end
+            cst:close(hdr_id, row, col)
+
+            if bounds() and not is_nl() and char() ~= "#" then
                 add_err("Unexpected content after section header")
                 while bounds() and not is_nl() do step() end
             end
-            current_section_id = section_id
-            if bounds() and is_nl() then skip_nl() end
+            if bounds() and is_nl() then emit_nl(sec_id) end
+
+            current_section = sec_id
         else
-            local sr, sc = row, col
-            local keys = parse_key_list()
-            skip_ws()
-
-            if #keys == 0 or (keys[1].is_empty and not keys[1].quoted) then
-                add_err("Empty key segment")
-                while bounds() and not is_nl() do step() end
-                if bounds() then skip_nl() end
-            elseif char() ~= "=" then
-                add_err("Expected = after key")
-                while bounds() and not is_nl() do step() end
-                if bounds() then skip_nl() end
-            else
-                step()
-                skip_ws()
-                local vs_r, vs_c = row, col
-                local val = parse_value()
-                if not val or (val.kind == NodeKind.Literal and val.token.value == nil) then
-                    val = { kind = NodeKind.MissingValue, range = mkr(vs_r, vs_c, row, col) }
-                end
-                local val_range = val.range
-
-                local node_val = val
-                if #keys > 1 then
-                    for i = #keys, 2, -1 do
-                        node_val = {
-                            kind = NodeKind.InlineTable,
-                            pairs = { { key = keys[i], value = node_val } },
-                            multiline = false,
-                            range = node_val and node_val.range or mkr(sr, sc, row, col)
-                        }
-                    end
-                end
-
-                local kvp_id = next_id()
-                ast:add_item(current_section_id, kvp_id,
-                    {
-                        kind = NodeKind.KeyValuePair,
-                        key = keys[1],
-                        value = node_val,
-                        value_range = val_range,
-                        trailing_comment =
-                            read_trailing_comment(),
-                        range = mkr(sr, sc, row, col)
-                    })
-                ast:add_item(kvp_id, next_id(),
-                    { kind = NodeKind.Key, value = keys[1].value, range = keys[1].range })
-                expand_value(kvp_id, node_val)
-                if bounds() and not is_nl() then
-                    add_err("Expected newline after key-value pair")
-                    while bounds() and not is_nl() do step() end
-                end
-                if bounds() and is_nl() then skip_nl() end
-            end
+            parse_kvp(current_section or doc_id)
+            if bounds() and is_nl() then emit_nl(current_section or doc_id) end
         end
     end
 
-    return { ok = #errors == 0, ast = ast, errors = errors }
+    -- close last section and document
+    if current_section then cst:close(current_section, row, col) end
+    cst:close(doc_id, row, col)
+
+    return { ok = #errors == 0, cst = cst, errors = errors }
 end
 
 return M

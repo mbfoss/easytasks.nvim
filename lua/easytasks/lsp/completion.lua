@@ -2,10 +2,10 @@ local M          = {}
 
 local s_util     = require("easytasks.toml.schema_util")
 local schema_nav = require("easytasks.toml.schema_nav")
-local Ast        = require("easytasks.toml.Ast")
+local Cst        = require("easytasks.toml.Cst")
 
-local CK         = vim.lsp.protocol.CompletionItemKind
-local NodeKind   = Ast.NodeKind
+local CK = vim.lsp.protocol.CompletionItemKind
+local K  = Cst.Kind
 
 local empty_result = { isIncomplete = false, items = {} }
 
@@ -52,8 +52,6 @@ local function value_items(schema)
     return {}
 end
 
--- Gather all navigable [table] paths from the schema and filter by the prefix
--- of the keys already typed in the header.
 ---@param root_schema table
 ---@param root_data   any
 ---@param typed_keys  string[]
@@ -72,7 +70,6 @@ local function table_header_items(root_schema, root_data, typed_keys)
     return items
 end
 
--- Same for [[array-of-tables]] headers.
 ---@param root_schema table
 ---@param root_data   any
 ---@param typed_keys  string[]
@@ -91,6 +88,22 @@ local function aot_header_items(root_schema, root_data, typed_keys)
     return items
 end
 
+-- Walk up from token_id in the CST to find the nearest ancestor of a given kind set.
+local function ancestor_of_kind(cst, id, ...)
+    return cst:ancestor_of_kind(id, ...)
+end
+
+-- True if the cursor position (row, col) is past the Equals token in a KVP.
+local function cursor_after_equals(cst, kvp_id, row, col)
+    for _, d in cst:iter_semantic(kvp_id) do
+        if d.kind == K.Equals then
+            local r = d.range
+            return row > r[3] or (row == r[3] and col >= r[4])
+        end
+    end
+    return false
+end
+
 ---@param context easytasks.LspBufferContext
 ---@param params lsp.CompletionParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
@@ -99,66 +112,54 @@ function M.handler(context, params, callback)
     if not context.schema then callback(nil, empty_result); return end
     local schema = context.schema --[[@as table]]
 
-    local row  = params.position.line
-    local col  = params.position.character
-    local dt   = context.decode_tree
+    local row = params.position.line
+    local col = params.position.character
+    local dt  = context.decode_tree
+    local cst = context.cst
+
+    if not cst then callback(nil, empty_result); return end
+
     local data = context.data
 
-    -- Step 1: classify context via the AST node at cursor (Taplo: context-first)
-    local ast_node = context.ast:node_at(row, col)
+    -- token_at always returns a valid id (falls back to root)
+    local tok_id  = cst:token_at(row, col)
+    local tok_d   = cst:data(tok_id)
+    local tok_k   = tok_d and tok_d.kind
 
-    if ast_node then
-        local kind = ast_node.node.kind
+    -- ── Header contexts ──────────────────────────────────────────────────────
 
-        -- TABLE HEADER [foo.bar] — offer navigable object paths filtered by prefix
-        if kind == NodeKind.TableSection or kind == NodeKind.PartialTableSection then
-            local keys = {}
-            for _, kt in ipairs(ast_node.node.keys) do keys[#keys + 1] = kt.value end
-            callback(nil, { isIncomplete = false, items = table_header_items(schema, data, keys) })
-            return
-        end
+    local hdr_id = ancestor_of_kind(cst, tok_id, K.TableHeader)
+    if hdr_id then
+        local keys = cst:get_keys(hdr_id)
+        local typed = {}
+        for _, kd in ipairs(keys) do typed[#typed + 1] = kd.value end
+        callback(nil, { isIncomplete = false, items = table_header_items(schema, data, typed) })
+        return
+    end
 
-        -- ARRAY-OF-TABLES HEADER [[foo.bar]] — offer array-of-object paths
-        if kind == NodeKind.ArrayOfTablesSection or kind == NodeKind.PartialArrayOfTablesSection then
-            local keys = {}
-            for _, kt in ipairs(ast_node.node.keys) do keys[#keys + 1] = kt.value end
-            callback(nil, { isIncomplete = false, items = aot_header_items(schema, data, keys) })
-            return
-        end
+    local aot_id = ancestor_of_kind(cst, tok_id, K.AotHeader)
+    if aot_id then
+        local keys = cst:get_keys(aot_id)
+        local typed = {}
+        for _, kd in ipairs(keys) do typed[#typed + 1] = kd.value end
+        callback(nil, { isIncomplete = false, items = aot_header_items(schema, data, typed) })
+        return
+    end
 
-        -- VALUE side: syntactic value node
-        if kind == NodeKind.Literal or kind == NodeKind.Array or kind == NodeKind.MissingValue then
+    -- ── Inside a KVP ─────────────────────────────────────────────────────────
+
+    local kvp_id = ancestor_of_kind(cst, tok_id, K.KeyValuePair)
+    if not kvp_id and tok_k == K.KeyValuePair then kvp_id = tok_id end
+
+    if kvp_id then
+        if cursor_after_equals(cst, kvp_id, row, col) then
+            -- value side
             local dt_id = dt:pos_to_id(row, col)
             local sch
             if dt_id then sch = schema_nav.schema_at(schema, data, dt, dt_id) end
             callback(nil, { isIncomplete = false, items = value_items(sch) })
-            return
-        end
-
-        -- KVP: cursor somewhere inside a key-value pair — use value_range to decide side
-        if kind == NodeKind.KeyValuePair then
-            local vr = ast_node.node.value_range
-            local on_value = vr and (row > vr[1] or (row == vr[1] and col >= vr[2]))
-            if on_value then
-                local dt_id = dt:pos_to_id(row, col)
-                local sch
-                if dt_id then sch = schema_nav.schema_at(schema, data, dt, dt_id) end
-                callback(nil, { isIncomplete = false, items = value_items(sch) })
-            else
-                local dt_id = dt:pos_to_id(row, col)
-                local parent_id = dt_id and dt:get_parent_id(dt_id)
-                local sch
-                if parent_id then
-                    sch = schema_nav.schema_at(schema, data, dt, parent_id)
-                else
-                    sch = schema_nav.flatten(schema, data)
-                end
-                callback(nil, { isIncomplete = false, items = key_items(sch) })
-            end
-            return
-        end
-        -- KEY: cursor on the key text → offer sibling keys from the enclosing scope
-        if kind == NodeKind.Key then
+        else
+            -- key side — offer sibling keys from enclosing scope
             local dt_id     = dt:pos_to_id(row, col)
             local parent_id = dt_id and dt:get_parent_id(dt_id)
             local sch
@@ -168,24 +169,54 @@ function M.handler(context, params, callback)
                 sch = schema_nav.flatten(schema, data)
             end
             callback(nil, { isIncomplete = false, items = key_items(sch) })
-            return
         end
-
-        -- INLINE TABLE: cursor in whitespace inside { } → key completion for this table
-        if kind == NodeKind.InlineTable then
-            local dt_id = dt:pos_to_id(row, col)
-            local sch
-            if dt_id then
-                sch = schema_nav.schema_at(schema, data, dt, dt_id)
-            else
-                sch = schema_nav.flatten(schema, data)
-            end
-            callback(nil, { isIncomplete = false, items = key_items(sch) })
-            return
-        end
+        return
     end
 
-    -- Comment, unknown node kind, or no AST node at cursor: no completions
+    -- ── Inside an inline table (whitespace/trivia, not in a KVP child) ───────
+
+    local itbl_id = ancestor_of_kind(cst, tok_id, K.InlineTable)
+    if itbl_id then
+        local dt_id = dt:pos_to_id(row, col)
+        local sch
+        if dt_id then
+            sch = schema_nav.schema_at(schema, data, dt, dt_id)
+        else
+            sch = schema_nav.flatten(schema, data)
+        end
+        callback(nil, { isIncomplete = false, items = key_items(sch) })
+        return
+    end
+
+    -- ── Inside a table/aot section body (trivia between KVPs) ────────────────
+
+    local sec_id = ancestor_of_kind(cst, tok_id, K.TableSection, K.AotSection)
+    if sec_id then
+        local dt_id = dt:pos_to_id(row, col)
+        local sch
+        if dt_id then
+            sch = schema_nav.schema_at(schema, data, dt, dt_id)
+        else
+            sch = schema_nav.flatten(schema, data)
+        end
+        callback(nil, { isIncomplete = false, items = key_items(sch) })
+        return
+    end
+
+    -- ── Document root (before any section) ───────────────────────────────────
+
+    if tok_k == K.Document or ancestor_of_kind(cst, tok_id, K.Document) then
+        local dt_id = dt:pos_to_id(row, col)
+        local sch
+        if dt_id then
+            sch = schema_nav.schema_at(schema, data, dt, dt_id)
+        else
+            sch = schema_nav.flatten(schema, data)
+        end
+        callback(nil, { isIncomplete = false, items = key_items(sch) })
+        return
+    end
+
     callback(nil, empty_result)
 end
 

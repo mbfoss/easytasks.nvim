@@ -2,24 +2,43 @@ local M          = {}
 
 local parser     = require("easytasks.toml.parser")
 local DecodeTree = require("easytasks.toml.DecodeTree")
-local Ast        = require("easytasks.toml.Ast")
+local Cst        = require("easytasks.toml.Cst")
 
-local NodeKind   = Ast.NodeKind
+local K          = Cst.Kind
 
----@param ast easytasks.toml.Ast
+-- CST kind → TOML type string (for type_map)
+local kind_to_type = {
+    [K.String]        = "string",
+    [K.Integer]       = "integer",
+    [K.Float]         = "float",
+    [K.Bool]          = "bool",
+    [K.Datetime]      = "datetime",
+    [K.DatetimeLocal] = "datetime-local",
+    [K.DateLocal]     = "date-local",
+    [K.TimeLocal]     = "time-local",
+}
+
+local literal_kinds = {
+    [K.String]        = true, [K.Integer]       = true, [K.Float]  = true,
+    [K.Bool]          = true, [K.Datetime]       = true,
+    [K.DatetimeLocal] = true, [K.DateLocal]      = true, [K.TimeLocal] = true,
+}
+
+---@param cst easytasks.toml.Cst
 ---@param with_type_map boolean?
 ---@return any                       data
 ---@return easytasks.toml.DecodeTree decode_tree
 ---@return table[]                   errors
----@return table<integer,string>?    value_types  node_id → TOML type, only when with_type_map is true
-local function evaluate(ast, with_type_map)
+---@return table<integer,string>?    value_types
+local function evaluate(cst, with_type_map)
     local root       = vim.empty_dict()
     local dt         = DecodeTree.new()
     local errors     = {}
     local kind_by_id = {}
     local type_by_id = with_type_map and {} or nil
+
     local function set_type(id, t) if type_by_id then type_by_id[id] = t end end
-    local function add_err(e) table.insert(errors, e) end
+    local function add_err(e)      table.insert(errors, e) end
 
     local dead_end_table     = vim.empty_dict()
     local current_table      = root
@@ -27,193 +46,256 @@ local function evaluate(ast, with_type_map)
     local dotted_key_ids     = {}
     local explicit_table_ids = {}
 
-    local root_id            = dt:root_id()
+    local root_id = dt:root_id()
     dt:add_range_by_id(root_id, { 0, 0, 0, 0 })
     kind_by_id[root_id] = "Table"
     set_type(root_id, "table")
 
-    ---@type integer?
-    local current_id = root_id
+    local current_id = root_id  ---@type integer?
 
-    local eval_value
-    eval_value = function(node, id)
-        if not node then return nil end
+    local eval_value  -- forward decl
 
-        if node.kind == NodeKind.Literal then
-            kind_by_id[id] = "Literal"
-            set_type(id, node.token.literalkind)
-            return node.token.value
-        elseif node.kind == NodeKind.Array then
-            kind_by_id[id] = "Array"
-            set_type(id, "array")
-            local result = {}
-            for _, item_node in ipairs(node.items) do
-                if item_node.kind ~= NodeKind.Comment then
-                    local index   = #result + 1
-                    local item_id = dt:add_child(id, tostring(index), item_node.range)
-                    table.insert(result, eval_value(item_node, item_id))
-                end
-            end
-            return result
-        elseif node.kind == NodeKind.InlineTable then
-            kind_by_id[id] = "Table"
-            set_type(id, "table")
-            if node.explicit then
-                inline_table_ids[id] = true
-            else
-                dotted_key_ids[id] = true
-            end
-            local result = vim.empty_dict()
-            for _, pair in ipairs(node.pairs) do
-                local key = pair.key.value
-                if result[key] ~= nil then
-                    add_err({
-                        message = "Duplicate key in inline table: " .. key,
-                        range   = pair.key.range or pair.value.range,
-                    })
+    -- Resolve a chain of dotted-key data objects as an implicit table path, starting from
+    -- (scope_table, scope_id), navigating keys[from..to].  Returns (table, id) at the leaf,
+    -- or (nil, nil) on error.
+    local function navigate_dotted(keys, from, to, scope_table, scope_id)
+        local cur_table = scope_table
+        local cur_id    = scope_id
+        for i = from, to do
+            if not cur_id then return nil, nil end
+            local key       = keys[i].value
+            local key_range = keys[i].range
+            local next_id   = dt:get_child_id(cur_id, key)
+            local nkind     = next_id and kind_by_id[next_id]
+
+            if next_id then
+                if nkind == "Table" then
+                    if inline_table_ids[next_id] then
+                        add_err({ message = "Cannot extend inline table: " .. key, range = key_range })
+                        return nil, nil
+                    end
+                    cur_table = cur_table[key]
+                    cur_id    = next_id
+                elseif nkind == "ArrayOfTables" then
+                    local arr         = cur_table[key]
+                    local idx         = #arr
+                    local arr_elem_id = dt:get_child_id(next_id, tostring(idx))
+                    if not arr_elem_id then return nil, nil end
+                    cur_table = arr[idx]
+                    cur_id    = arr_elem_id
                 else
-                    local pair_range = pair.value and {
-                        pair.key.range[1], pair.key.range[2],
-                        pair.value.range[3], pair.value.range[4],
-                    } or pair.key.range
-                    local found_id   = dt:get_child_id(id, key)
-                    local pair_id    = found_id or dt:add_child(id, key, pair_range)
-                    if found_id then dt:add_range_by_id(pair_id, pair_range) end
-                    if pair.value == nil then dt:mark_as_key_node(pair_id) end
-                    dt:set_key_range(pair_id, pair.key.range)
-                    if not pair.no_equals then dt:set_value_range(pair_id, pair.value_range) end
-                    result[key] = eval_value(pair.value, pair_id)
+                    add_err({ message = "Cannot extend non-table key: " .. key, range = key_range })
+                    return nil, nil
                 end
+                dt:add_range_by_id(next_id, key_range)
+            else
+                cur_table[key] = vim.empty_dict()
+                local new_id   = dt:add_child(cur_id, key, key_range)
+                kind_by_id[new_id] = "Table"
+                set_type(new_id, "table")
+                dotted_key_ids[new_id] = true
+                cur_table = cur_table[key]
+                cur_id    = new_id
+            end
+        end
+        return cur_table, cur_id
+    end
+
+    -- Process a KVP CST node at (scope_table, scope_id). Handles dotted keys.
+    local function process_kvp_at(kvp_id, scope_table, scope_id)
+        if not scope_id then return end
+        local keys = cst:get_keys(kvp_id)
+        if #keys == 0 then return end
+
+        local val_id, val_data = cst:get_value(kvp_id)
+        -- Determine full KVP range
+        local kvp_range = cst:range(kvp_id) or { 0, 0, 0, 0 }
+
+        -- Navigate intermediate dotted keys (all but the last)
+        local leaf_table, leaf_id
+        if #keys > 1 then
+            leaf_table, leaf_id = navigate_dotted(keys, 1, #keys - 1, scope_table, scope_id)
+        else
+            leaf_table, leaf_id = scope_table, scope_id
+        end
+        if not leaf_table then return end
+
+        local last_key   = keys[#keys]
+        local key        = last_key.value
+        local key_range  = last_key.range
+        local existing_id   = dt:get_child_id(leaf_id, key)
+        local existing_kind = existing_id and kind_by_id[existing_id]
+
+        if existing_id and existing_kind then
+            -- Dotted key extending an existing implicit table is allowed
+            if existing_kind == "Table" and val_data and val_data.kind == K.InlineTable then
+                if inline_table_ids[existing_id] then
+                    add_err({ message = "Cannot extend inline table: " .. key, range = key_range })
+                elseif dotted_key_ids[existing_id] then
+                    -- merge dotted values in
+                    local fresh = eval_value(val_id, val_data, existing_id)
+                    if type(leaf_table[key]) == "table" and type(fresh) == "table" then
+                        for k, v in pairs(fresh) do
+                            leaf_table[key][k] = v
+                        end
+                    end
+                else
+                    add_err({ message = "Cannot redefine table as dotted key: " .. key, range = key_range })
+                end
+            elseif existing_kind == "Table" and (not val_data or val_data.kind ~= K.InlineTable) then
+                add_err({ message = "Cannot overwrite table with non-table value: " .. key, range = key_range })
+            else
+                local msg = "Duplicate key: " .. key
+                if existing_kind == "ArrayOfTables" then
+                    msg = "Cannot overwrite array of tables: " .. key
+                end
+                add_err({ message = msg, range = key_range })
+            end
+        else
+            local child_id = dt:add_child(leaf_id, key, kvp_range)
+            dt:set_key_range(child_id, key_range)
+            if val_data then dt:set_value_range(child_id, val_data.range) end
+            leaf_table[key] = eval_value(val_id, val_data, child_id)
+        end
+    end
+
+    -- Process KVPs that are direct children of a section or the document.
+    local function process_section_kvps(sec_id, scope_table, scope_id)
+        for kvp_id, d in cst:iter_semantic(sec_id) do
+            if d.kind == K.KeyValuePair then
+                process_kvp_at(kvp_id, scope_table, scope_id)
+            end
+        end
+    end
+
+    -- Evaluate an inline table: iterate its KVP children (handling dotted keys).
+    local function eval_inline_table(node_id, dt_id)
+        kind_by_id[dt_id] = "Table"
+        set_type(dt_id, "table")
+        inline_table_ids[dt_id] = true
+        local result = vim.empty_dict()
+
+        local function process_inline_kvp(kvp_id, scope_tbl, scope_id)
+            if not scope_id then return end
+            local keys = cst:get_keys(kvp_id)
+            if #keys == 0 then return end
+            local vi, vd   = cst:get_value(kvp_id)
+            local kvpr     = cst:range(kvp_id) or { 0, 0, 0, 0 }
+
+            local leaf_tbl, leaf_id
+            if #keys > 1 then
+                leaf_tbl, leaf_id = navigate_dotted(keys, 1, #keys - 1, scope_tbl, scope_id)
+            else
+                leaf_tbl, leaf_id = scope_tbl, scope_id
+            end
+            if not leaf_tbl then return end
+
+            local last = keys[#keys]
+            local key  = last.value
+            if leaf_tbl[key] ~= nil then
+                add_err({ message = "Duplicate key in inline table: " .. key, range = last.range or kvpr })
+            else
+                local sub_id = dt:add_child(leaf_id, key, kvpr)
+                dt:set_key_range(sub_id, last.range)
+                if vd then dt:set_value_range(sub_id, vd.range) end
+                leaf_tbl[key] = eval_value(vi, vd, sub_id)
+            end
+        end
+
+        for kvp_id, d in cst:iter_semantic(node_id) do
+            if d.kind == K.KeyValuePair then
+                process_inline_kvp(kvp_id, result, dt_id)
+            end
+        end
+        return result
+    end
+
+    eval_value = function(val_id, val_data, dt_id)
+        if not val_data then return nil end
+        local k = val_data.kind
+
+        if k == K.MissingValue or k == K.Error then
+            return nil
+        end
+
+        if literal_kinds[k] then
+            kind_by_id[dt_id] = "Literal"
+            set_type(dt_id, kind_to_type[k] or "string")
+            return val_data.value
+        end
+
+        if k == K.Array then
+            kind_by_id[dt_id] = "Array"
+            set_type(dt_id, "array")
+            local result = {}
+            local idx    = 0
+            for item_id, item_d in cst:iter_values(val_id) do
+                idx = idx + 1
+                local item_dt_id = dt:add_child(dt_id, tostring(idx), item_d.range)
+                table.insert(result, eval_value(item_id, item_d, item_dt_id))
             end
             return result
+        end
+
+        if k == K.InlineTable then
+            return eval_inline_table(val_id, dt_id)
         end
 
         return nil
     end
 
-    local function merge_values(target_tbl, incoming_val, id)
-        if explicit_table_ids[id] then
-            add_err({ message = "Cannot extend explicitly-defined table via dotted keys", range = dt:range_of_id(id) })
-            return
-        end
-        if type(target_tbl) == "table" and type(incoming_val) == "table" and kind_by_id[id] == "Table" then
-            for k, v in pairs(incoming_val) do
-                local sub_id = dt:get_child_id(id, k)
-                if target_tbl[k] ~= nil and sub_id then
-                    merge_values(target_tbl[k], v, sub_id)
-                else
-                    target_tbl[k] = v
-                end
+    -- ===== main document walk =====
+
+    for sec_id, d in cst:iter_semantic(cst:root_id()) do
+        if d.kind == K.TableSection then
+            current_table = root
+            current_id    = dt:root_id()
+            local invalid = false
+
+            -- Find the TableHeader child and extract keys
+            local hdr_id
+            for cid, cd in cst:iter_semantic(sec_id) do
+                if cd.kind == K.TableHeader then hdr_id = cid; break end
             end
-        else
-            add_err({ message = "Duplicate key definition structure conflict", range = dt:range_of_id(id) })
-        end
-    end
-
-    local function full_section_range(ast_id, header_node)
-        local r = header_node.range or { 0, 0, 0, 0 }
-        local er, ec = r[3], r[4]
-        for _, child in ast:iter_children(ast_id) do
-            if child.range and (child.range[3] > er or (child.range[3] == er and child.range[4] > ec)) then
-                er, ec = child.range[3], child.range[4]
+            local keys = hdr_id and cst:get_keys(hdr_id) or {}
+            if #keys == 0 then
+                add_err({ message = "Empty table header", range = cst:range(sec_id) or { 0, 0, 0, 0 } })
+                invalid = true
             end
-        end
-        return { r[1], r[2], er, ec }
-    end
 
-    local function process_kvp(node)
-        if not current_id then return end
-        if not node.key or not node.value then return end
-        local key           = node.key.value
-        local existing_id   = dt:get_child_id(current_id, key)
-        local existing_kind = existing_id and kind_by_id[existing_id]
+            local sec_range = cst:range(sec_id) or { 0, 0, 0, 0 }
+            local nkeys     = #keys
 
-        if existing_id and existing_kind then
-            if existing_kind == "Table" and node.value.kind == NodeKind.InlineTable then
-                if inline_table_ids[existing_id] then
-                    add_err({ message = "Cannot extend inline table: " .. key, range = node.key.range or node.range })
-                elseif node.value.explicit then
-                    add_err({
-                        message = "Cannot redefine implicit table as inline table: " .. key,
-                        range = node.key
-                            .range or node.range
-                    })
-                else
-                    local fresh_val = eval_value(node.value, existing_id)
-                    merge_values(current_table[key], fresh_val, existing_id)
-                    dt:add_range_by_id(existing_id, node.range)
-                end
-            else
-                local msg = "Duplicate key: " .. key
-                if existing_kind == "Table" then
-                    msg = "Cannot overwrite table structure with key: " .. key
-                elseif existing_kind == "ArrayOfTables" then
-                    msg = "Cannot overwrite array of tables structure with key: " .. key
-                end
-                add_err({ message = msg, range = node.key.range or node.range })
-            end
-        else
-            local child_id = dt:add_child(current_id, key, node.range)
-            dt:set_key_range(child_id, node.key.range)
-            dt:set_value_range(child_id, node.value_range)
-            current_table[key] = eval_value(node.value, child_id)
-        end
-    end
-
-    for _, root_item in ipairs(ast:get_roots()) do
-        local id   = root_item.id
-        local node = root_item.data
-
-        if node.kind == NodeKind.TableSection then
-            current_table       = root
-            current_id          = dt:root_id()
-            local invalid       = false
-
-            local nkeys         = #node.keys
-            local section_range = full_section_range(id, node)
-            for i, key_token in ipairs(node.keys) do
-                if not current_id then
-                    invalid = true; break
-                end
-                local key       = key_token.value
+            for i, key_data in ipairs(keys) do
+                if not current_id then invalid = true; break end
+                local key       = key_data.value
+                local is_last   = (i == nkeys)
                 local next_id   = dt:get_child_id(current_id, key)
-                local kind      = next_id and kind_by_id[next_id]
-                local key_range = (i == nkeys) and section_range or (key_token.range or node.range)
+                local nkind     = next_id and kind_by_id[next_id]
+                local key_range = is_last and sec_range or (key_data.range or sec_range)
 
-                if kind == "ArrayOfTables" then
-                    if i == nkeys then
-                        add_err({
-                            message = "Cannot use table header for array-of-tables key: " .. key,
-                            range   = key_token.range or node.range,
-                        })
-                        invalid = true
-                        break
+                if nkind == "ArrayOfTables" then
+                    if is_last then
+                        add_err({ message = "Cannot use [table] for array-of-tables key: " .. key,
+                                  range = key_data.range or sec_range })
+                        invalid = true; break
                     end
                     assert(next_id)
                     local arr         = current_table[key]
                     local idx         = #arr
                     local arr_elem_id = dt:get_child_id(next_id, tostring(idx))
-                    if not arr_elem_id then
-                        invalid = true; break
-                    end
+                    if not arr_elem_id then invalid = true; break end
                     current_table = arr[idx]
                     current_id    = arr_elem_id
-                    dt:add_range_by_id(next_id, key_token.range or node.range)
-                elseif kind and kind ~= "Table" then
-                    add_err({
-                        message = "Cannot redefine non-table target: " .. key,
-                        range   = key_token.range or node.range,
-                    })
-                    invalid = true
-                    break
+                    dt:add_range_by_id(next_id, key_data.range or sec_range)
+                elseif nkind and nkind ~= "Table" then
+                    add_err({ message = "Cannot redefine non-table: " .. key, range = key_data.range or sec_range })
+                    invalid = true; break
                 else
                     if next_id and inline_table_ids[next_id] then
-                        add_err({
-                            message = "Cannot extend inline table with table header: " .. key,
-                            range   = key_token.range or node.range,
-                        })
-                        invalid = true
-                        break
+                        add_err({ message = "Cannot extend inline table with [table]: " .. key,
+                                  range = key_data.range or sec_range })
+                        invalid = true; break
                     end
                     if not next_id then
                         current_table[key] = vim.empty_dict()
@@ -230,143 +312,115 @@ local function evaluate(ast, with_type_map)
 
             if not invalid and current_id then
                 if explicit_table_ids[current_id] then
-                    add_err({ message = "Duplicate table header", range = node.range })
+                    add_err({ message = "Duplicate table header", range = sec_range })
                     invalid = true
                 elseif dotted_key_ids[current_id] then
-                    add_err({ message = "Cannot redefine table created by dotted key", range = node.range })
+                    add_err({ message = "Cannot redefine table created by dotted key", range = sec_range })
                     invalid = true
                 else
                     explicit_table_ids[current_id] = true
                 end
             end
 
-            if invalid then
-                current_table = dead_end_table
-                current_id    = nil
-            end
+            if invalid then current_table = dead_end_table; current_id = nil end
+            process_section_kvps(sec_id, current_table, current_id)
 
-            for _, data in ast:iter_children(id) do
-                if data.kind == NodeKind.KeyValuePair then
-                    process_kvp(data)
-                end
-            end
-        elseif node.kind == NodeKind.ArrayOfTablesSection then
-            current_table       = root
-            current_id          = dt:root_id()
-            local invalid       = false
-            local num_keys      = #node.keys
-            local section_range = full_section_range(id, node)
+        elseif d.kind == K.AotSection then
+            current_table = root
+            current_id    = dt:root_id()
+            local invalid = false
 
-            for i, key_token in ipairs(node.keys) do
-                if not current_id then
-                    invalid = true; break
-                end
-                local key     = key_token.value
+            local hdr_id
+            for cid, cd in cst:iter_semantic(sec_id) do
+                if cd.kind == K.AotHeader then hdr_id = cid; break end
+            end
+            local keys      = hdr_id and cst:get_keys(hdr_id) or {}
+            local sec_range = cst:range(sec_id) or { 0, 0, 0, 0 }
+            local num_keys  = #keys
+
+            for i, key_data in ipairs(keys) do
+                if not current_id then invalid = true; break end
+                local key     = key_data.value
                 local is_last = (i == num_keys)
                 local next_id = dt:get_child_id(current_id, key)
-                local kind    = next_id and kind_by_id[next_id]
+                local nkind   = next_id and kind_by_id[next_id]
 
                 if is_last then
-                    if kind and kind ~= "ArrayOfTables" then
-                        add_err({
-                            message = "Cannot redefine non-array target as array of tables: " .. key,
-                            range   = key_token.range or node.range,
-                        })
-                        invalid = true
-                        break
+                    if nkind and nkind ~= "ArrayOfTables" then
+                        add_err({ message = "Cannot redefine non-array as [[aot]]: " .. key,
+                                  range = key_data.range or sec_range })
+                        invalid = true; break
                     end
-
                     if not next_id then
                         current_table[key] = {}
-                        next_id = dt:add_child(current_id, key, section_range)
+                        next_id = dt:add_child(current_id, key, sec_range)
                         kind_by_id[next_id] = "ArrayOfTables"
                     else
-                        dt:add_range_by_id(next_id, section_range)
+                        dt:add_range_by_id(next_id, sec_range)
                     end
                     set_type(next_id, "array")
-
-                    local tbl_arr  = current_table[key]
-                    local next_tbl = vim.empty_dict()
+                    local tbl_arr     = current_table[key]
+                    local next_tbl    = vim.empty_dict()
                     table.insert(tbl_arr, next_tbl)
-
-                    local arr_elem_id = dt:add_child(next_id, tostring(#tbl_arr), section_range)
-                    kind_by_id[arr_elem_id] = "Table"
-                    set_type(arr_elem_id, "table")
-
+                    local elem_id = dt:add_child(next_id, tostring(#tbl_arr), sec_range)
+                    kind_by_id[elem_id] = "Table"
+                    set_type(elem_id, "table")
                     current_table = next_tbl
-                    current_id    = arr_elem_id
+                    current_id    = elem_id
                 else
-                    if kind == "ArrayOfTables" then
+                    if nkind == "ArrayOfTables" then
                         assert(next_id)
                         local arr         = current_table[key]
                         local idx         = #arr
                         local arr_elem_id = dt:get_child_id(next_id, tostring(idx))
-                        if not arr_elem_id then
-                            invalid = true; break
-                        end
+                        if not arr_elem_id then invalid = true; break end
                         current_table = arr[idx]
                         current_id    = arr_elem_id
-                    elseif kind and kind ~= "Table" then
-                        add_err({
-                            message = "Cannot redefine non-table structural ancestor: " .. key,
-                            range   = key_token.range or node.range,
-                        })
-                        invalid = true
-                        break
+                    elseif nkind and nkind ~= "Table" then
+                        add_err({ message = "Cannot redefine non-table ancestor: " .. key,
+                                  range = key_data.range or sec_range })
+                        invalid = true; break
                     else
                         if next_id and inline_table_ids[next_id] then
-                            add_err({
-                                message = "Cannot extend inline table with array-of-tables header: " .. key,
-                                range   = key_token.range or node.range,
-                            })
-                            invalid = true
-                            break
+                            add_err({ message = "Cannot extend inline table with [[aot]]: " .. key,
+                                      range = key_data.range or sec_range })
+                            invalid = true; break
                         end
                         if not next_id then
                             current_table[key] = vim.empty_dict()
-                            next_id = dt:add_child(current_id, key, key_token.range or node.range)
+                            next_id = dt:add_child(current_id, key, key_data.range or sec_range)
                             kind_by_id[next_id] = "Table"
                         end
                         set_type(next_id, "table")
                         current_table = current_table[key]
                         current_id    = next_id
                     end
-                    if next_id then dt:add_range_by_id(next_id, key_token.range or node.range) end
+                    if next_id then dt:add_range_by_id(next_id, key_data.range or sec_range) end
                 end
             end
 
-            if invalid then
-                current_table = dead_end_table
-                current_id    = nil
-            end
+            if invalid then current_table = dead_end_table; current_id = nil end
+            process_section_kvps(sec_id, current_table, current_id)
 
-            for _, data in ast:iter_children(id) do
-                if data.kind == NodeKind.KeyValuePair then
-                    process_kvp(data)
-                end
-            end
-        elseif node.kind == NodeKind.KeyValuePair then
-            process_kvp(node)
+        elseif d.kind == K.KeyValuePair then
+            process_kvp_at(sec_id, root, dt:root_id())
         end
     end
 
     local value_types
     if with_type_map and type_by_id then
         value_types = {}
-        for tid, t in pairs(type_by_id) do
-            value_types[tid] = t
-        end
+        for tid, t in pairs(type_by_id) do value_types[tid] = t end
     end
 
     return root, dt, errors, value_types
 end
 
 function M.decode(input, opts)
-    local ast
+    local cst
 
     if type(input) == "string" then
         local parsed = parser.parse(input)
-
         if not parsed.ok then
             return {
                 ok          = false,
@@ -375,17 +429,16 @@ function M.decode(input, opts)
                 decode_tree = DecodeTree.new(),
             }
         end
-
-        ast = parsed.ast
+        cst = parsed.cst
     else
-        ast = input
+        cst = input
     end
 
-    local data, dt, errors, value_types = evaluate(ast, opts and opts.type_map)
+    local data, dt, errs, value_types = evaluate(cst, opts and opts.type_map)
     return {
-        ok          = #errors == 0,
+        ok          = #errs == 0,
         data        = data,
-        errors      = errors,
+        errors      = errs,
         decode_tree = dt,
         type_map    = (opts and opts.type_map) and value_types or nil,
     }

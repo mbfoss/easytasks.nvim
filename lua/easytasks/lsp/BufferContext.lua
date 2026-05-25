@@ -1,6 +1,6 @@
 ---@class easytasks.LspBufferContext
 ---@field bufnr         number
----@field ast           easytasks.toml.Ast
+---@field cst           easytasks.toml.Cst
 ---@field parse_errors  table
 ---@field data          any
 ---@field decode_errors table

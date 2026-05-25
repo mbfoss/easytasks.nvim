@@ -67,9 +67,9 @@ end
 local function update_context(bufnr, context)
   local text            = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
   local parsed          = parser.parse(text)
-  context.ast           = parsed.ast
+  context.cst           = parsed.cst
   context.parse_errors  = parsed.errors
-  local decoded         = decoder.decode(context.ast)
+  local decoded         = decoder.decode(parsed.cst)
   context.data          = decoded.data
   context.decode_errors = decoded.errors
   context.decode_tree   = decoded.decode_tree
