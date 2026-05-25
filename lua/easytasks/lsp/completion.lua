@@ -34,7 +34,7 @@ local function value_items(schema)
         for _, v in ipairs(schema.enum) do
             local insert = type(v) == "string" and ('"' .. v .. '"') or tostring(v)
             items[#items + 1] = {
-                label      = tostring(v),
+                label      = insert,
                 kind       = CK.Value,
                 detail     = s_util.get_type_label(schema),
                 insertText = insert,
