@@ -564,26 +564,27 @@ function M.parse(text)
             if char() ~= "=" then
                 add_err("Expected = in inline table")
                 cst:close(kvp_id, row, col)
-                break
-            end
-
-            local eq_r, eq_c = row, col; step()
-            cst:token(kvp_id, K.Equals, "=", nil, eq_r, eq_c, row, col)
-            emit_trivia(kvp_id)
-
-            if bounds() and char() ~= "," and char() ~= "}" then
-                parse_value(kvp_id)
-            end
-            cst:close(kvp_id, row, col)
-
-            emit_trivia(tbl_id)
-            if char() == "," then
-                local cr, cc = row, col; step()
-                cst:token(tbl_id, K.Comma, ",", nil, cr, cc, row, col)
-            elseif char() == "}" then
-                break
+                -- cursor is on the newline; emit_trivia at loop top will consume it
+                -- and the next iteration picks up the following key = value
             else
-                break
+                local eq_r, eq_c = row, col; step()
+                cst:token(kvp_id, K.Equals, "=", nil, eq_r, eq_c, row, col)
+                emit_trivia(kvp_id)
+
+                if bounds() and char() ~= "," and char() ~= "}" then
+                    parse_value(kvp_id)
+                end
+                cst:close(kvp_id, row, col)
+
+                emit_trivia(tbl_id)
+                if char() == "," then
+                    local cr, cc = row, col; step()
+                    cst:token(tbl_id, K.Comma, ",", nil, cr, cc, row, col)
+                elseif char() == "}" then
+                    break
+                else
+                    break
+                end
             end
         end
 
