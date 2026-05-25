@@ -30,19 +30,30 @@ local function untag(v)
             return math.floor(tonumber(val) or 0)
         elseif typ == "float" then
             local s = tostring(val)
-            if s == "nan"  then return { __toml_raw = "nan" } end
-            if s == "inf"  then return { __toml_raw = "inf" } end
-            if s == "-inf" then return { __toml_raw = "-inf" } end
+            if s == "nan"  then return encoder.raw("nan") end
+            if s == "inf"  then return encoder.raw("inf") end
+            if s == "-inf" then return encoder.raw("-inf") end
             local n = tonumber(s)
             local formatted = string.format("%.17g", n)
             if not formatted:find("[%.eE]") then formatted = formatted .. ".0" end
-            return { __toml_raw = formatted }
+            return encoder.raw(formatted)
         elseif typ == "bool" then
             return val == "true" or val == true
         elseif datetime_types[typ] then
             -- Emit verbatim — no quotes
-            return { __toml_raw = tostring(val) }
+            return encoder.raw(tostring(val))
         end
+    end
+
+    -- vim.json.decode sets __jsontype="object" on decoded objects (including empty {}).
+    -- Check this before the array heuristic so empty dicts aren't mistaken for empty arrays.
+    local mt = getmetatable(v)
+    if mt and mt.__jsontype == "object" then
+        local tbl = vim.empty_dict()
+        for k, child in pairs(v) do
+            tbl[k] = untag(child)
+        end
+        return tbl
     end
 
     -- Array: consecutive integer keys 1..n (toml-test arrays are Lua arrays after json.decode)

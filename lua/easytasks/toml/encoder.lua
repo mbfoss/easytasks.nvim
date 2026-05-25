@@ -1,5 +1,21 @@
 local M = {}
 
+--- Wrap a pre-formatted TOML scalar so the encoder emits it verbatim.
+---@param s string
+---@return table
+function M.raw(s)
+    return setmetatable({}, { __toml_raw = s })
+end
+
+--- Returns the verbatim string if v was created with M.raw(), otherwise nil.
+---@param v any
+---@return string?
+local function raw_value(v)
+    if type(v) ~= "table" then return nil end
+    local mt = getmetatable(v)
+    return mt and type(mt.__toml_raw) == "string" and mt.__toml_raw or nil
+end
+
 ---@param key string
 ---@return boolean
 local function needs_quotes(key)
@@ -128,8 +144,8 @@ encode_value = function(v)
     if t == "number"  then return encode_number(v) end
     if t == "boolean" then return tostring(v) end
     if t == "table" then
-        -- {__toml_raw = "..."} emits the string verbatim (datetimes, pre-formatted floats).
-        if type(v.__toml_raw) == "string" then return v.__toml_raw end
+        local raw = raw_value(v)
+        if raw then return raw end
         if is_array(v) then return encode_array(v) end
         return encode_inline_table(v)
     end
@@ -149,8 +165,8 @@ local function emit_section(path, data, out)
     for _, k in ipairs(sorted_keys(data)) do
         local v = data[k]
         -- A non-array dict table at section scope becomes a [header]. Everything
-        -- else (scalars, arrays, __toml_raw wrappers) is a simple inline KVP.
-        if type(v) == "table" and not is_array(v) and type(v.__toml_raw) ~= "string" then
+        -- else (scalars, arrays, raw wrappers) is a simple inline KVP.
+        if type(v) == "table" and not is_array(v) and not raw_value(v) then
             subtbl_keys[#subtbl_keys+1] = k
         else
             simple_keys[#simple_keys+1] = k

@@ -3,14 +3,14 @@ FAIL encoder/array/nested-inline-table (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98272):
+     input sent to parser-cmd (PID 1394):
         1 │[0m {
         2 │[0m     "a": [{
         3 │[0m         "b": {}
         4 │[0m     }]
         5 │[0m }
 
-     output from parser-cmd (PID 98272) (stdout):
+     output from parser-cmd (PID 1394) (stdout):
         1 │[0m a = [ { b = [] } ]
 
      want:
@@ -21,7 +21,7 @@ FAIL encoder/array/open-parent-table (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98275):
+     input sent to parser-cmd (PID 1397):
         1 │[0m {
         2 │[0m     "parent-table": {
         3 │[0m         "not-arr": {"type": "integer", "value": "1"},
@@ -32,7 +32,7 @@ FAIL encoder/array/open-parent-table (encoder)
         8 │[0m     }
         9 │[0m }
 
-     output from parser-cmd (PID 98275) (stdout):
+     output from parser-cmd (PID 1397) (stdout):
         1 │[0m [parent-table]
         2 │[0m arr = [ [], [] ]
         3 │[0m not-arr = 1
@@ -48,7 +48,7 @@ FAIL encoder/inline-table/empty (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98321):
+     input sent to parser-cmd (PID 1444):
         1 │[0m {
         2 │[0m     "empty1":   {},
         3 │[0m     "empty2":   {},
@@ -75,7 +75,7 @@ FAIL encoder/inline-table/empty (encoder)
        24 │[0m     }
        25 │[0m }
 
-     output from parser-cmd (PID 98321) (stdout):
+     output from parser-cmd (PID 1444) (stdout):
         1 │[0m empty1 = []
         2 │[0m empty2 = []
         3 │[0m empty_in_array = [ { not_empty = 1 }, [] ]
@@ -100,7 +100,7 @@ FAIL encoder/inline-table/nest (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98332):
+     input sent to parser-cmd (PID 1456):
         1 │[0m {
         2 │[0m     "arr_arr_tbl_empty": [[{}]],
         3 │[0m     "arr_arr_tbl_val":   [[{
@@ -132,7 +132,7 @@ FAIL encoder/inline-table/nest (encoder)
        29 │[0m     }
        30 │[0m }
 
-     output from parser-cmd (PID 98332) (stdout):
+     output from parser-cmd (PID 1456) (stdout):
         1 │[0m arr_arr_tbl_empty = [ [ [] ] ]
         2 │[0m arr_arr_tbl_val = [ [ { one = 1 } ] ]
         3 │[0m arr_arr_tbls = [ [ { one = 1 }, { two = 2 } ] ]
@@ -166,13 +166,13 @@ FAIL encoder/integer/long (encoder)
        Expected:     9223372036854775807 (int64)
        Your encoder: 9.223372036854776e+18 (float64)
 
-     input sent to parser-cmd (PID 98339):
+     input sent to parser-cmd (PID 1463):
         1 │[0m {
         2 │[0m     "int64-max":     {"type": "integer", "value": "9223372036854775807"},
         3 │[0m     "int64-max-neg": {"type": "integer", "value": "-9223372036854775808"}
         4 │[0m }
 
-     output from parser-cmd (PID 98339) (stdout):
+     output from parser-cmd (PID 1463) (stdout):
         1 │[0m int64-max = 9.2233720368547758e+18
         2 │[0m int64-max-neg = -9.2233720368547758e+18
 
@@ -187,7 +187,7 @@ FAIL encoder/key/escapes (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98353):
+     input sent to parser-cmd (PID 1479):
         1 │[0m {
         2 │[0m     "\b":         {"type": "string", "value": "bell"},
         3 │[0m     "\n":         {"type": "string", "value": "newline"},
@@ -202,7 +202,7 @@ FAIL encoder/key/escapes (encoder)
        12 │[0m     }
        13 │[0m }
 
-     output from parser-cmd (PID 98353) (stdout):
+     output from parser-cmd (PID 1479) (stdout):
         1 │[0m "\b" = 'bell'
         2 │[0m "\n" = 'newline'
         3 │[0m "\"" = 'just a quote'
@@ -233,12 +233,12 @@ FAIL encoder/spec-1.1.0/common-37 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98403):
+     input sent to parser-cmd (PID 1531):
         1 │[0m {
         2 │[0m     "table": {}
         3 │[0m }
 
-     output from parser-cmd (PID 98403) (stdout):
+     output from parser-cmd (PID 1531) (stdout):
         1 │[0m table = []
 
      want:
@@ -249,7 +249,7 @@ FAIL encoder/spec-1.1.0/common-40 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98407):
+     input sent to parser-cmd (PID 1535):
         1 │[0m {
         2 │[0m     "a": {
         3 │[0m         "b": {
@@ -273,7 +273,7 @@ FAIL encoder/spec-1.1.0/common-40 (encoder)
        21 │[0m     }
        22 │[0m }
 
-     output from parser-cmd (PID 98407) (stdout):
+     output from parser-cmd (PID 1535) (stdout):
         1 │[0m [a]
         2 │[0m
         3 │[0m [a.b]
@@ -305,7 +305,7 @@ FAIL encoder/spec-1.1.0/common-41 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98408):
+     input sent to parser-cmd (PID 1536):
         1 │[0m {
         2 │[0m     "x": {
         3 │[0m         "y": {
@@ -316,7 +316,7 @@ FAIL encoder/spec-1.1.0/common-41 (encoder)
         8 │[0m     }
         9 │[0m }
 
-     output from parser-cmd (PID 98408) (stdout):
+     output from parser-cmd (PID 1536) (stdout):
         1 │[0m [x]
         2 │[0m
         3 │[0m [x.y]
@@ -337,7 +337,7 @@ FAIL encoder/spec-1.1.0/common-42 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98409):
+     input sent to parser-cmd (PID 1537):
         1 │[0m {
         2 │[0m     "animal": {},
         3 │[0m     "fruit": {
@@ -346,7 +346,7 @@ FAIL encoder/spec-1.1.0/common-42 (encoder)
         6 │[0m     }
         7 │[0m }
 
-     output from parser-cmd (PID 98409) (stdout):
+     output from parser-cmd (PID 1537) (stdout):
         1 │[0m animal = []
         2 │[0m
         3 │[0m [fruit]
@@ -364,7 +364,7 @@ FAIL encoder/spec-1.1.0/common-43 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98410):
+     input sent to parser-cmd (PID 1538):
         1 │[0m {
         2 │[0m     "animal": {},
         3 │[0m     "fruit": {
@@ -373,7 +373,7 @@ FAIL encoder/spec-1.1.0/common-43 (encoder)
         6 │[0m     }
         7 │[0m }
 
-     output from parser-cmd (PID 98410) (stdout):
+     output from parser-cmd (PID 1538) (stdout):
         1 │[0m animal = []
         2 │[0m
         3 │[0m [fruit]
@@ -391,7 +391,7 @@ FAIL encoder/spec-1.1.0/common-51 (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98418):
+     input sent to parser-cmd (PID 1547):
         1 │[0m {
         2 │[0m     "product": [
         3 │[0m         {
@@ -407,7 +407,7 @@ FAIL encoder/spec-1.1.0/common-51 (encoder)
        13 │[0m     ]
        14 │[0m }
 
-     output from parser-cmd (PID 98418) (stdout):
+     output from parser-cmd (PID 1547) (stdout):
         1 │[0m product = [
         2 │[0m   { name = 'Hammer', sku = 738594937 },
         3 │[0m   [],
@@ -432,12 +432,12 @@ FAIL encoder/table/array-empty (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98453):
+     input sent to parser-cmd (PID 1582):
         1 │[0m {
         2 │[0m     "a": [{}]
         3 │[0m }
 
-     output from parser-cmd (PID 98453) (stdout):
+     output from parser-cmd (PID 1582) (stdout):
         1 │[0m a = [ [] ]
 
      want:
@@ -448,12 +448,12 @@ FAIL encoder/table/empty (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98462):
+     input sent to parser-cmd (PID 1591):
         1 │[0m {
         2 │[0m     "a": {}
         3 │[0m }
 
-     output from parser-cmd (PID 98462) (stdout):
+     output from parser-cmd (PID 1591) (stdout):
         1 │[0m a = []
 
      want:
@@ -464,7 +464,7 @@ FAIL encoder/table/keyword (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98464):
+     input sent to parser-cmd (PID 1594):
         1 │[0m {
         2 │[0m     "false": {},
         3 │[0m     "inf":   {},
@@ -472,7 +472,7 @@ FAIL encoder/table/keyword (encoder)
         5 │[0m     "true":  {}
         6 │[0m }
 
-     output from parser-cmd (PID 98464) (stdout):
+     output from parser-cmd (PID 1594) (stdout):
         1 │[0m false = []
         2 │[0m inf = []
         3 │[0m nan = []
@@ -492,7 +492,7 @@ FAIL encoder/table/names (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98467):
+     input sent to parser-cmd (PID 1595):
         1 │[0m {
         2 │[0m     "a": {
         3 │[0m         " x ": {},
@@ -524,7 +524,7 @@ FAIL encoder/table/names (encoder)
        29 │[0m     }
        30 │[0m }
 
-     output from parser-cmd (PID 98467) (stdout):
+     output from parser-cmd (PID 1595) (stdout):
         1 │[0m [a]
         2 │[0m " x " = []
         3 │[0m "b.c" = []
@@ -569,12 +569,12 @@ FAIL encoder/table/no-eol (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98466):
+     input sent to parser-cmd (PID 1597):
         1 │[0m {
         2 │[0m     "table": {}
         3 │[0m }
 
-     output from parser-cmd (PID 98466) (stdout):
+     output from parser-cmd (PID 1597) (stdout):
         1 │[0m table = []
 
      want:
@@ -585,14 +585,14 @@ FAIL encoder/table/sub-empty (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98468):
+     input sent to parser-cmd (PID 1596):
         1 │[0m {
         2 │[0m     "a": {
         3 │[0m         "b": {}
         4 │[0m     }
         5 │[0m }
 
-     output from parser-cmd (PID 98468) (stdout):
+     output from parser-cmd (PID 1596) (stdout):
         1 │[0m [a]
         2 │[0m b = []
 
@@ -605,12 +605,12 @@ FAIL encoder/table/whitespace (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98470):
+     input sent to parser-cmd (PID 1599):
         1 │[0m {
         2 │[0m     "valid key": {}
         3 │[0m }
 
-     output from parser-cmd (PID 98470) (stdout):
+     output from parser-cmd (PID 1599) (stdout):
         1 │[0m "valid key" = []
 
      want:
@@ -621,7 +621,7 @@ FAIL encoder/table/without-super (encoder)
        Expected:     map[string]any(nil)
        Your encoder: map[string]any
 
-     input sent to parser-cmd (PID 98475):
+     input sent to parser-cmd (PID 1604):
         1 │[0m {
         2 │[0m     "x": {
         3 │[0m         "y": {
@@ -632,7 +632,7 @@ FAIL encoder/table/without-super (encoder)
         8 │[0m     }
         9 │[0m }
 
-     output from parser-cmd (PID 98475) (stdout):
+     output from parser-cmd (PID 1604) (stdout):
         1 │[0m [x]
         2 │[0m
         3 │[0m [x.y]
