@@ -2,6 +2,7 @@ local M          = {}
 
 local Cst        = require("easytasks.toml.Cst")
 local encoder    = require("easytasks.toml.encoder")
+local async      = require("easytasks.util.async")
 local K          = Cst.Kind
 
 local kind_names = {}
@@ -282,32 +283,33 @@ function M.execute_command(context, params, callback)
     end
     _pending[id] = nil -- consume once
 
-    local templates = type(entry.templates) == "function"
-        and entry.templates()
-        or entry.templates --[[@as easytasks.TaskTemplate[] ]]
-
-    if not templates or #templates == 0 then
-        vim.notify("[easytasks] no templates for type: " .. entry.type_name, vim.log.levels.WARN)
-        callback(nil, nil)
-        return
+    local function show_select(templates)
+        if not templates or #templates == 0 then
+            vim.notify("[easytasks] no templates for type: " .. entry.type_name, vim.log.levels.WARN)
+            return
+        end
+        vim.ui.select(
+            templates,
+            {
+                prompt      = "Choose " .. entry.type_name .. " template:",
+                format_item = function(item) return item.label end,
+            },
+            function(choice)
+                if choice then
+                    vim.schedule(function() apply_template(entry, choice) end)
+                end
+            end
+        )
     end
 
-    vim.ui.select(
-        templates,
-        {
-            prompt = "Choose " .. entry.type_name .. " template:",
-            format_item = function(item)
-                return item.label
-            end,
-        },
-        function(choice)
-            if choice then
-                vim.schedule(function()
-                    apply_template(entry, choice)
-                end)
-            end
-        end
-    )
+    if type(entry.templates) == "function" then
+        local fn = entry.templates ---@cast fn function
+        async.go(fn, function(ok, result)
+            if ok then show_select(result --[[@as easytasks.TaskTemplate[] ]]) end
+        end)
+    else
+        show_select(entry.templates --[[@as easytasks.TaskTemplate[] ]])
+    end
 
     callback(nil, nil)
 end

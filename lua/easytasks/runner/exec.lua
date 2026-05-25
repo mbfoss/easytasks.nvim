@@ -1,7 +1,8 @@
 --- Task execution engine.
 --- Handles TOML loading, dependency resolution, coroutine scheduling,
 --- and task state tracking.
-local async      = require("easytasks.runner.async")
+local async      = require("easytasks.util.async")
+local spawn      = require("easytasks.runner.spawn").spawn
 local term       = require("easytasks.runner.term")
 local parser     = require("easytasks.toml.parser")
 local decoder    = require("easytasks.toml.decoder")
@@ -152,7 +153,7 @@ local function run_task_coro(name, tasks)
         ---@param spawn_opts {cwd?:string, env?:table<string,string>}
         ---@return integer exit_code
         spawn = function(cmd, spawn_opts)
-            return async.spawn(cmd, spawn_opts or {}, entry.bufnr)
+            return spawn(cmd, spawn_opts or {}, entry.bufnr)
         end,
     }
 
