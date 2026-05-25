@@ -7,9 +7,14 @@ local parser     = require("easytasks.toml.parser")
 local decoder    = require("easytasks.toml.decoder")
 local task_types = require("easytasks.types")
 
+---@class easytasks.TaskTemplate
+---@field label string  shown in vim.ui.select
+---@field task  table   the template data to encode and insert
+
 ---@class easytasks.TaskTypeDef
----@field run fun(task: table, ctx: easytasks.RunCtx): boolean
----@field schema table?
+---@field run       fun(task: table, ctx: easytasks.RunCtx): boolean
+---@field schema    table?
+---@field templates (easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[]))?
 
 ---@class easytasks.RunCtx
 ---@field term   integer

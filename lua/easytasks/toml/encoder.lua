@@ -179,6 +179,24 @@ local function emit_section(path, data, out)
     end
 end
 
+--- Encode a Lua table as a TOML inline table string: { key = val, ... }.
+---@param t table
+---@return string
+function M.encode_inline(t)
+    return encode_inline_table(t)
+end
+
+--- Encode a Lua table as a [[key]] AoT entry block.
+--- Returns "[[key]]\nfield = val\n..." using sorted keys.
+---@param aot_key string
+---@param item    table
+---@return string
+function M.encode_aot_entry(aot_key, item)
+    local out = { "[[" .. quote_key(aot_key) .. "]]" }
+    emit_section({}, item, out)
+    return table.concat(out, "\n")
+end
+
 --- Encode a Lua table as a TOML string.
 ---@param data table
 ---@return string

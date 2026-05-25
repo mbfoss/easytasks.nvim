@@ -17,14 +17,14 @@ return {
             command = {
                 description = "Command to execute. Can be a single string or a list of strings (program + args).",
                 oneOf = {
-                    { type = "string",  minLength = 1,  description = "Command or process to execute, can include arguments" },
+                    { type = "string", minLength = 1,                       description = "Command or process to execute, can include arguments" },
                     {
                         type        = "array",
                         minItems    = 1,
                         description = "Command with arguments, executed without shell interpolation",
                         items       = { type = "string", minLength = 1, description = "Command or argument token" },
                     },
-                    { type = "null", description = "No command execution" },
+                    { type = "null",   description = "No command execution" },
                 },
             },
             cwd = { type = { "string", "null" }, description = "Working directory used when executing the command" },
@@ -41,4 +41,8 @@ return {
             },
         },
     },
+    templates = {
+        { label = "Shell command", task = { name = "my-cmd", type = "process", cmd = "echo hello" } },
+        { label = "Watch mode",    task = { name = "watch", type = "process", cmd = "npm run watch" } },
+    }
 }

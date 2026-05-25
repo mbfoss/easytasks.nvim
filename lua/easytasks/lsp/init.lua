@@ -33,9 +33,10 @@ local initialize_result = {
   capabilities = {
     hoverProvider              = true,
     completionProvider         = { triggerCharacters = { ".", "[", '"', "=", " " } },
-    codeActionProvider         = { codeActionKinds = { "quickfix" } },
+    codeActionProvider         = { codeActionKinds = { "quickfix", "refactor.extract" } },
     documentFormattingProvider = true,
     documentRangeFormattingProvider = true,
+    executeCommandProvider     = { commands = { "easytasks._add_template" } },
   },
   serverInfo = { name = M.SERVER_NAME, version = M.SERVER_VERSION },
 }
@@ -47,6 +48,7 @@ function M._bind_handlers()
   handlers[ms.textDocument_completion]     = features.completion.handler
   handlers[ms.textDocument_hover]          = features.hover.handler
   handlers[ms.textDocument_codeAction]     = features.code_action.handler
+  handlers[ms.workspace_executeCommand]    = features.code_action.execute_command
   handlers[ms.textDocument_formatting]     = features.format.handler
   handlers[ms.textDocument_rangeFormatting] = features.format.handler
 end
