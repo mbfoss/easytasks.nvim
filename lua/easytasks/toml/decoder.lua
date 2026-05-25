@@ -108,7 +108,7 @@ local function evaluate(cst, with_type_map)
         if #keys == 0 then return end
 
         local val_id, val_data = cst:get_value(kvp_id)
-        -- Determine full KVP range
+        if not val_data or val_data.kind == K.Error then return end
         local kvp_range = cst:range(kvp_id) or { 0, 0, 0, 0 }
 
         -- Navigate intermediate dotted keys (all but the last)
@@ -180,6 +180,7 @@ local function evaluate(cst, with_type_map)
             local keys = cst:get_keys(kvp_id)
             if #keys == 0 then return end
             local vi, vd   = cst:get_value(kvp_id)
+            if not vd or vd.kind == K.Error then return end
             local kvpr     = cst:range(kvp_id) or { 0, 0, 0, 0 }
 
             local leaf_tbl, leaf_id
@@ -214,7 +215,7 @@ local function evaluate(cst, with_type_map)
         if not val_data then return nil end
         local k = val_data.kind
 
-        if k == K.MissingValue or k == K.Error then
+        if k == K.Error then
             return nil
         end
 

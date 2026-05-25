@@ -525,8 +525,6 @@ function M.parse(text)
 
         if bounds() and not is_nl() and char() ~= "#" then
             parse_value(kvp_id)
-        else
-            cst:token(kvp_id, K.MissingValue, "", nil, row, col, row, col)
         end
 
         emit_inline_ws(kvp_id)
@@ -572,8 +570,6 @@ function M.parse(text)
 
             if bounds() and char() ~= "," and char() ~= "}" then
                 parse_value(kvp_id)
-            else
-                cst:token(kvp_id, K.MissingValue, "", nil, row, col, row, col)
             end
             cst:close(kvp_id, row, col)
 

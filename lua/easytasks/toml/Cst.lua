@@ -51,9 +51,6 @@ local Kind = {
     -- Error recovery token (leaf)
     Error         = 21,
 
-    -- Missing value placeholder (leaf; emitted after = with no value)
-    MissingValue  = 30,
-
     -- Composite nodes (have children)
     Document      = 22,
     TableSection  = 23,  -- [header] line + following KVPs until next section
@@ -72,7 +69,6 @@ local value_set  = {
     [Kind.Datetime] = true, [Kind.DatetimeLocal] = true,
     [Kind.DateLocal] = true, [Kind.TimeLocal] = true,
     [Kind.Array] = true, [Kind.InlineTable] = true,
-    [Kind.MissingValue] = true,
 }
 
 Cst.Kind      = Kind
