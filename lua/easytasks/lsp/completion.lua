@@ -157,12 +157,36 @@ function M.handler(context, params, callback)
             end
             return
         end
+        -- KEY: cursor on the key text → offer sibling keys from the enclosing scope
+        if kind == NodeKind.Key then
+            local dt_id     = dt:pos_to_id(row, col)
+            local parent_id = dt_id and dt:get_parent_id(dt_id)
+            local sch
+            if parent_id then
+                sch = schema_nav.schema_at(schema, data, dt, parent_id)
+            else
+                sch = schema_nav.flatten(schema, data)
+            end
+            callback(nil, { isIncomplete = false, items = key_items(sch) })
+            return
+        end
+
+        -- INLINE TABLE: cursor in whitespace inside { } → key completion for this table
         if kind == NodeKind.InlineTable then
+            local dt_id = dt:pos_to_id(row, col)
+            local sch
+            if dt_id then
+                sch = schema_nav.schema_at(schema, data, dt, dt_id)
+            else
+                sch = schema_nav.flatten(schema, data)
+            end
+            callback(nil, { isIncomplete = false, items = key_items(sch) })
             return
         end
     end
 
-    callback(nil, { isIncomplete = false, items = {}--[[  ]] })
+    -- Comment, unknown node kind, or no AST node at cursor: no completions
+    callback(nil, empty_result)
 end
 
 return M
