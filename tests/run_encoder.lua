@@ -45,31 +45,12 @@ local function untag(v)
         end
     end
 
-    -- vim.json.decode sets __jsontype="object" on decoded objects (including empty {}).
-    -- Check this before the array heuristic so empty dicts aren't mistaken for empty arrays.
-    local mt = getmetatable(v)
-    if mt and mt.__jsontype == "object" then
-        local tbl = vim.empty_dict()
-        for k, child in pairs(v) do
-            tbl[k] = untag(child)
-        end
-        return tbl
-    end
-
-    -- Array: consecutive integer keys 1..n (toml-test arrays are Lua arrays after json.decode)
-    local is_seq = true
-    local max = 0
-    for k in pairs(v) do
-        if type(k) ~= "number" then is_seq = false; break end
-        if k > max then max = k end
-    end
-    if is_seq and max == #v then
+    if vim.islist(v) then
         local arr = {}
         for i = 1, #v do arr[i] = untag(v[i]) end
         return arr
     end
 
-    -- Table
     local tbl = vim.empty_dict()
     for k, child in pairs(v) do
         tbl[k] = untag(child)

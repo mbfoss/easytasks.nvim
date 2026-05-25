@@ -82,23 +82,11 @@ local function encode_number(n)
     return s
 end
 
--- Returns true if t is a sequence: consecutive integer keys 1..#t with no gaps.
--- An empty table without the JSON-object metatable is treated as an empty array.
--- vim.empty_dict() (and any table with mt.__jsontype == "object") is NOT an array.
+-- vim.islist correctly handles vim.empty_dict() via the vim._empty_dict_mt sentinel.
 ---@param t table
 ---@return boolean
 local function is_array(t)
-    local mt = getmetatable(t)
-    if mt and mt.__jsontype == "object" then return false end
-    local max, count = 0, 0
-    for k in pairs(t) do
-        if type(k) ~= "number" or k ~= math.floor(k) or k < 1 then
-            return false
-        end
-        if k > max then max = k end
-        count = count + 1
-    end
-    return count == max
+    return vim.islist(t)
 end
 
 ---@param t table
