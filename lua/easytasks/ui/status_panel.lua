@@ -188,7 +188,17 @@ local function _cursor_bufnr()
     if not _tb then return nil end
     local id, data = _tb:cursor_item()
     if not id or not data then return nil end
-    return data.bufnr and vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
+    if _is_buf_node(id) then
+        ---@cast data easytasks.BufEntry
+        return data.bufnr and vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
+    else
+        ---@cast data easytasks.RunEntry
+        if #data.bufnrs > 0 then
+            local bufnr = data.bufnrs[#data.bufnrs].bufnr
+            return vim.api.nvim_buf_is_valid(bufnr) and bufnr or nil
+        end
+    end
+    return nil
 end
 
 local function _sync_output_to_cursor()
