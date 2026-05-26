@@ -37,7 +37,7 @@ local M = {}
 local running = {}
 
 --- Fires with (name: string, entry: easytasks.RunEntry) on every state change.
----@type easytasks.util.Signal
+---@type easytasks.util.Signal<fun(name: string, entry: easytasks.RunEntry)>
 local _on_state_change = Signal.new()
 
 ---@param fn fun(name: string, entry: easytasks.RunEntry)

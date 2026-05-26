@@ -1,19 +1,20 @@
----@class easytasks.util.Signal
----@field _listeners function[]
+---@class easytasks.util.Signal<T>
+---@field _listeners T[]
 local Signal = {}
 Signal.__index = Signal
 
----@return easytasks.util.Signal
+---@generic T: fun(...)
+---@return easytasks.util.Signal<T>
 function Signal.new()
     return setmetatable({ _listeners = {} }, Signal)
 end
 
----@param fn function
+---@param fn T
 function Signal:subscribe(fn)
     table.insert(self._listeners, fn)
 end
 
----@param fn function
+---@param fn T
 function Signal:unsubscribe(fn)
     for i, l in ipairs(self._listeners) do
         if l == fn then

@@ -1,7 +1,7 @@
 local ListBuffer = require('easytasks.ui.ListBuffer')
 local exec       = require('easytasks.runner.exec')
 
----@class easytasks.ui.StatusPanel
+---@class easytasks.ui.status_panel
 local M = {}
 
 ---@type easytasks.ui.ListBuffer?
