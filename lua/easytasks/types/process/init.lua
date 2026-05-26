@@ -20,16 +20,16 @@ return {
             relative  = "editor",
             row       = 0,
             col       = 0,
-            width     = math.max(1, vim.o.columns),
-            height    = math.max(1, vim.o.lines - 2),
-            style     = "minimal",
+            width     = 1,
+            height    = 1,
+            style     = "",
             focusable = false,
             zindex    = 1,
         })
 
         local code = spawn(task.command, { cwd = task.cwd, env = task.env }, bufnr)
 
-        pcall(vim.api.nvim_win_close, float_win, true)
+        vim.api.nvim_win_close(float_win, true)
 
         return code == 0
     end,
