@@ -16,6 +16,10 @@ local _known_runs   = {}
 ---@type table<string, string>
 local _known_bufs   = {}
 
+--- Scratch info buffers shown when a run has no output buffer yet.
+---@type table<string, integer>
+local _info_bufs    = {}
+
 local _PANEL_HEIGHT = 8
 local _LIST_WIDTH   = 36
 
@@ -166,6 +170,32 @@ local function _sync_buf_nodes(run_id, entry)
     end
 end
 
+local _ui = require('easytasks.ui')
+
+---@param entry easytasks.RunEntry
+---@return string[]
+local function _info_lines(entry)
+    return {
+        "",
+        "  task:  " .. entry.task_name,
+        "  state: " .. entry.state,
+    }
+end
+
+--- Ensure a scratch info buffer exists for `run_id` and refresh its content.
+---@param run_id string
+---@param entry  easytasks.RunEntry
+local function _ensure_info_buf(run_id, entry)
+    local bufnr = _info_bufs[run_id]
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        bufnr = _ui.create_sratch_buffer(false, { bufhidden = "hide" })
+        _info_bufs[run_id] = bufnr
+    end
+    vim.bo[bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, _info_lines(entry))
+    vim.bo[bufnr].modifiable = false
+end
+
 --- Return the bufnr to show for the item under the cursor, or nil.
 ---@return integer?
 local function _cursor_bufnr()
@@ -181,8 +211,9 @@ local function _cursor_bufnr()
             local bufnr = data.bufnrs[#data.bufnrs].bufnr
             return vim.api.nvim_buf_is_valid(bufnr) and bufnr or nil
         end
+        local info = _info_bufs[id]
+        return info and vim.api.nvim_buf_is_valid(info) and info or nil
     end
-    return nil
 end
 
 local function _sync_output_to_cursor()
@@ -205,6 +236,7 @@ local function on_state_change(run_id, entry)
         _tb:add_item(run_id, entry, nil)
     end
     _sync_buf_nodes(run_id, entry)
+    _ensure_info_buf(run_id, entry)
     vim.schedule(_sync_output_to_cursor)
 end
 
@@ -216,6 +248,10 @@ local function on_close()
     _win        = nil
     _known_runs = {}
     _known_bufs = {}
+    for _, bufnr in pairs(_info_bufs) do
+        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+    _info_bufs  = {}
 end
 
 function M.open()
@@ -256,17 +292,6 @@ function M.open()
     vim.wo[_win].relativenumber = false
     vim.wo[_win].wrap           = false
 
-    vim.keymap.set("n", "<C-w>l", function()
-        if _output_win and vim.api.nvim_win_is_valid(_output_win) then
-            vim.api.nvim_set_current_win(_output_win)
-        end
-    end, { buffer = buf, nowait = true })
-    vim.keymap.set("n", "<C-w><C-l>", function()
-        if _output_win and vim.api.nvim_win_is_valid(_output_win) then
-            vim.api.nvim_set_current_win(_output_win)
-        end
-    end, { buffer = buf, nowait = true })
-
     vim.api.nvim_create_autocmd("WinClosed", {
         group    = _augroup,
         pattern  = tostring(_win),
@@ -297,18 +322,10 @@ function M.open()
         _known_runs[run_id] = true
         _tb:add_item(run_id, entry, nil)
         _sync_buf_nodes(run_id, entry)
+        _ensure_info_buf(run_id, entry)
     end
 
-    -- Show the most recent buffer immediately
-    for _, entry in pairs(exec.get_all()) do
-        if #entry.bufnrs > 0 then
-            local bufnr = entry.bufnrs[#entry.bufnrs].bufnr
-            if vim.api.nvim_buf_is_valid(bufnr) then
-                _show_output(bufnr)
-                break
-            end
-        end
-    end
+    _sync_output_to_cursor()
 
     exec.subscribe(on_state_change)
 end
