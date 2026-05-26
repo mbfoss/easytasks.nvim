@@ -12,8 +12,7 @@ return {
         }
 
         for _, pane in ipairs(panes) do
-            local bufnr = vim.api.nvim_create_buf(false, true)
-            vim.bo[bufnr].bufhidden = "wipe"
+            local bufnr = vim.api.nvim_create_buf(true, true)
             vim.bo[bufnr].swapfile  = false
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, pane.lines or {})
             ctx.add_bufnr(bufnr, pane.label)

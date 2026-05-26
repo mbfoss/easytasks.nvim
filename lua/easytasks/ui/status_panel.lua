@@ -12,8 +12,8 @@ local _output_win   = nil ---@type integer?
 ---@type table<string, true>
 local _known_runs   = {}
 
---- buf-node IDs already in the tree ("buf#<bufnr>").
----@type table<string, true>
+--- buf-node IDs already in the tree ("buf#<bufnr>") → owning run_id.
+---@type table<string, string>
 local _known_bufs   = {}
 
 local _PANEL_HEIGHT = 8
@@ -136,50 +136,34 @@ local function _formatter(_, data, depth)
     end
 end
 
---- Add any buffer children not yet in the tree for this run entry.
+--- Sync buffer child nodes for a run entry.
 --- Children are only shown when a run has 2+ buffers; a single buffer is implied.
+--- Removes nodes for deleted buffers and adds nodes for new ones.
 ---@param run_id string
 ---@param entry  easytasks.RunEntry
 local function _sync_buf_nodes(run_id, entry)
     if not _tb then return end
-    if #entry.bufnrs < 2 then return end
-    for _, buf_entry in ipairs(entry.bufnrs) do
-        local bid = _buf_node_id(buf_entry.bufnr)
+
+    local current = {} ---@type table<string, easytasks.BufEntry>
+    if #entry.bufnrs >= 2 then
+        for _, buf_entry in ipairs(entry.bufnrs) do
+            current[_buf_node_id(buf_entry.bufnr)] = buf_entry
+        end
+    end
+
+    for bid, owner in pairs(_known_bufs) do
+        if owner == run_id and not current[bid] then
+            _known_bufs[bid] = nil
+            _tb:remove_item(bid)
+        end
+    end
+
+    for bid, buf_entry in pairs(current) do
         if not _known_bufs[bid] then
-            _known_bufs[bid] = true
+            _known_bufs[bid] = run_id
             _tb:add_item(bid, buf_entry, run_id)
         end
     end
-end
-
----@param run_id string
----@param entry  easytasks.RunEntry
-local function on_state_change(run_id, entry)
-    if not _tb then return end
-    if _known_runs[run_id] then
-        _tb:update_item(run_id, entry)
-    else
-        _known_runs[run_id] = true
-        _tb:add_item(run_id, entry, nil)
-    end
-    _sync_buf_nodes(run_id, entry)
-    -- Auto-show the newest buffer when no output pane is open
-    if #entry.bufnrs > 0 and (not _output_win or not vim.api.nvim_win_is_valid(_output_win)) then
-        local bufnr = entry.bufnrs[#entry.bufnrs].bufnr
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            _show_output(bufnr)
-        end
-    end
-end
-
-local function on_close()
-    exec.unsubscribe(on_state_change)
-    vim.api.nvim_clear_autocmds({ group = _augroup })
-    _close_output()
-    _tb         = nil
-    _win        = nil
-    _known_runs = {}
-    _known_bufs = {}
 end
 
 --- Return the bufnr to show for the item under the cursor, or nil.
@@ -208,6 +192,30 @@ local function _sync_output_to_cursor()
     else
         _close_output()
     end
+end
+
+---@param run_id string
+---@param entry  easytasks.RunEntry
+local function on_state_change(run_id, entry)
+    if not _tb then return end
+    if _known_runs[run_id] then
+        _tb:update_item(run_id, entry)
+    else
+        _known_runs[run_id] = true
+        _tb:add_item(run_id, entry, nil)
+    end
+    _sync_buf_nodes(run_id, entry)
+    vim.schedule(_sync_output_to_cursor)
+end
+
+local function on_close()
+    exec.unsubscribe(on_state_change)
+    vim.api.nvim_clear_autocmds({ group = _augroup })
+    _close_output()
+    _tb         = nil
+    _win        = nil
+    _known_runs = {}
+    _known_bufs = {}
 end
 
 function M.open()
