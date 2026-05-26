@@ -2,6 +2,7 @@ local M            = {}
 
 ---@class easytasks.Config
 ---@field enabled boolean
+---@field tasks_filename string
 ---@field schema  table?
 
 local tasks_lsp    = require("easytasks.lsp")
@@ -22,8 +23,9 @@ end
 local function _get_default_config()
     ---@type easytasks.Config
     return {
-        enabled = true,
-        schema  = nil, -- built in setup() from registered types
+        enabled        = true,
+        tasks_filename = "tasks.toml",
+        schema         = nil, -- built in setup() from registered types
     }
 end
 
@@ -36,11 +38,11 @@ local enabled = false
 local function run_command(args)
     local path = args[1]
     if not path or path == "" then
-        path = vim.fn.findfile("tasks.toml", vim.fn.getcwd() .. ";") --[[@as string]]
+        path = vim.fn.findfile(M.config.tasks_filename, vim.fn.getcwd() .. ";") --[[@as string]]
     end
 
     if path == "" then
-        ui.notify_error("tasks.toml not found")
+        ui.notify_error(("tasks file (%s) not found"):format(M.config))
         return
     end
 

@@ -4,7 +4,7 @@ local exec          = require('easytasks.runner.exec')
 ---@class easytasks.ui.status_panel
 local M             = {}
 
-local _tb           = nil ---@type table?   easytasks.ui.TreeBuffer instance
+local _tb           = nil ---@type easytasks.ui.TreeBuffer?
 local _win          = nil ---@type integer?
 local _output_win   = nil ---@type integer?
 
@@ -188,22 +188,16 @@ local function _cursor_bufnr()
     if not _tb then return nil end
     local id, data = _tb:cursor_item()
     if not id or not data then return nil end
-    if _is_buf_node(id) then
-        ---@cast data easytasks.BufEntry
-        return vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
-    end
-    -- run entry node: show the most recently registered buffer
-    ---@cast data easytasks.RunEntry
-    if #data.bufnrs > 0 then
-        local bufnr = data.bufnrs[#data.bufnrs].bufnr
-        return vim.api.nvim_buf_is_valid(bufnr) and bufnr or nil
-    end
-    return nil
+    return data.bufnr and vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
 end
 
 local function _sync_output_to_cursor()
     local bufnr = _cursor_bufnr()
-    if bufnr then _show_output(bufnr) end
+    if bufnr then
+        _show_output(bufnr)
+    else
+        _close_output()
+    end
 end
 
 function M.open()
@@ -212,28 +206,29 @@ function M.open()
         return
     end
 
-    _tb                         = TreeBuffer.new({
-        formatter           = _formatter,
-        current_item_prefix = "",
-        on_selection        = function(id, data)
-            local bufnr
-            if _is_buf_node(id) then
-                ---@cast data easytasks.BufEntry
-                bufnr = data.bufnr
-            else
-                ---@cast data easytasks.RunEntry
-                if #data.bufnrs > 0 then
-                    bufnr = data.bufnrs[#data.bufnrs].bufnr
+    _tb                         = TreeBuffer.new(
+        {
+            formatter           = _formatter,
+            current_item_prefix = "",
+            on_selection        = function(id, data)
+                local bufnr
+                if _is_buf_node(id) then
+                    ---@cast data easytasks.BufEntry
+                    bufnr = data.bufnr
+                else
+                    ---@cast data easytasks.RunEntry
+                    if #data.bufnrs > 0 then
+                        bufnr = data.bufnrs[#data.bufnrs].bufnr
+                    end
                 end
-            end
-            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-                _show_output(bufnr)
-                if _output_win and vim.api.nvim_win_is_valid(_output_win) then
-                    vim.api.nvim_set_current_win(_output_win)
+                if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+                    _show_output(bufnr)
+                    if _output_win and vim.api.nvim_win_is_valid(_output_win) then
+                        vim.api.nvim_set_current_win(_output_win)
+                    end
                 end
-            end
-        end,
-    })
+            end,
+        })
 
     local buf                   = _tb:buf()
     vim.bo[buf].filetype        = "easytasks-status"

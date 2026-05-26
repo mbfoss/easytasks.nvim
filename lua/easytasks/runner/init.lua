@@ -7,9 +7,8 @@ local M = {}
 --- Non-blocking: execution is driven by coroutines and libuv callbacks.
 ---@param task_name string
 ---@param toml_path string
----@param opts      {show_output?: boolean}?
-function M.run(task_name, toml_path, opts)
-    exec.run(task_name, toml_path, opts)
+function M.run(task_name, toml_path)
+    exec.run(task_name, toml_path)
 end
 
 --- Stop a running task.

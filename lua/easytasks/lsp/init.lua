@@ -1,11 +1,12 @@
 local parser        = require("easytasks.toml.parser")
 local decoder       = require("easytasks.toml.decoder")
-local completion    = require("easytasks.lsp.completion")
-local hover         = require("easytasks.lsp.hover")
-local code_action   = require("easytasks.lsp.code_action")
-local BufferContext = require("easytasks.lsp.BufferContext")
-local diagnostics   = require("easytasks.lsp.diagnostics")
-local format        = require("easytasks.lsp.format")
+local completion       = require("easytasks.lsp.completion")
+local hover            = require("easytasks.lsp.hover")
+local code_action      = require("easytasks.lsp.code_action")
+local document_symbol  = require("easytasks.lsp.document_symbol")
+local BufferContext    = require("easytasks.lsp.BufferContext")
+local diagnostics      = require("easytasks.lsp.diagnostics")
+local format           = require("easytasks.lsp.format")
 
 local M             = {}
 
@@ -21,22 +22,24 @@ local handlers      = {}
 local attached      = {}
 
 local features      = {
-  completion  = completion,
-  hover       = hover,
-  code_action = code_action,
-  diagnostics = diagnostics,
-  format      = format,
+  completion      = completion,
+  hover           = hover,
+  code_action     = code_action,
+  document_symbol = document_symbol,
+  diagnostics     = diagnostics,
+  format          = format,
 }
 
 ---@type lsp.InitializeResult
 local initialize_result = {
   capabilities = {
-    hoverProvider              = true,
-    completionProvider         = { triggerCharacters = { ".", "[", '"', "=", " " } },
-    codeActionProvider         = { codeActionKinds = { "quickfix", "refactor.extract" } },
-    documentFormattingProvider = true,
-    documentRangeFormattingProvider = true,
-    executeCommandProvider     = { commands = { "easytasks/insertTemplate" } },
+    hoverProvider                    = true,
+    completionProvider               = { triggerCharacters = { ".", "[", '"', "=", " " } },
+    codeActionProvider               = { codeActionKinds = { "quickfix", "refactor.extract" } },
+    documentFormattingProvider       = true,
+    documentRangeFormattingProvider  = true,
+    documentSymbolProvider           = true,
+    executeCommandProvider           = { commands = { "easytasks/insertTemplate" } },
   },
   serverInfo = { name = M.SERVER_NAME, version = M.SERVER_VERSION },
 }
@@ -44,13 +47,14 @@ local initialize_result = {
 -- ─── Handler binding ────────────────────────────────────────────────────────
 
 function M._bind_handlers()
-  handlers[ms.initialize]                  = function(_, _, cb) cb(nil, initialize_result) end
-  handlers[ms.textDocument_completion]     = features.completion.handler
-  handlers[ms.textDocument_hover]          = features.hover.handler
-  handlers[ms.textDocument_codeAction]     = features.code_action.handler
-  handlers[ms.workspace_executeCommand]    = features.code_action.execute_command
-  handlers[ms.textDocument_formatting]     = features.format.handler
+  handlers[ms.initialize]                   = function(_, _, cb) cb(nil, initialize_result) end
+  handlers[ms.textDocument_completion]      = features.completion.handler
+  handlers[ms.textDocument_hover]           = features.hover.handler
+  handlers[ms.textDocument_codeAction]      = features.code_action.handler
+  handlers[ms.workspace_executeCommand]     = features.code_action.execute_command
+  handlers[ms.textDocument_formatting]      = features.format.handler
   handlers[ms.textDocument_rangeFormatting] = features.format.handler
+  handlers[ms.textDocument_documentSymbol]  = features.document_symbol.handler
 end
 
 M._bind_handlers()

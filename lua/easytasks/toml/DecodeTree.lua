@@ -97,6 +97,13 @@ function DecodeTree:range_of_id(id)
     return self:ranges_of_id(id)[1]
 end
 
+---@param id integer
+---@return integer[]?
+function DecodeTree:get_value_range(id)
+    local data = self._tree:get_data(id)
+    return data and data.value_range
+end
+
 ---@param handler fun(id:any, data:any, depth:number):boolean?
 function DecodeTree:walk_tree(handler)
     return self._tree:walk_tree(handler)
