@@ -2,6 +2,7 @@
 --- Handles TOML loading, dependency resolution, coroutine scheduling,
 --- and task state tracking.
 local async      = require("easytasks.util.async")
+local Signal     = require("easytasks.util.Signal")
 local spawn      = require("easytasks.runner.spawn").spawn
 local term       = require("easytasks.runner.term")
 local parser     = require("easytasks.toml.parser")
@@ -34,6 +35,33 @@ local M = {}
 
 ---@type table<string, easytasks.RunEntry>
 local running = {}
+
+--- Fires with (name: string, entry: easytasks.RunEntry) on every state change.
+---@type easytasks.util.Signal
+local _on_state_change = Signal.new()
+
+---@param fn fun(name: string, entry: easytasks.RunEntry)
+function M.subscribe(fn)
+    _on_state_change:subscribe(fn)
+end
+
+---@param fn fun(name: string, entry: easytasks.RunEntry)
+function M.unsubscribe(fn)
+    _on_state_change:unsubscribe(fn)
+end
+
+---@param name string
+local function notify(name)
+    local entry = running[name]
+    if not entry then return end
+    _on_state_change:emit(name, entry)
+end
+
+--- Return a snapshot of all run entries indexed by task name.
+---@return table<string, easytasks.RunEntry>
+function M.get_all()
+    return vim.tbl_extend("force", {}, running)
+end
 
 -- ─── TOML loading ────────────────────────────────────────────────────────────
 
@@ -108,6 +136,7 @@ local function run_task_coro(name, tasks)
         local bufnr = term.open(name)
         term.show(name)
         running[name] = { state = "running", bufnr = bufnr, job_ids = {} }
+        notify(name)
     end
 
     local entry = running[name]
@@ -123,6 +152,7 @@ local function run_task_coro(name, tasks)
             for _, r in ipairs(results) do
                 if not r.ok or not r.result then
                     entry.state = "failed"
+                    notify(name)
                     return false
                 end
             end
@@ -131,6 +161,7 @@ local function run_task_coro(name, tasks)
                 local ok = run_task_coro(dep_name, tasks)
                 if not ok then
                     entry.state = "failed"
+                    notify(name)
                     return false
                 end
             end
@@ -142,6 +173,7 @@ local function run_task_coro(name, tasks)
     if not type_def then
         vim.notify("[easytasks] unknown task type: " .. tostring(task.type), vim.log.levels.ERROR)
         entry.state = "failed"
+        notify(name)
         return false
     end
 
@@ -159,6 +191,7 @@ local function run_task_coro(name, tasks)
 
     local ok = type_def.run(task, ctx)
     entry.state = ok and "ok" or "failed"
+    notify(name)
     return ok
 end
 
@@ -209,6 +242,7 @@ function M.run(task_name, toml_path, opts)
 
     ---@type easytasks.RunEntry
     running[task_name] = { state = "running", bufnr = bufnr, job_ids = {} }
+    notify(task_name)
 
     vim.notify("[easytasks] starting: " .. task_name, vim.log.levels.INFO)
 
@@ -219,9 +253,11 @@ function M.run(task_name, toml_path, opts)
         if final_entry then
             if not co_ok then
                 final_entry.state = "failed"
+                notify(task_name)
                 vim.notify("[easytasks] error: " .. task_name .. ": " .. tostring(result), vim.log.levels.ERROR)
             else
                 final_entry.state = result and "ok" or "failed"
+                notify(task_name)
                 if result then
                     vim.notify("[easytasks] done: " .. task_name, vim.log.levels.INFO)
                 else
@@ -254,6 +290,7 @@ function M.stop(task_name)
         vim.fn.jobstop(jid)
     end
     entry.state = "idle"
+    notify(task_name)
 end
 
 --- Return the current state of a task.
