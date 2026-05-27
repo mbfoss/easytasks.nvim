@@ -82,4 +82,4 @@ Add Lua annotations (`---@param`, `---@return`, `---@class`, etc.) whenever poss
 
 Class-based modules are named in PascalCase and functional modules are named in snake_case.
 
-Module local variable names are to be prefixed with underscore 
+Module local variable names are to be prefixed with underscore, but not local function names or module names.

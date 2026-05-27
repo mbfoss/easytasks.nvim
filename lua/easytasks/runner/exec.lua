@@ -6,7 +6,7 @@ local Signal       = require("easytasks.util.Signal")
 local parser       = require("easytasks.toml.parser")
 local decoder      = require("easytasks.toml.decoder")
 local task_types   = require("easytasks.types")
-local _notify      = require("easytasks.ui")
+local notify       = require("easytasks.ui")
 
 ---@class easytasks.TaskTemplate
 ---@field label string  shown in vim.ui.select
@@ -28,61 +28,52 @@ local _notify      = require("easytasks.ui")
 ---@class easytasks.RunProgress
 ---@field start_time integer              unix timestamp set when the run begins
 ---@field stop_time  integer?             unix timestamp set when the run reaches a terminal state
----@field events     easytasks.ProgressEvent[]  task-reported and system messages
+---@field events     easytasks.ProgressEvent[]
 
 ---@class easytasks.RunCtx
 ---@field tasks      table<string,table>
----@field add_bufnr  fun(bufnr: integer, label?: string)  register an output buffer for this run
----@field set_cancel fun(fn: fun())                       register a teardown function called by M.stop
----@field report     fun(message: string)                 append a progress message visible in the status panel
-
----@class easytasks.exec
-local M            = {}
+---@field add_bufnr  fun(bufnr: integer, label?: string)
+---@field set_cancel fun(fn: fun())
+---@field report     fun(message: string)
 
 ---@alias easytasks.TaskState "idle"|"running"|"waiting"|"ok"|"failed"|"stopped"
 
 ---@class easytasks.RunEntry
 ---@field task_name      string
 ---@field state          easytasks.TaskState
----@field waiting_for    string[]?                      dep names set while state == "waiting"
+---@field waiting_for    string[]?
 ---@field progress       easytasks.RunProgress
 ---@field bufnrs         easytasks.BufEntry[]
----@field cancel         fun()?                        registered by the task type; called by M.stop
+---@field cancel         fun()?
 ---@field stop_requested boolean?
----@field done           easytasks.util.Signal<fun()>  fires once when the run reaches a terminal state
+---@field done           easytasks.util.Signal<fun()>
 
----@type table<string, easytasks.RunEntry>  run_id → entry
+---@class easytasks.exec
+local M            = {}
+
+---@type table<string, easytasks.RunEntry>
 local _running     = {}
-
 local _run_counter = 0
 
-local function _gen_run_id(task_name)
+local function gen_run_id(task_name)
     _run_counter = _run_counter + 1
     return task_name .. "#" .. _run_counter
 end
 
---- Fires with (run_id: string, entry: easytasks.RunEntry) on every state change.
 ---@type easytasks.util.Signal<fun(run_id: string, entry: easytasks.RunEntry)>
 local _on_state_change = Signal.new()
 
 ---@param fn fun(run_id: string, entry: easytasks.RunEntry)
-function M.subscribe(fn)
-    _on_state_change:subscribe(fn)
-end
+function M.subscribe(fn) _on_state_change:subscribe(fn) end
 
 ---@param fn fun(run_id: string, entry: easytasks.RunEntry)
-function M.unsubscribe(fn)
-    _on_state_change:unsubscribe(fn)
-end
+function M.unsubscribe(fn) _on_state_change:unsubscribe(fn) end
 
----@param run_id string
-local function notify(run_id)
+local function notify_change(run_id)
     local entry = _running[run_id]
-    if not entry then return end
-    _on_state_change:emit(run_id, entry)
+    if entry then _on_state_change:emit(run_id, entry) end
 end
 
---- Return a snapshot of all run entries indexed by run_id.
 ---@return table<string, easytasks.RunEntry>
 function M.get_all()
     return vim.tbl_extend("force", {}, _running)
@@ -94,32 +85,26 @@ end
 ---@return table<string,table>?, string?
 local function load_tasks(toml_path)
     local lines = vim.fn.readfile(toml_path)
-    if not lines then
-        return nil, "cannot read " .. toml_path
-    end
+    if not lines then return nil, "cannot read " .. toml_path end
     local text    = table.concat(lines, "\n") .. "\n"
     local parsed  = parser.parse(text)
     local decoded = decoder.decode(parsed.cst)
-
     if not decoded.data or not decoded.data.tasks then
         return nil, "no tasks table in " .. toml_path
     end
-
     local by_name = {}
     for _, task in ipairs(decoded.data.tasks) do
-        if task.name then
-            by_name[task.name] = task
-        end
+        if task.name then by_name[task.name] = task end
     end
     return by_name, nil
 end
 
 -- ─── Cycle detection ─────────────────────────────────────────────────────────
 
----@param name string
----@param tasks table<string,table>
+---@param name    string
+---@param tasks   table<string,table>
 ---@param visited table<string,boolean>
----@param stack table<string,boolean>
+---@param stack   table<string,boolean>
 ---@return string?
 local function find_cycle(name, tasks, visited, stack)
     if stack[name] then return name end
@@ -130,9 +115,7 @@ local function find_cycle(name, tasks, visited, stack)
     if task and type(task.depends_on) == "table" then
         for _, dep in ipairs(task.depends_on) do
             local cycle = find_cycle(dep, tasks, visited, stack)
-            if cycle then
-                return name .. " → " .. cycle
-            end
+            if cycle then return name .. " → " .. cycle end
         end
     end
     stack[name] = false
@@ -142,39 +125,42 @@ end
 -- ─── Core execution ──────────────────────────────────────────────────────────
 
 --- Run a single task (and its dependencies) as a coroutine.
+--- Always creates and fully owns its RunEntry — entry is created synchronously
+--- before the first yield, so it is visible to callers immediately.
 --- Must be called from within a coroutine (via async.go).
---- `run_id` is provided by the caller for the top-level task so the entry is
---- already visible before the coroutine body runs; dep tasks generate their own.
----@param name   string
----@param tasks  table<string,table>
----@param run_id string?
+---@param name  string
+---@param tasks table<string,table>
 ---@return boolean ok
-local function run_task_coro(name, tasks, run_id)
+local function run_task_coro(name, tasks)
     local task = tasks[name]
     if not task then
-        _notify.notify_error("unknown task: " .. name)
+        notify.notify_error("unknown task: " .. name)
         return false
     end
 
-    local own_entry = not run_id
-    if own_entry then
-        run_id = _gen_run_id(name)
-        _running[run_id] = {
-            task_name = name,
-            state = "running",
-            bufnrs = {},
-            done = Signal.new(),
-            progress = { start_time = os.time(), events = {} }
-        }
-        notify(run_id)
-    end
-    run_id = run_id --[[@as string]]
+    local run_id = gen_run_id(name)
+    ---@type easytasks.RunEntry
+    local entry = {
+        task_name = name,
+        state     = "running",
+        bufnrs    = {},
+        done      = Signal.new(),
+        progress  = { start_time = os.time(), events = {} },
+    }
+    _running[run_id] = entry
+    notify_change(run_id)
 
-    local entry = _running[run_id]
-
-    local function _event(msg)
+    local function event(msg)
         table.insert(entry.progress.events, { time = os.time(), message = msg })
-        notify(run_id)
+        notify_change(run_id)
+    end
+
+    local function finish(state)
+        entry.state              = state
+        entry.progress.stop_time = os.time()
+        entry.done:emit()
+        notify_change(run_id)
+        return state == "ok"
     end
 
     -- ── depends_on ──────────────────────────────────────────────────────────
@@ -182,70 +168,57 @@ local function run_task_coro(name, tasks, run_id)
     if #deps > 0 then
         entry.state       = "waiting"
         entry.waiting_for = deps
-        notify(run_id)
+        notify_change(run_id)
+
+        local deps_ok
         if task.depends_order == "parallel" then
             local fns = vim.tbl_map(function(dep_name)
                 return function() return run_task_coro(dep_name, tasks) end
             end, deps)
             local results = async.wait_all(fns)
-            local any_failed = false
+            deps_ok = true
             for i, r in ipairs(results) do
                 if not r.ok or not r.result then
-                    any_failed = true
-                    _event("dependency '" .. deps[i] .. "' failed")
+                    deps_ok = false
+                    event("dependency '" .. deps[i] .. "' failed")
                 end
             end
-            if any_failed then
-                entry.state = "failed"
-                notify(run_id)
-                return false
-            end
         else
+            deps_ok = true
             for _, dep_name in ipairs(deps) do
-                local ok = run_task_coro(dep_name, tasks)
-                if not ok then
-                    _event("dependency '" .. dep_name .. "' failed")
-                    entry.state = "failed"
-                    notify(run_id)
-                    return false
+                if not run_task_coro(dep_name, tasks) then
+                    deps_ok = false
+                    event("dependency '" .. dep_name .. "' failed")
+                    break
                 end
             end
         end
+
+        if not deps_ok then return finish("failed") end
+
         entry.state       = "running"
         entry.waiting_for = nil
-        notify(run_id)
+        notify_change(run_id)
     end
 
     -- ── stop check (may have been requested while waiting for deps) ──────────
-    if entry.stop_requested then
-        if own_entry then
-            entry.state = "stopped"
-            entry.progress.stop_time = os.time()
-            entry.done:emit()
-            notify(run_id)
-        end
-        return false
-    end
+    if entry.stop_requested then return finish("stopped") end
 
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get_all()[task.type]
     if not type_def then
-        _event("unknown task type: " .. tostring(task.type))
-        entry.state = "failed"
-        if own_entry then
-            entry.progress.stop_time = os.time()
-            entry.done:emit()
-        end
-        notify(run_id)
-        return false
+        event("unknown task type: " .. tostring(task.type))
+        return finish("failed")
     end
 
     ---@type easytasks.RunCtx
     local ctx = {
         tasks      = tasks,
+        set_cancel = function(fn) entry.cancel = fn end,
+        report     = function(message) event(message) end,
         add_bufnr  = function(bufnr, label)
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label or "output" })
-            notify(run_id)
+            notify_change(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
                 buffer   = bufnr,
                 once     = true,
@@ -256,71 +229,40 @@ local function run_task_coro(name, tasks, run_id)
                             break
                         end
                     end
-                    notify(run_id)
+                    notify_change(run_id)
                 end,
             })
-        end,
-        set_cancel = function(fn)
-            entry.cancel = fn
-        end,
-        report     = function(message)
-            _event(message)
         end,
     }
 
     local ok = type_def.run(task, ctx)
-    if own_entry then
-        entry.state = ok and "ok" or "failed"
-        entry.progress.stop_time = os.time()
-        entry.done:emit()
-        notify(run_id)
-    else
-        -- always update state inside the coroutine: for async tasks the coroutine is
-        -- resumed directly (not via async.go's step), so _launch's on_done never fires
-        entry.state = entry.stop_requested and "stopped" or (ok and "ok" or "failed")
-        entry.progress.stop_time = os.time()
-        notify(run_id)
-    end
-    return ok
+
+    if entry.stop_requested then return finish("stopped") end
+    return finish(ok and "ok" or "failed")
 end
 
 -- ─── Internal launch ─────────────────────────────────────────────────────────
 
+--- `run_task_coro` creates its entry synchronously before its first yield,
+--- so the entry is live before launch returns.
 ---@param task_name string
 ---@param tasks     table<string,table>
-local function _launch(task_name, tasks)
-    local run_id = _gen_run_id(task_name)
-    ---@type easytasks.RunEntry
-    _running[run_id] = {
-        task_name = task_name,
-        state = "running",
-        bufnrs = {},
-        done = Signal.new(),
-        progress = { start_time = os.time(), events = {} }
-    }
-    notify(run_id)
-
+local function launch(task_name, tasks)
     async.go(function()
-        return run_task_coro(task_name, tasks, run_id)
+        return run_task_coro(task_name, tasks)
     end, function(co_ok, result)
-        local final_entry = _running[run_id]
-        if not final_entry then return end
-
-        final_entry.progress.stop_time = os.time()
-
-        if not co_ok then
-            final_entry.state = "failed"
-            notify(run_id)
-            _notify.notify_error("error: " .. task_name .. ": " .. tostring(result))
-        elseif final_entry.stop_requested then
-            final_entry.state = "stopped"
-            notify(run_id)
-        else
-            final_entry.state = result and "ok" or "failed"
-            notify(run_id)
+        if co_ok then return end
+        -- coroutine itself threw — mark any orphaned running entry as failed
+        for run_id, entry in pairs(_running) do
+            if entry.task_name == task_name
+                and (entry.state == "running" or entry.state == "waiting") then
+                entry.state              = "failed"
+                entry.progress.stop_time = os.time()
+                entry.done:emit()
+                notify_change(run_id)
+            end
         end
-
-        final_entry.done:emit()
+        notify.notify_error("task error: " .. task_name .. ": " .. tostring(result))
     end)
 end
 
@@ -331,84 +273,74 @@ end
 function M.run(task_name, toml_path)
     local tasks, err = load_tasks(toml_path)
     if not tasks then
-        _notify.notify_error(err or "load error")
+        notify.notify_error(err or "load error")
         return
     end
 
     local task = tasks[task_name]
     if not task then
-        _notify.notify_error("task not found: " .. task_name)
+        notify.notify_error("task not found: " .. task_name)
         return
     end
 
-    -- cycle check
     local cycle = find_cycle(task_name, tasks, {}, {})
     if cycle then
-        _notify.notify_error("dependency cycle: " .. cycle)
+        notify.notify_error("dependency cycle: " .. cycle)
         return
     end
 
-    -- if_running check
-    local already_running = false
+    -- Collect any currently-active runs for this task
+    local active_signals = {}
     for _, e in pairs(_running) do
         if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
-            already_running = true
-            break
+            table.insert(active_signals, e.done)
         end
     end
+    local is_running = #active_signals > 0
 
-    if already_running then
-        local policy = task.if_running or "refuse"
-        if policy == "refuse" then
-            _notify.notify_warning("task already running: " .. task_name)
-            return
-        elseif policy == "wait" then
-            local signals = {}
-            for _, e in pairs(_running) do
-                if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
-                    table.insert(signals, e.done)
-                end
-            end
-            local wait_id = _gen_run_id(task_name)
-            _running[wait_id] = {
-                task_name = task_name,
-                state = "waiting",
-                bufnrs = {},
-                done = Signal.new(),
-                progress = { start_time = os.time(), events = {} }
-            }
-            notify(wait_id)
-            async.go(function()
-                local fns = vim.tbl_map(function(sig)
-                    return function() async.wait_signal(sig) end
-                end, signals)
-                async.wait_all(fns)
-            end, function()
-                _running[wait_id] = nil
-                _launch(task_name, tasks)
-            end)
-            return
-        elseif policy == "restart" then
-            local signals = {}
-            for _, e in pairs(_running) do
-                if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
-                    table.insert(signals, e.done)
-                end
-            end
-            M.stop(task_name)
-            async.go(function()
-                local fns = vim.tbl_map(function(sig)
-                    return function() async.wait_signal(sig) end
-                end, signals)
-                if #fns > 0 then async.wait_all(fns) end
-                _launch(task_name, tasks)
-            end, function() end)
-            return
-        end
-        -- "parallel": fall through and start a new independent run
+    if not is_running then
+        launch(task_name, tasks)
+        return
     end
 
-    _launch(task_name, tasks)
+    local policy = task.if_running or "refuse"
+
+    if policy == "refuse" then
+        notify.notify_warning("task already running: " .. task_name)
+    elseif policy == "parallel" then
+        launch(task_name, tasks)
+    elseif policy == "wait" then
+        local wait_id = gen_run_id(task_name)
+        _running[wait_id] = {
+            task_name = task_name,
+            state     = "waiting",
+            bufnrs    = {},
+            done      = Signal.new(),
+            progress  = { start_time = os.time(), events = {} },
+        }
+        notify_change(wait_id)
+
+        local fns = vim.tbl_map(function(sig)
+            return function() async.wait_signal(sig) end
+        end, active_signals)
+
+        async.go(function() async.wait_all(fns) end, function()
+            _running[wait_id] = nil
+            launch(task_name, tasks)
+        end)
+    elseif policy == "restart" then
+        M.stop(task_name)
+
+        local fns = vim.tbl_map(function(sig)
+            return function() async.wait_signal(sig) end
+        end, active_signals)
+
+        async.go(function()
+            if #fns > 0 then async.wait_all(fns) end
+        end, function()
+            launch(task_name, tasks)
+        end)
+    end
 end
 
 ---@param toml_path string
@@ -421,11 +353,12 @@ function M.list(toml_path)
     return names
 end
 
---- Stop all active instances of a task (running or waiting on deps).
+--- Stop all active instances of a task.
 ---@param task_name string
 function M.stop(task_name)
     for _, entry in pairs(_running) do
-        if entry.task_name == task_name and (entry.state == "running" or entry.state == "waiting") then
+        if entry.task_name == task_name
+            and (entry.state == "running" or entry.state == "waiting") then
             entry.stop_requested = true
             if entry.cancel then entry.cancel() end
         end
@@ -437,10 +370,12 @@ end
 ---@return easytasks.TaskState
 function M.state(task_name)
     local best_n = -1
-    local result = "idle"
+    local result = "idle" ---@type easytasks.TaskState
     for id, entry in pairs(_running) do
         if entry.task_name == task_name then
-            if entry.state == "running" or entry.state == "waiting" then return "running" end
+            if entry.state == "running" or entry.state == "waiting" then
+                return "running"
+            end
             local n = tonumber(id:match("#(%d+)$")) or 0
             if n > best_n then
                 best_n = n
