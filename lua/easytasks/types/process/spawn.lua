@@ -9,7 +9,7 @@ local _spawn_win
 --- `bufnr` must already be visible in a window.
 --- termopen handles all output rendering including ANSI colours.
 ---@param cmd  string|string[]
----@param opts {cwd?: string, env?: table<string,string>}
+---@param opts {cwd?: string, env?: table<string,string>, on_start?: fun(job_id: integer)}
 ---@param bufnr integer  terminal buffer (must be visible in a window)
 ---@return integer exit_code
 function M.spawn(cmd, opts, bufnr)
@@ -51,6 +51,8 @@ function M.spawn(cmd, opts, bufnr)
     vim.api.nvim_set_current_win(saved_win)
 
     if job_id <= 0 then return -1 end
+
+    if opts.on_start then opts.on_start(job_id) end
 
     return coroutine.yield()
 end

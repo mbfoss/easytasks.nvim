@@ -22,19 +22,22 @@ local _notify      = require("easytasks.ui")
 ---@field label string
 
 ---@class easytasks.RunCtx
----@field tasks     table<string,table>
----@field add_bufnr fun(bufnr: integer, label?: string)  register an output buffer for this run
+---@field tasks      table<string,table>
+---@field add_bufnr  fun(bufnr: integer, label?: string)  register an output buffer for this run
+---@field add_job_id fun(job_id: integer)                 register a job so it can be stopped
 
 ---@class easytasks.exec
 local M            = {}
 
----@alias easytasks.TaskState "idle"|"running"|"ok"|"failed"
+---@alias easytasks.TaskState "idle"|"running"|"ok"|"failed"|"stopped"
 
 ---@class easytasks.RunEntry
----@field task_name string
----@field state     easytasks.TaskState
----@field bufnrs    easytasks.BufEntry[]
----@field job_ids   integer[]
+---@field task_name      string
+---@field state          easytasks.TaskState
+---@field bufnrs         easytasks.BufEntry[]
+---@field job_ids        integer[]
+---@field stop_requested boolean?
+---@field _done_cbs      (fun())[]?
 
 ---@type table<string, easytasks.RunEntry>  run_id → entry
 local _running     = {}
@@ -187,8 +190,8 @@ local function run_task_coro(name, tasks, run_id)
 
     ---@type easytasks.RunCtx
     local ctx = {
-        tasks     = tasks,
-        add_bufnr = function(bufnr, label)
+        tasks      = tasks,
+        add_bufnr  = function(bufnr, label)
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label or "output" })
             notify(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
@@ -205,12 +208,49 @@ local function run_task_coro(name, tasks, run_id)
                 end,
             })
         end,
+        add_job_id = function(job_id)
+            table.insert(entry.job_ids, job_id)
+        end,
     }
 
     local ok = type_def.run(task, ctx)
     entry.state = ok and "ok" or "failed"
     notify(run_id)
     return ok
+end
+
+-- ─── Internal launch ─────────────────────────────────────────────────────────
+
+---@param task_name string
+---@param tasks     table<string,table>
+local function _launch(task_name, tasks)
+    local run_id = _gen_run_id(task_name)
+    ---@type easytasks.RunEntry
+    _running[run_id] = { task_name = task_name, state = "running", bufnrs = {}, job_ids = {} }
+    notify(run_id)
+
+    async.go(function()
+        return run_task_coro(task_name, tasks, run_id)
+    end, function(co_ok, result)
+        local final_entry = _running[run_id]
+        if not final_entry then return end
+
+        if not co_ok then
+            final_entry.state = "failed"
+            notify(run_id)
+            _notify.notify_error("error: " .. task_name .. ": " .. tostring(result))
+        elseif final_entry.stop_requested then
+            final_entry.state = "stopped"
+            notify(run_id)
+        else
+            final_entry.state = result and "ok" or "failed"
+            notify(run_id)
+        end
+
+        local cbs = final_entry._done_cbs or {}
+        final_entry._done_cbs = {}
+        for _, cb in ipairs(cbs) do cb() end
+    end)
 end
 
 -- ─── Public ──────────────────────────────────────────────────────────────────
@@ -230,23 +270,6 @@ function M.run(task_name, toml_path)
         return
     end
 
-    -- if_running check: scan entries for a running instance of this task
-    local already_running = false
-    for _, e in pairs(_running) do
-        if e.task_name == task_name and e.state == "running" then
-            already_running = true
-            break
-        end
-    end
-    if already_running then
-        local policy = task.if_running or "refuse"
-        if policy == "refuse" then
-            _notify.notify_warning("task already running: " .. task_name)
-            return
-        end
-        -- "parallel" / "restart": fall through and start a new independent run
-    end
-
     -- cycle check
     local cycle = find_cycle(task_name, tasks, {}, {})
     if cycle then
@@ -254,26 +277,28 @@ function M.run(task_name, toml_path)
         return
     end
 
-    local run_id = _gen_run_id(task_name)
-    ---@type easytasks.RunEntry
-    _running[run_id] = { task_name = task_name, state = "running", bufnrs = {}, job_ids = {} }
-    notify(run_id)
-
-    async.go(function()
-        return run_task_coro(task_name, tasks, run_id)
-    end, function(co_ok, result)
-        local final_entry = _running[run_id]
-        if final_entry then
-            if not co_ok then
-                final_entry.state = "failed"
-                notify(run_id)
-                _notify.notify_error("error: " .. task_name .. ": " .. tostring(result))
-            else
-                final_entry.state = result and "ok" or "failed"
-                notify(run_id)
-            end
+    -- if_running check
+    local already_running = false
+    for _, e in pairs(_running) do
+        if e.task_name == task_name and e.state == "running" then
+            already_running = true
+            break
         end
-    end)
+    end
+
+    if already_running then
+        local policy = task.if_running or "refuse"
+        if policy == "refuse" then
+            _notify.notify_warning("task already running: " .. task_name)
+            return
+        elseif policy == "restart" then
+            M.stop(task_name, function() _launch(task_name, tasks) end)
+            return
+        end
+        -- "parallel": fall through and start a new independent run
+    end
+
+    _launch(task_name, tasks)
 end
 
 ---@param toml_path string
@@ -287,15 +312,39 @@ function M.list(toml_path)
 end
 
 --- Stop all running instances of a task.
+--- `on_done` is called once every stopped instance has finished (or immediately
+--- if nothing was running).
 ---@param task_name string
-function M.stop(task_name)
-    for run_id, entry in pairs(_running) do
+---@param on_done   fun()?
+function M.stop(task_name, on_done)
+    local to_stop = {}
+    for _, entry in pairs(_running) do
         if entry.task_name == task_name and entry.state == "running" then
-            for _, jid in ipairs(entry.job_ids) do
-                vim.fn.jobstop(jid)
-            end
-            entry.state = "idle"
-            notify(run_id)
+            table.insert(to_stop, entry)
+        end
+    end
+
+    if #to_stop == 0 then
+        if on_done then on_done() end
+        return
+    end
+
+    if on_done then
+        local remaining = #to_stop
+        local cb = function()
+            remaining = remaining - 1
+            if remaining == 0 then on_done() end
+        end
+        for _, entry in ipairs(to_stop) do
+            entry._done_cbs = entry._done_cbs or {}
+            table.insert(entry._done_cbs, cb)
+        end
+    end
+
+    for _, entry in ipairs(to_stop) do
+        entry.stop_requested = true
+        for _, jid in ipairs(entry.job_ids) do
+            vim.fn.jobstop(jid)
         end
     end
 end
