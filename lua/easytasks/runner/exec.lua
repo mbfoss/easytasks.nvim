@@ -39,11 +39,12 @@ local _notify      = require("easytasks.ui")
 ---@class easytasks.exec
 local M            = {}
 
----@alias easytasks.TaskState "idle"|"running"|"ok"|"failed"|"stopped"
+---@alias easytasks.TaskState "idle"|"running"|"waiting"|"ok"|"failed"|"stopped"
 
 ---@class easytasks.RunEntry
 ---@field task_name      string
 ---@field state          easytasks.TaskState
+---@field waiting_for    string[]?                      dep names set while state == "waiting"
 ---@field progress       easytasks.RunProgress
 ---@field bufnrs         easytasks.BufEntry[]
 ---@field cancel         fun()?                        registered by the task type; called by M.stop
@@ -172,6 +173,9 @@ local function run_task_coro(name, tasks, run_id)
     -- ── depends_on ──────────────────────────────────────────────────────────
     local deps = type(task.depends_on) == "table" and task.depends_on or {}
     if #deps > 0 then
+        entry.state       = "waiting"
+        entry.waiting_for = deps
+        notify(run_id)
         if task.depends_order == "parallel" then
             local fns = vim.tbl_map(function(dep_name)
                 return function() return run_task_coro(dep_name, tasks) end
@@ -200,6 +204,9 @@ local function run_task_coro(name, tasks, run_id)
                 end
             end
         end
+        entry.state       = "running"
+        entry.waiting_for = nil
+        notify(run_id)
     end
 
     -- ── type-specific run ────────────────────────────────────────────────────
@@ -325,12 +332,19 @@ function M.run(task_name, toml_path)
                     table.insert(signals, e.done)
                 end
             end
+            local wait_id = _gen_run_id(task_name)
+            _running[wait_id] = { task_name = task_name, state = "waiting", bufnrs = {}, done = Signal.new(),
+                                  progress = { start_time = os.time(), events = {} } }
+            notify(wait_id)
             async.go(function()
                 local fns = vim.tbl_map(function(sig)
                     return function() async.wait_signal(sig) end
                 end, signals)
                 async.wait_all(fns)
-            end, function() end)
+            end, function()
+                _running[wait_id] = nil
+                _launch(task_name, tasks)
+            end)
             return
         elseif policy == "restart" then
             local signals = {}

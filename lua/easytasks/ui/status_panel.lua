@@ -26,9 +26,11 @@ local _LIST_WIDTH   = 36
 
 local _augroup      = vim.api.nvim_create_augroup("EasytasksStatusPanel", { clear = true })
 local _empty_ns     = vim.api.nvim_create_namespace("EasytasksStatusPanelEmpty")
+local _info_hl_ns   = vim.api.nvim_create_namespace("EasytasksInfoBuf")
 
 local _state_badge  = {
     running = { "● ", "DiagnosticWarn" },
+    waiting = { "◌ ", "DiagnosticWarn" },
     ok      = { "● ", "DiagnosticOk" },
     failed  = { "● ", "DiagnosticError" },
     stopped = { "● ", "DiagnosticHint" },
@@ -213,27 +215,49 @@ local function _sync_buf_nodes(run_id, entry)
     end
 end
 
+---@class easytasks.InfoLine
+---@field text string
+---@field hl   string?   highlight group for the whole line, or nil
+
 ---@param entry easytasks.RunEntry
----@return string[]
+---@return easytasks.InfoLine[]
 local function _info_lines(entry)
-    local p     = entry.progress
-    local fmt   = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
-    local lines = {}
+    local p   = entry.progress
+    local fmt = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
 
-    table.insert(lines, "  started: " .. fmt(p.start_time))
+    ---@param text string
+    ---@param hl   string?
+    ---@return easytasks.InfoLine
+    local function line(text, hl) return { text = text, hl = hl } end
+
+    local rows = {
+        line(entry.task_name, "Title"),
+        line(""),
+        line("status   " .. entry.state),
+        line("started  " .. fmt(p.start_time)),
+    }
+
     if p.stop_time then
-        table.insert(lines, "  stopped: " .. fmt(p.stop_time))
+        table.insert(rows, line("stopped  " .. fmt(p.stop_time)))
     end
-    table.insert(lines, "  status:  " .. entry.state)
 
-    if #p.events > 0 then
-        table.insert(lines, "")
-        for _, ev in ipairs(p.events) do
-            table.insert(lines, "  [" .. fmt(ev.time) .. "] " .. ev.message)
+    if entry.waiting_for and #entry.waiting_for > 0 then
+        table.insert(rows, line(""))
+        table.insert(rows, line("waiting for", "Label"))
+        for _, dep in ipairs(entry.waiting_for) do
+            table.insert(rows, line("  - " .. dep))
         end
     end
 
-    return lines
+    if #p.events > 0 then
+        table.insert(rows, line(""))
+        table.insert(rows, line("events", "Label"))
+        for _, ev in ipairs(p.events) do
+            table.insert(rows, line("  [" .. fmt(ev.time) .. "] " .. ev.message))
+        end
+    end
+
+    return rows
 end
 
 --- Ensure a scratch info buffer exists for `run_id` and refresh its content.
@@ -245,9 +269,20 @@ local function _ensure_info_buf(run_id, entry)
         bufnr = utils.create_sratch_buffer(false, { bufhidden = "hide" })
         _info_bufs[run_id] = bufnr
     end
+
+    local rows  = _info_lines(entry)
+    local texts = vim.tbl_map(function(r) return r.text end, rows)
+
     vim.bo[bufnr].modifiable = true
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, _info_lines(entry))
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, texts)
     vim.bo[bufnr].modifiable = false
+
+    vim.api.nvim_buf_clear_namespace(bufnr, _info_hl_ns, 0, -1)
+    for i, r in ipairs(rows) do
+        if r.hl then
+            vim.api.nvim_buf_set_extmark(bufnr, _info_hl_ns, i - 1, 0, { hl_group = r.hl, end_col = #r.text })
+        end
+    end
 end
 
 --- Return the bufnr to show for the item under the cursor, or nil.
