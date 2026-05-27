@@ -81,10 +81,12 @@ function M.enable()
         function(cmd, args, cmd_opts)
             local action = args[1]
             table.remove(args, 1)
-            if action == "toggle" then
-                require("easytasks.ui.status_panel").toggle()
-            elseif action == "run" then
+            if action == nil or action == "" or action == "run" then
                 run_command(args)
+            elseif action == "toggle" then
+                require("easytasks.ui.status_panel").toggle()
+            else
+                ui.notify_warning("Invalid action: " .. tostring(action))
             end
         end,
         {

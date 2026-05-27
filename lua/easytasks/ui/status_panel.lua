@@ -1,4 +1,5 @@
 local TreeBuffer    = require('easytasks.ui.TreeBuffer')
+local utils         = require('easytasks.ui.utils')
 local exec          = require('easytasks.runner.exec')
 
 ---@class easytasks.ui.status_panel
@@ -24,6 +25,7 @@ local _PANEL_HEIGHT = 8
 local _LIST_WIDTH   = 36
 
 local _augroup      = vim.api.nvim_create_augroup("EasytasksStatusPanel", { clear = true })
+local _empty_ns     = vim.api.nvim_create_namespace("EasytasksStatusPanelEmpty")
 
 local _state_badge  = {
     running = { "● ", "DiagnosticWarn" },
@@ -66,6 +68,24 @@ local function _list_config()
 end
 
 ---@return vim.api.keyset.win_config
+local function _full_config()
+    local gw = _gutter_width()
+    ---@type vim.api.keyset.win_config
+    return {
+        relative  = "editor",
+        anchor    = "SW",
+        row       = _panel_row(),
+        col       = gw,
+        width     = math.max(4, vim.o.columns - gw * 2),
+        height    = _PANEL_HEIGHT,
+        style     = "minimal",
+        border    = "rounded",
+        focusable = true,
+        zindex    = 49,
+    }
+end
+
+---@return vim.api.keyset.win_config
 local function _output_config()
     local gw    = _gutter_width()
     local out_w = math.max(4, vim.o.columns - gw - gw - _LIST_WIDTH - 2)
@@ -92,7 +112,12 @@ local function _show_output(bufnr)
     if _output_win and vim.api.nvim_win_is_valid(_output_win) then
         vim.api.nvim_win_set_buf(_output_win, bufnr)
     else
-        _output_win                        = vim.api.nvim_open_win(bufnr, false, _output_config())
+        _output_win                        = utils.create_window(bufnr, false, _output_config(), function()
+            _output_win = nil
+            if _win then
+                vim.api.nvim_win_close(_win, false)
+            end
+        end)
         vim.wo[_output_win].number         = false
         vim.wo[_output_win].relativenumber = false
         vim.wo[_output_win].wrap           = false
@@ -112,6 +137,26 @@ local function _close_output()
         pcall(vim.api.nvim_win_close, _output_win, true)
     end
     _output_win = nil
+end
+
+local function _update_layout()
+    if not _tb or not _win or not vim.api.nvim_win_is_valid(_win) then return end
+    local is_empty = next(_known_runs) == nil
+    local buf = _tb:buf()
+    vim.api.nvim_buf_clear_namespace(buf, _empty_ns, 0, -1)
+    if is_empty then
+        _close_output()
+        pcall(vim.api.nvim_win_set_config, _win, _full_config())
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
+        vim.bo[buf].modifiable = false
+        vim.api.nvim_buf_set_extmark(buf, _empty_ns, 0, 0, {
+            virt_text     = { { "  No running tasks", "Comment" } },
+            virt_text_pos = "overlay",
+        })
+    else
+        pcall(vim.api.nvim_win_set_config, _win, _list_config())
+    end
 end
 
 ---@param bufnr integer
@@ -170,8 +215,6 @@ local function _sync_buf_nodes(run_id, entry)
     end
 end
 
-local _ui = require('easytasks.ui')
-
 ---@param entry easytasks.RunEntry
 ---@return string[]
 local function _info_lines(entry)
@@ -188,7 +231,7 @@ end
 local function _ensure_info_buf(run_id, entry)
     local bufnr = _info_bufs[run_id]
     if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-        bufnr = _ui.create_sratch_buffer(false, { bufhidden = "hide" })
+        bufnr = utils.create_sratch_buffer(false, { bufhidden = "hide" })
         _info_bufs[run_id] = bufnr
     end
     vim.bo[bufnr].modifiable = true
@@ -237,6 +280,7 @@ local function on_state_change(run_id, entry)
     end
     _sync_buf_nodes(run_id, entry)
     _ensure_info_buf(run_id, entry)
+    _update_layout()
     vim.schedule(_sync_output_to_cursor)
 end
 
@@ -251,7 +295,7 @@ local function on_close()
     for _, bufnr in pairs(_info_bufs) do
         pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
     end
-    _info_bufs  = {}
+    _info_bufs = {}
 end
 
 function M.open()
@@ -287,24 +331,19 @@ function M.open()
     local buf                   = _tb:buf()
     vim.bo[buf].filetype        = "easytasks-status"
 
-    _win                        = vim.api.nvim_open_win(buf, true, _list_config())
+    _win                        = utils.create_window(buf, true, _list_config(), function()
+        _win = nil
+        on_close()
+    end)
     vim.wo[_win].number         = false
     vim.wo[_win].relativenumber = false
     vim.wo[_win].wrap           = false
-
-    vim.api.nvim_create_autocmd("WinClosed", {
-        group    = _augroup,
-        pattern  = tostring(_win),
-        once     = true,
-        callback = on_close,
-    })
+    vim.wo[_win].cursorline     = true
 
     vim.api.nvim_create_autocmd("VimResized", {
         group    = _augroup,
         callback = function()
-            if _win and vim.api.nvim_win_is_valid(_win) then
-                pcall(vim.api.nvim_win_set_config, _win, _list_config())
-            end
+            _update_layout()
             if _output_win and vim.api.nvim_win_is_valid(_output_win) then
                 pcall(vim.api.nvim_win_set_config, _output_win, _output_config())
             end
@@ -325,13 +364,14 @@ function M.open()
         _ensure_info_buf(run_id, entry)
     end
 
+    _update_layout()
     _sync_output_to_cursor()
 
     exec.subscribe(on_state_change)
 end
 
 function M.toggle()
-    if _win and vim.api.nvim_win_is_valid(_win) then
+    if _win then
         vim.api.nvim_win_close(_win, false)
     else
         M.open()

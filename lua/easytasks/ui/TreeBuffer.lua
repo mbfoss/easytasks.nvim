@@ -328,6 +328,17 @@ function TreeBuffer:current_item()
     return self._current_id
 end
 
+---@param id any
+---@return integer? row 0-indexed row of the item in the buffer, or nil if not found
+function TreeBuffer:row_of(id)
+    for i, rid in ipairs(self._render_order) do
+        if rid == id then
+            return self:_row_for_index(i)
+        end
+    end
+    return nil
+end
+
 ---@return fun():any, any, integer?
 function TreeBuffer:iter_items()
     local i = 0
