@@ -158,8 +158,13 @@ local function run_task_coro(name, tasks, run_id)
 
     if not run_id then
         run_id = _gen_run_id(name)
-        _running[run_id] = { task_name = name, state = "running", bufnrs = {}, done = Signal.new(),
-                             progress = { start_time = os.time(), events = {} } }
+        _running[run_id] = {
+            task_name = name,
+            state = "running",
+            bufnrs = {},
+            done = Signal.new(),
+            progress = { start_time = os.time(), events = {} }
+        }
         notify(run_id)
     end
 
@@ -225,8 +230,8 @@ local function run_task_coro(name, tasks, run_id)
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label or "output" })
             notify(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
-                buffer  = bufnr,
-                once    = true,
+                buffer   = bufnr,
+                once     = true,
                 callback = function()
                     for i, be in ipairs(entry.bufnrs) do
                         if be.bufnr == bufnr then
@@ -259,8 +264,13 @@ end
 local function _launch(task_name, tasks)
     local run_id = _gen_run_id(task_name)
     ---@type easytasks.RunEntry
-    _running[run_id] = { task_name = task_name, state = "running", bufnrs = {}, done = Signal.new(),
-                         progress = { start_time = os.time(), events = {} } }
+    _running[run_id] = {
+        task_name = task_name,
+        state = "running",
+        bufnrs = {},
+        done = Signal.new(),
+        progress = { start_time = os.time(), events = {} }
+    }
     notify(run_id)
 
     async.go(function()
@@ -333,8 +343,13 @@ function M.run(task_name, toml_path)
                 end
             end
             local wait_id = _gen_run_id(task_name)
-            _running[wait_id] = { task_name = task_name, state = "waiting", bufnrs = {}, done = Signal.new(),
-                                  progress = { start_time = os.time(), events = {} } }
+            _running[wait_id] = {
+                task_name = task_name,
+                state = "waiting",
+                bufnrs = {},
+                done = Signal.new(),
+                progress = { start_time = os.time(), events = {} }
+            }
             notify(wait_id)
             async.go(function()
                 local fns = vim.tbl_map(function(sig)
