@@ -156,7 +156,8 @@ local function run_task_coro(name, tasks, run_id)
         return false
     end
 
-    if not run_id then
+    local own_entry = not run_id
+    if own_entry then
         run_id = _gen_run_id(name)
         _running[run_id] = {
             task_name = name,
@@ -167,6 +168,7 @@ local function run_task_coro(name, tasks, run_id)
         }
         notify(run_id)
     end
+    run_id = run_id --[[@as string]]
 
     local entry = _running[run_id]
 
@@ -214,11 +216,26 @@ local function run_task_coro(name, tasks, run_id)
         notify(run_id)
     end
 
+    -- ── stop check (may have been requested while waiting for deps) ──────────
+    if entry.stop_requested then
+        if own_entry then
+            entry.state = "stopped"
+            entry.progress.stop_time = os.time()
+            entry.done:emit()
+            notify(run_id)
+        end
+        return false
+    end
+
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get_all()[task.type]
     if not type_def then
         _event("unknown task type: " .. tostring(task.type))
         entry.state = "failed"
+        if own_entry then
+            entry.progress.stop_time = os.time()
+            entry.done:emit()
+        end
         notify(run_id)
         return false
     end
@@ -252,8 +269,18 @@ local function run_task_coro(name, tasks, run_id)
     }
 
     local ok = type_def.run(task, ctx)
-    entry.state = ok and "ok" or "failed"
-    notify(run_id)
+    if own_entry then
+        entry.state = ok and "ok" or "failed"
+        entry.progress.stop_time = os.time()
+        entry.done:emit()
+        notify(run_id)
+    else
+        -- always update state inside the coroutine: for async tasks the coroutine is
+        -- resumed directly (not via async.go's step), so _launch's on_done never fires
+        entry.state = entry.stop_requested and "stopped" or (ok and "ok" or "failed")
+        entry.progress.stop_time = os.time()
+        notify(run_id)
+    end
     return ok
 end
 
@@ -324,7 +351,7 @@ function M.run(task_name, toml_path)
     -- if_running check
     local already_running = false
     for _, e in pairs(_running) do
-        if e.task_name == task_name and e.state == "running" then
+        if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
             already_running = true
             break
         end
@@ -338,7 +365,7 @@ function M.run(task_name, toml_path)
         elseif policy == "wait" then
             local signals = {}
             for _, e in pairs(_running) do
-                if e.task_name == task_name and e.state == "running" then
+                if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
                     table.insert(signals, e.done)
                 end
             end
@@ -364,7 +391,7 @@ function M.run(task_name, toml_path)
         elseif policy == "restart" then
             local signals = {}
             for _, e in pairs(_running) do
-                if e.task_name == task_name and e.state == "running" then
+                if e.task_name == task_name and (e.state == "running" or e.state == "waiting") then
                     table.insert(signals, e.done)
                 end
             end
@@ -394,11 +421,11 @@ function M.list(toml_path)
     return names
 end
 
---- Stop all running instances of a task.
+--- Stop all active instances of a task (running or waiting on deps).
 ---@param task_name string
 function M.stop(task_name)
     for _, entry in pairs(_running) do
-        if entry.task_name == task_name and entry.state == "running" then
+        if entry.task_name == task_name and (entry.state == "running" or entry.state == "waiting") then
             entry.stop_requested = true
             if entry.cancel then entry.cancel() end
         end
@@ -409,11 +436,16 @@ end
 ---@param task_name string
 ---@return easytasks.TaskState
 function M.state(task_name)
+    local best_n = -1
     local result = "idle"
-    for _, entry in pairs(_running) do
+    for id, entry in pairs(_running) do
         if entry.task_name == task_name then
-            if entry.state == "running" then return "running" end
-            result = entry.state
+            if entry.state == "running" or entry.state == "waiting" then return "running" end
+            local n = tonumber(id:match("#(%d+)$")) or 0
+            if n > best_n then
+                best_n = n
+                result = entry.state
+            end
         end
     end
     return result
