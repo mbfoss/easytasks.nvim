@@ -62,6 +62,10 @@ end
 function M.enable()
     if enabled then return end
     enabled = true
+
+    --TODO: remove this
+    require("easytasks.util.log").enable()
+
     -- Build schema now if setup() was not called (or called without a schema)
     if not M.config.schema then
         M.config.schema = task_types.build_schema()
