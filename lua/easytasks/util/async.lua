@@ -54,6 +54,18 @@ function M.wait_signal(sig)
     coroutine.yield()
 end
 
+--- Run fn as a sub-coroutine and yield until it completes.
+--- Must be called from within a coroutine (started with async.go).
+---@param fn fun(): any
+---@return { ok: boolean, result: any }
+function M.wait_one(fn)
+    local co = assert(coroutine.running(), "wait_one must be called inside a coroutine")
+    M.go(fn, function(ok, result)
+        M.resume(co, { ok = ok, result = result })
+    end)
+    return coroutine.yield()
+end
+
 --- Run all fns as parallel coroutines and yield until all complete.
 --- Must be called from within a coroutine (started with async.go).
 --- Returns an array of { ok: boolean, result: any } in the same order as fns.

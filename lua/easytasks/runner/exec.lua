@@ -128,26 +128,35 @@ end
 --- Always creates and fully owns its RunEntry — entry is created synchronously
 --- before the first yield, so it is visible to callers immediately.
 --- Must be called from within a coroutine (via async.go).
----@param name  string
----@param tasks table<string,table>
+---@param name     string
+---@param tasks    table<string,table>
+---@param run_id?  string  pre-existing run_id to reuse (e.g. a waiting entry)
 ---@return boolean ok
-local function run_task_coro(name, tasks)
+local function run_task_coro(name, tasks, run_id)
     local task = tasks[name]
     if not task then
         notify.notify_error("unknown task: " .. name)
         return false
     end
 
-    local run_id = gen_run_id(name)
     ---@type easytasks.RunEntry
-    local entry = {
-        task_name = name,
-        state     = "running",
-        bufnrs    = {},
-        done      = Signal.new(),
-        progress  = { start_time = os.time(), events = {} },
-    }
-    _running[run_id] = entry
+    local entry
+    if run_id then
+        entry = _running[run_id]
+        entry.state               = "running"
+        entry.waiting_for         = nil
+        entry.progress.start_time = os.time()
+    else
+        run_id = gen_run_id(name)
+        entry = {
+            task_name = name,
+            state     = "running",
+            bufnrs    = {},
+            done      = Signal.new(),
+            progress  = { start_time = os.time(), events = {} },
+        }
+        _running[run_id] = entry
+    end
     notify_change(run_id)
 
     local function event(msg)
@@ -186,7 +195,8 @@ local function run_task_coro(name, tasks)
         else
             deps_ok = true
             for _, dep_name in ipairs(deps) do
-                if not run_task_coro(dep_name, tasks) then
+                local r = async.wait_one(function() return run_task_coro(dep_name, tasks) end)
+                if not r.ok or not r.result then
                     deps_ok = false
                     event("dependency '" .. dep_name .. "' failed")
                     break
@@ -247,19 +257,20 @@ end
 --- so the entry is live before launch returns.
 ---@param task_name string
 ---@param tasks     table<string,table>
-local function launch(task_name, tasks)
+---@param run_id?   string  pre-existing run_id to reuse (e.g. a waiting entry)
+local function launch(task_name, tasks, run_id)
     async.go(function()
-        return run_task_coro(task_name, tasks)
+        return run_task_coro(task_name, tasks, run_id)
     end, function(co_ok, result)
         if co_ok then return end
         -- coroutine itself threw — mark any orphaned running entry as failed
-        for run_id, entry in pairs(_running) do
+        for rid, entry in pairs(_running) do
             if entry.task_name == task_name
                 and (entry.state == "running" or entry.state == "waiting") then
                 entry.state              = "failed"
                 entry.progress.stop_time = os.time()
                 entry.done:emit()
-                notify_change(run_id)
+                notify_change(rid)
             end
         end
         notify.notify_error("task error: " .. task_name .. ": " .. tostring(result))
@@ -310,23 +321,22 @@ function M.run(task_name, toml_path)
     elseif policy == "parallel" then
         launch(task_name, tasks)
     elseif policy == "wait" then
-        local wait_id = gen_run_id(task_name)
-        _running[wait_id] = {
+        local run_id = gen_run_id(task_name)
+        _running[run_id] = {
             task_name = task_name,
             state     = "waiting",
             bufnrs    = {},
             done      = Signal.new(),
             progress  = { start_time = os.time(), events = {} },
         }
-        notify_change(wait_id)
+        notify_change(run_id)
 
         local fns = vim.tbl_map(function(sig)
             return function() async.wait_signal(sig) end
         end, active_signals)
 
         async.go(function() async.wait_all(fns) end, function()
-            _running[wait_id] = nil
-            launch(task_name, tasks)
+            launch(task_name, tasks, run_id)
         end)
     elseif policy == "restart" then
         M.stop(task_name)
