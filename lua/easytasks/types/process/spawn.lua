@@ -1,7 +1,6 @@
 local M = {}
 
-local async = require("easytasks.util.async")
-local ui    = require("easytasks.ui")
+local ui = require("easytasks.ui")
 
 local _spawn_win
 
@@ -19,8 +18,6 @@ local _spawn_win
 ---@param bufnr integer  terminal buffer (must be visible in a window)
 ---@return easytasks.SpawnHandle
 function M.spawn(cmd, opts, bufnr)
-    local co = assert(coroutine.running(), "spawn must be called inside a coroutine")
-
     -- A terminal buffer must be in a window for jobstart {term=true}.
     if not _spawn_win then
         _spawn_win = ui.create_window(bufnr, false, {
@@ -43,13 +40,14 @@ function M.spawn(cmd, opts, bufnr)
     local saved_win = vim.api.nvim_get_current_win()
     vim.api.nvim_set_current_win(_spawn_win)
 
+    local waker
     local job_id = vim.fn.jobstart(cmd, {
         term    = true,
         cwd     = opts.cwd,
         env     = opts.env,
         on_exit = function(_, code)
             vim.schedule(function()
-                async.resume(co, code)
+                if waker then waker(code) end
             end)
         end,
     })
@@ -60,7 +58,12 @@ function M.spawn(cmd, opts, bufnr)
         return { job_id = -1, wait = function() return -1 end }
     end
 
-    return { job_id = job_id, wait = function() return coroutine.yield() end }
+    return {
+        job_id = job_id,
+        wait   = function()
+            return coroutine.yield(function(w) waker = w end)
+        end,
+    }
 end
 
 return M

@@ -142,7 +142,7 @@ local function run_task_coro(name, tasks, run_id)
     ---@type easytasks.RunEntry
     local entry
     if run_id then
-        entry = _running[run_id]
+        entry                     = _running[run_id]
         entry.state               = "running"
         entry.waiting_for         = nil
         entry.progress.start_time = os.time()

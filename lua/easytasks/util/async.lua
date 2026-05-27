@@ -1,10 +1,10 @@
 ---@class easytasks.async
 local M = {}
 
----@type table<thread, fun(...): any>
-local _steps = {}
-
 --- Drive `fn` as a coroutine. Calls `on_done(ok, result)` when it finishes or errors.
+--- When the coroutine yields it must yield a function `setup(waker)`. The step
+--- function calls `setup(step)` immediately, handing the coroutine's own resume
+--- path to whoever will wake it later (a timer, an on_exit callback, etc.).
 ---@param fn     fun(...): any
 ---@param on_done fun(ok: boolean, result: any)
 ---@param ...    any  arguments forwarded to fn
@@ -16,42 +16,30 @@ function M.go(fn, on_done, ...)
     local function step(...)
         local ok, val = coroutine.resume(co, ...)
         if not ok then
-            _steps[co] = nil
             on_done(false, val)
         elseif coroutine.status(co) == "dead" then
-            _steps[co] = nil
             on_done(true, val)
+        elseif type(val) == "function" then
+            val(step)
+        else
+            on_done(false, "unexpected yield value: " .. type(val))
         end
-        -- still suspended: a callback will call M.resume(co, ...) to continue
     end
-    _steps[co] = step
     step()
-end
-
---- Resume a coroutine managed by M.go, routing through its step function so
---- on_done is fired when the coroutine finishes. All async resume sites (spawn,
---- wait_signal, wait_all) must use this instead of coroutine.resume directly.
----@param co thread
----@param ... any
-function M.resume(co, ...)
-    local step = _steps[co]
-    if step then
-        step(...)
-    end
 end
 
 --- Yield the calling coroutine until `sig` emits once.
 --- Must be called from within a coroutine (started with async.go).
 ---@param sig easytasks.util.Signal<fun()>
 function M.wait_signal(sig)
-    local co = assert(coroutine.running(), "wait_signal must be called inside a coroutine")
-    local handler
-    handler = function()
-        sig:unsubscribe(handler)
-        M.resume(co)
-    end
-    sig:subscribe(handler)
-    coroutine.yield()
+    coroutine.yield(function(waker)
+        local handler
+        handler = function()
+            sig:unsubscribe(handler)
+            waker()
+        end
+        sig:subscribe(handler)
+    end)
 end
 
 --- Run fn as a sub-coroutine and yield until it completes.
@@ -59,11 +47,11 @@ end
 ---@param fn fun(): any
 ---@return { ok: boolean, result: any }
 function M.wait_one(fn)
-    local co = assert(coroutine.running(), "wait_one must be called inside a coroutine")
-    M.go(fn, function(ok, result)
-        M.resume(co, { ok = ok, result = result })
+    return coroutine.yield(function(waker)
+        M.go(fn, function(ok, result)
+            waker({ ok = ok, result = result })
+        end)
     end)
-    return coroutine.yield()
 end
 
 --- Run all fns as parallel coroutines and yield until all complete.
@@ -73,19 +61,17 @@ end
 ---@return { ok: boolean, result: any }[]
 function M.wait_all(fns)
     if #fns == 0 then return {} end
-    local co = assert(coroutine.running(), "wait_all must be called inside a coroutine")
-    local results = {}
-    local pending = #fns
-    for i, fn in ipairs(fns) do
-        M.go(fn, function(ok, result)
-            results[i] = { ok = ok, result = result }
-            pending = pending - 1
-            if pending == 0 then
-                M.resume(co, results)
-            end
-        end)
-    end
-    return coroutine.yield()
+    return coroutine.yield(function(waker)
+        local results = {}
+        local pending = #fns
+        for i, fn in ipairs(fns) do
+            M.go(fn, function(ok, result)
+                results[i] = { ok = ok, result = result }
+                pending = pending - 1
+                if pending == 0 then waker(results) end
+            end)
+        end
+    end)
 end
 
 return M
