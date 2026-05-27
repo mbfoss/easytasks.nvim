@@ -21,10 +21,20 @@ local _notify      = require("easytasks.ui")
 ---@field bufnr integer
 ---@field label string
 
+---@class easytasks.ProgressEvent
+---@field time    integer  unix timestamp
+---@field message string
+
+---@class easytasks.RunProgress
+---@field start_time integer              unix timestamp set when the run begins
+---@field stop_time  integer?             unix timestamp set when the run reaches a terminal state
+---@field events     easytasks.ProgressEvent[]  task-reported and system messages
+
 ---@class easytasks.RunCtx
 ---@field tasks      table<string,table>
 ---@field add_bufnr  fun(bufnr: integer, label?: string)  register an output buffer for this run
 ---@field set_cancel fun(fn: fun())                       register a teardown function called by M.stop
+---@field report     fun(message: string)                 append a progress message visible in the status panel
 
 ---@class easytasks.exec
 local M            = {}
@@ -34,6 +44,7 @@ local M            = {}
 ---@class easytasks.RunEntry
 ---@field task_name      string
 ---@field state          easytasks.TaskState
+---@field progress       easytasks.RunProgress
 ---@field bufnrs         easytasks.BufEntry[]
 ---@field cancel         fun()?                        registered by the task type; called by M.stop
 ---@field stop_requested boolean?
@@ -146,11 +157,17 @@ local function run_task_coro(name, tasks, run_id)
 
     if not run_id then
         run_id = _gen_run_id(name)
-        _running[run_id] = { task_name = name, state = "running", bufnrs = {}, done = Signal.new() }
+        _running[run_id] = { task_name = name, state = "running", bufnrs = {}, done = Signal.new(),
+                             progress = { start_time = os.time(), events = {} } }
         notify(run_id)
     end
 
     local entry = _running[run_id]
+
+    local function _event(msg)
+        table.insert(entry.progress.events, { time = os.time(), message = msg })
+        notify(run_id)
+    end
 
     -- ── depends_on ──────────────────────────────────────────────────────────
     local deps = type(task.depends_on) == "table" and task.depends_on or {}
@@ -160,17 +177,23 @@ local function run_task_coro(name, tasks, run_id)
                 return function() return run_task_coro(dep_name, tasks) end
             end, deps)
             local results = async.wait_all(fns)
-            for _, r in ipairs(results) do
+            local any_failed = false
+            for i, r in ipairs(results) do
                 if not r.ok or not r.result then
-                    entry.state = "failed"
-                    notify(run_id)
-                    return false
+                    any_failed = true
+                    _event("dependency '" .. deps[i] .. "' failed")
                 end
+            end
+            if any_failed then
+                entry.state = "failed"
+                notify(run_id)
+                return false
             end
         else
             for _, dep_name in ipairs(deps) do
                 local ok = run_task_coro(dep_name, tasks)
                 if not ok then
+                    _event("dependency '" .. dep_name .. "' failed")
                     entry.state = "failed"
                     notify(run_id)
                     return false
@@ -182,7 +205,7 @@ local function run_task_coro(name, tasks, run_id)
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get_all()[task.type]
     if not type_def then
-        _notify.notify_error("unknown task type: " .. tostring(task.type))
+        _event("unknown task type: " .. tostring(task.type))
         entry.state = "failed"
         notify(run_id)
         return false
@@ -211,6 +234,9 @@ local function run_task_coro(name, tasks, run_id)
         set_cancel = function(fn)
             entry.cancel = fn
         end,
+        report     = function(message)
+            _event(message)
+        end,
     }
 
     local ok = type_def.run(task, ctx)
@@ -226,7 +252,8 @@ end
 local function _launch(task_name, tasks)
     local run_id = _gen_run_id(task_name)
     ---@type easytasks.RunEntry
-    _running[run_id] = { task_name = task_name, state = "running", bufnrs = {}, done = Signal.new() }
+    _running[run_id] = { task_name = task_name, state = "running", bufnrs = {}, done = Signal.new(),
+                         progress = { start_time = os.time(), events = {} } }
     notify(run_id)
 
     async.go(function()
@@ -234,6 +261,8 @@ local function _launch(task_name, tasks)
     end, function(co_ok, result)
         local final_entry = _running[run_id]
         if not final_entry then return end
+
+        final_entry.progress.stop_time = os.time()
 
         if not co_ok then
             final_entry.state = "failed"

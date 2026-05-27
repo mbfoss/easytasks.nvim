@@ -31,6 +31,7 @@ local _state_badge  = {
     running = { "● ", "DiagnosticWarn" },
     ok      = { "● ", "DiagnosticOk" },
     failed  = { "● ", "DiagnosticError" },
+    stopped = { "● ", "DiagnosticHint" },
     idle    = { "● ", "Comment" },
 }
 
@@ -186,7 +187,6 @@ local function _formatter(_, data, depth)
 end
 
 --- Sync buffer child nodes for a run entry.
---- Children are only shown when a run has 2+ buffers; a single buffer is implied.
 --- Removes nodes for deleted buffers and adds nodes for new ones.
 ---@param run_id string
 ---@param entry  easytasks.RunEntry
@@ -194,10 +194,8 @@ local function _sync_buf_nodes(run_id, entry)
     if not _tb then return end
 
     local current = {} ---@type table<string, easytasks.BufEntry>
-    if #entry.bufnrs >= 2 then
-        for _, buf_entry in ipairs(entry.bufnrs) do
-            current[_buf_node_id(buf_entry.bufnr)] = buf_entry
-        end
+    for _, buf_entry in ipairs(entry.bufnrs) do
+        current[_buf_node_id(buf_entry.bufnr)] = buf_entry
     end
 
     for bid, owner in pairs(_known_bufs) do
@@ -218,11 +216,24 @@ end
 ---@param entry easytasks.RunEntry
 ---@return string[]
 local function _info_lines(entry)
-    return {
-        "",
-        "  task:  " .. entry.task_name,
-        "  state: " .. entry.state,
-    }
+    local p     = entry.progress
+    local fmt   = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
+    local lines = {}
+
+    table.insert(lines, "  started: " .. fmt(p.start_time))
+    if p.stop_time then
+        table.insert(lines, "  stopped: " .. fmt(p.stop_time))
+    end
+    table.insert(lines, "  status:  " .. entry.state)
+
+    if #p.events > 0 then
+        table.insert(lines, "")
+        for _, ev in ipairs(p.events) do
+            table.insert(lines, "  [" .. fmt(ev.time) .. "] " .. ev.message)
+        end
+    end
+
+    return lines
 end
 
 --- Ensure a scratch info buffer exists for `run_id` and refresh its content.
@@ -249,11 +260,6 @@ local function _cursor_bufnr()
         ---@cast data easytasks.BufEntry
         return data.bufnr and vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
     else
-        ---@cast data easytasks.RunEntry
-        if #data.bufnrs > 0 then
-            local bufnr = data.bufnrs[#data.bufnrs].bufnr
-            return vim.api.nvim_buf_is_valid(bufnr) and bufnr or nil
-        end
         local info = _info_bufs[id]
         return info and vim.api.nvim_buf_is_valid(info) and info or nil
     end
@@ -314,10 +320,7 @@ function M.open()
                     ---@cast data easytasks.BufEntry
                     bufnr = data.bufnr
                 else
-                    ---@cast data easytasks.RunEntry
-                    if #data.bufnrs > 0 then
-                        bufnr = data.bufnrs[#data.bufnrs].bufnr
-                    end
+                    bufnr = _info_bufs[id]
                 end
                 if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
                     _show_output(bufnr)
