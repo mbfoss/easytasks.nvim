@@ -33,7 +33,7 @@ M.base_properties = {
         items       = {
             type                = "string",
             minLength           = 1,
-            ["x-valueSelector"] = "loop.task.jsonhooks.select_dependency",
+            ["x-enumfunc"] = "loop.task.jsonhooks.select_dependency",
             description         = "Name of a task this task depends on",
         },
     },
@@ -77,7 +77,7 @@ function M.build(type_registry)
         local then_schema = {
             description           = ts.description,
             ["x-order"]           = ts["x-order"],
-            ["x-valueSelector"]   = "loop.task.jsonhooks.select_taskobj",
+            ["x-enumfunc"]   = "loop.task.jsonhooks.select_taskobj",
             additionalProperties  = false,
             required              = required,
             properties            = props,
@@ -111,12 +111,12 @@ function M.build(type_registry)
                     type                = "object",
                     required            = { "name", "type" },
                     ["x-order"]         = { "name", "type" },
-                    ["x-valueSelector"] = "loop.task.jsonhooks.select_taskobj",
+                    ["x-enumfunc"] = "loop.task.jsonhooks.select_taskobj",
                     description         = "Single task definition entry",
                     properties          = vim.tbl_extend("force", vim.deepcopy(M.base_properties), {
                         type = {
                             type                = "string",
-                            ["x-valueSelector"] = "loop.task.jsonhooks.select_tasktype",
+                            ["x-enumfunc"] = "loop.task.jsonhooks.select_tasktype",
                             enum                = type_names,
                             description         = "Task type (used to determine behavior)",
                         },

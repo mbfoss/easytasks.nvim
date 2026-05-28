@@ -1,12 +1,12 @@
-local M          = {}
+local M            = {}
 
-local s_util     = require("easytasks.toml.schema_util")
-local schema_nav = require("easytasks.toml.schema_nav")
-local Cst        = require("easytasks.toml.Cst")
+local s_util       = require("easytasks.toml.schema_util")
+local schema_nav   = require("easytasks.toml.schema_nav")
+local Cst          = require("easytasks.toml.Cst")
 
-local CK = vim.lsp.protocol.CompletionItemKind
-local K  = Cst.Kind
-local IF = vim.lsp.protocol.InsertTextFormat
+local CK           = vim.lsp.protocol.CompletionItemKind
+local K            = Cst.Kind
+local IF           = vim.lsp.protocol.InsertTextFormat
 
 local empty_result = { isIncomplete = false, items = {} }
 
@@ -35,10 +35,10 @@ local function value_items(schema, open_quote)
         local descs = schema["x-enumDescriptions"]
         local items = {}
         for i, v in ipairs(schema.enum) do
-            local q      = open_quote or '"'
+            local q           = open_quote or '"'
             -- When cursor is already inside an open string, the opening quote is in the
             -- buffer; only insert the rest to avoid doubling it.
-            local insert = type(v) == "string"
+            local insert      = type(v) == "string"
                 and (open_quote and (v .. q) or (q .. v .. q))
                 or tostring(v)
             items[#items + 1] = {
@@ -50,6 +50,12 @@ local function value_items(schema, open_quote)
             }
         end
         return items
+    end
+    do
+        local enumfunc = schema["x-enumDescriptions"]
+        if enumfunc then
+
+        end
     end
     local t = schema.type
     if t == "boolean" or (type(t) == "table" and vim.tbl_contains(t, "boolean")) then
@@ -66,7 +72,7 @@ local function value_items(schema, open_quote)
         items[#items + 1] = { label = "{}", kind = CK.Value, insertTextFormat = IF.Snippet, insertText = "{$1}" }
     end
     if not open_quote and (t == "string" or (type(t) == "table" and vim.tbl_contains(t, "string"))) then
-        items[#items + 1] = { label = '""', kind = CK.Value, insertTextFormat = IF.Snippet, insertText = '"$1"' }
+        items[#items + 1] = { label = '""', kind = CK.Value, insertText = '"' }
     end
     return items
 end
@@ -135,22 +141,26 @@ end
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
 function M.handler(context, params, callback)
     callback = vim.schedule_wrap(callback)
-    if not context.schema then callback(nil, empty_result); return end
+    if not context.schema then
+        callback(nil, empty_result); return
+    end
     local schema = context.schema --[[@as table]]
 
-    local row = params.position.line
-    local col = params.position.character
-    local dt  = context.decode_tree
-    local cst = context.cst
+    local row    = params.position.line
+    local col    = params.position.character
+    local dt     = context.decode_tree
+    local cst    = context.cst
 
-    if not cst then callback(nil, empty_result); return end
+    if not cst then
+        callback(nil, empty_result); return
+    end
 
-    local data = context.data
+    local data   = context.data
 
     -- token_at always returns a valid id (falls back to root)
     local tok_id = cst:token_at(row, col)
-    local tok_d  = cst:data(tok_id)  --[[@as easytasks.toml.CstData?]]
-    local tok_k  = tok_d and tok_d.kind  --[[@as easytasks.toml.CstKind?]]
+    local tok_d  = cst:data(tok_id) --[[@as easytasks.toml.CstData?]]
+    local tok_k  = tok_d and tok_d.kind --[[@as easytasks.toml.CstKind?]]
 
     -- ── Header contexts ──────────────────────────────────────────────────────
 
@@ -186,10 +196,16 @@ function M.handler(context, params, callback)
     if kvp_id then
         local is_trivia = tok_k == K.Whitespace or tok_k == K.Newline or tok_k == K.Comment
         if cursor_after_equals(cst, kvp_id, row, col) then
-            -- value side: suppress when cursor is on trivia and a complete value already exists
-            local val_id = cst:get_value(kvp_id)
-            if is_trivia and val_id then callback(nil, empty_result); return end
-            if tok_k == K.LBracket or tok_k == K.RBracket then callback(nil, empty_result); return end
+            -- value side: suppress when cursor is on trivia and a complete value already exists,
+            -- but not when cursor is inside an inline array (want item completions there)
+            local val_id   = cst:get_value(kvp_id)
+            local in_array = ancestor_of_kind(cst, tok_id, K.Array) ~= nil
+            if is_trivia and val_id and not in_array then
+                callback(nil, empty_result); return
+            end
+            if tok_k == K.RBracket then
+                callback(nil, empty_result); return
+            end
 
             local dt_id = cst:get_tag(kvp_id)
             local sch
@@ -200,8 +216,8 @@ function M.handler(context, params, callback)
                 local enc_id       = ancestor_of_kind(cst, kvp_id, K.TableSection, K.AotSection, K.InlineTable)
                 local parent_dt_id = enc_id and cst:get_tag(enc_id) or dt:root_id()
                 local parent_sch   = schema_nav.schema_at(schema, data, dt, parent_dt_id)
-                                  or schema_nav.flatten(schema, data)
-                local keys = cst:get_keys(kvp_id)
+                    or schema_nav.flatten(schema, data)
+                local keys         = cst:get_keys(kvp_id)
                 if parent_sch and #keys > 0 then
                     sch = parent_sch
                     for _, kd in ipairs(keys) do
@@ -214,14 +230,14 @@ function M.handler(context, params, callback)
                 end
             end
             local open_quote = tok_k == K.String and tok_d and tok_d.text:sub(1, 1) or nil
-            if ancestor_of_kind(cst, tok_id, K.Array) then
-                sch = sch and sch.items
-            end
+            if in_array then sch = sch and sch.items end
             callback(nil, { isIncomplete = false, items = value_items(sch, open_quote) })
         else
             -- key side: suppress when cursor is on trivia and a complete key already exists
             local keys = cst:get_keys(kvp_id)
-            if is_trivia and #keys > 0 then callback(nil, empty_result); return end
+            if is_trivia and #keys > 0 then
+                callback(nil, empty_result); return
+            end
 
             local dt_id     = cst:get_tag(kvp_id)
             local parent_id = dt_id and dt:get_parent_id(dt_id)
@@ -231,7 +247,7 @@ function M.handler(context, params, callback)
                 parent_id = enc_id and cst:get_tag(enc_id) or dt:root_id()
             end
             local sch = schema_nav.schema_at(schema, data, dt, parent_id)
-                     or schema_nav.flatten(schema, data)
+                or schema_nav.flatten(schema, data)
             callback(nil, { isIncomplete = false, items = key_items(sch) })
         end
         return
@@ -271,7 +287,7 @@ function M.handler(context, params, callback)
 
     if tok_k == K.Document or ancestor_of_kind(cst, tok_id, K.Document) then
         local sch = schema_nav.schema_at(schema, data, dt, dt:root_id())
-                 or schema_nav.flatten(schema, data)
+            or schema_nav.flatten(schema, data)
         callback(nil, { isIncomplete = false, items = key_items(sch) })
         return
     end
