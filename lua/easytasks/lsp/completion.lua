@@ -189,6 +189,7 @@ function M.handler(context, params, callback)
             -- value side: suppress when cursor is on trivia and a complete value already exists
             local val_id = cst:get_value(kvp_id)
             if is_trivia and val_id then callback(nil, empty_result); return end
+            if tok_k == K.LBracket or tok_k == K.RBracket then callback(nil, empty_result); return end
 
             local dt_id = cst:get_tag(kvp_id)
             local sch
@@ -213,6 +214,9 @@ function M.handler(context, params, callback)
                 end
             end
             local open_quote = tok_k == K.String and tok_d and tok_d.text:sub(1, 1) or nil
+            if ancestor_of_kind(cst, tok_id, K.Array) then
+                sch = sch and sch.items
+            end
             callback(nil, { isIncomplete = false, items = value_items(sch, open_quote) })
         else
             -- key side: suppress when cursor is on trivia and a complete key already exists
