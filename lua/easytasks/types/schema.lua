@@ -113,14 +113,14 @@ function M.build(type_registry)
                     ["x-order"]         = { "name", "type" },
                     ["x-valueSelector"] = "loop.task.jsonhooks.select_taskobj",
                     description         = "Single task definition entry",
-                    properties          = {
+                    properties          = vim.tbl_extend("force", vim.deepcopy(M.base_properties), {
                         type = {
                             type                = "string",
                             ["x-valueSelector"] = "loop.task.jsonhooks.select_tasktype",
                             enum                = type_names,
                             description         = "Task type (used to determine behavior)",
                         },
-                    },
+                    }),
                     allOf = allOf,
                 },
             },
