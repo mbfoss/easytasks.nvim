@@ -3,6 +3,7 @@ local M            = {}
 local s_util       = require("easytasks.toml.schema_util")
 local schema_nav   = require("easytasks.toml.schema_nav")
 local Cst          = require("easytasks.toml.Cst")
+local enumfuncs    = require("easytasks.lsp.enumfuncs")
 
 local CK           = vim.lsp.protocol.CompletionItemKind
 local K            = Cst.Kind
@@ -10,42 +11,11 @@ local IF           = vim.lsp.protocol.InsertTextFormat
 
 local empty_result = { isIncomplete = false, items = {} }
 
--- ── Enum function registry ────────────────────────────────────────────────────
-
----@type table<string, fun(data: any): (string|{label:string, description:string?})[]>
-local _enumfuncs = {
-    -- Returns all task names defined in the file; used for depends_on items.
-    ["easytasks.tasks.names"] = function(data)
-        local names = {}
-        if type(data) == "table" and type(data.tasks) == "table" then
-            for _, task in ipairs(data.tasks) do
-                if type(task) == "table" and type(task.name) == "string" then
-                    names[#names + 1] = task.name
-                end
-            end
-        end
-        return names
-    end,
-}
-
---- Register a custom enum generator.
----@param key string           the x-enumfunc value used in schema fields
----@param fn  fun(data: any): (string|{label:string,description:string?})[]
-function M.register_enumfunc(key, fn)
-    _enumfuncs[key] = fn
-end
-
+--- Register a custom enum generator. Delegates to the enumfuncs registry.
 ---@param key string
----@return (fun(data: any): any[])?
-local function resolve_enumfunc(key)
-    if _enumfuncs[key] then return _enumfuncs[key] end
-    -- fallback: dotted Lua global path for external integrations
-    local obj = _G
-    for part in key:gmatch("[^.]+") do
-        if type(obj) ~= "table" then return nil end
-        obj = obj[part]
-    end
-    return type(obj) == "function" and obj or nil
+---@param fn  fun(data: any, ctx: easytasks.EnumFuncContext): (string|{label:string,description:string?})[]
+function M.register_enumfunc(key, fn)
+    enumfuncs.register(key, fn)
 end
 
 -- ── Completion item builders ──────────────────────────────────────────────────
@@ -67,10 +37,10 @@ local function key_items(schema)
 end
 
 ---@param schema     table?
----@param open_quote string?  the opening quote char already in the buffer ("'" or '"'), or nil
----@param data       any      decoded root data passed to x-enumfunc generators
+---@param open_quote string?                 the opening quote char already in the buffer, or nil
+---@param ctx        easytasks.EnumFuncContext
 ---@return lsp.CompletionItem[]
-local function value_items(schema, open_quote, data)
+local function value_items(schema, open_quote, ctx)
     if not schema then return {} end
     if schema.enum then
         local descs = schema["x-enumDescriptions"]
@@ -92,9 +62,9 @@ local function value_items(schema, open_quote, data)
     end
     local enumfunc_key = schema["x-enumfunc"]
     if enumfunc_key then
-        local fn = resolve_enumfunc(enumfunc_key)
+        local fn = enumfuncs.resolve(enumfunc_key)
         if fn then
-            local ok, result = pcall(fn, data)
+            local ok, result = pcall(fn, ctx.data, ctx)
             if ok and type(result) == "table" then
                 local q     = open_quote or '"'
                 local items = {}
@@ -289,7 +259,10 @@ function M.handler(context, params, callback)
             end
             local open_quote = tok_k == K.String and tok_d and tok_d.text:sub(1, 1) or nil
             if in_array then sch = sch and sch.items end
-            callback(nil, { isIncomplete = false, items = value_items(sch, open_quote, data) })
+            local path = dt_id and dt:key_parts_of(dt_id) or {}
+            ---@type easytasks.EnumFuncContext
+            local ctx = { data = data, path = path }
+            callback(nil, { isIncomplete = false, items = value_items(sch, open_quote, ctx) })
         else
             -- key side: suppress when cursor is on trivia and a complete key already exists
             local keys = cst:get_keys(kvp_id)
