@@ -239,8 +239,9 @@ function M.handler(context, params, callback)
         if cursor_after_equals(cst, kvp_id, row, col) then
             -- value side: suppress when cursor is on trivia and a complete value already exists,
             -- but not when cursor is inside an inline array (want item completions there)
-            local val_id   = cst:get_value(kvp_id)
-            local in_array = ancestor_of_kind(cst, tok_id, K.Array) ~= nil
+            local val_id      = cst:get_value(kvp_id)
+            local _arr_anc    = ancestor_of_kind(cst, tok_id, K.Array, K.InlineTable)
+            local in_array    = _arr_anc ~= nil and cst:kind(_arr_anc) == K.Array
             if is_trivia and val_id and not in_array then
                 callback(nil, empty_result); return
             end
