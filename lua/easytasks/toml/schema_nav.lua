@@ -81,4 +81,37 @@ function M.schema_at(root_schema, root_data, dt, id)
   return M.flatten(s, d)
 end
 
+-- Like schema_at but returns the field's schema without the final flatten,
+-- preserving oneOf/allOf on the target node. Used by completion to offer
+-- completions from all oneOf branches rather than just the best-matching one.
+---@param root_schema table
+---@param root_data   any
+---@param dt          easytasks.toml.DecodeTree
+---@param id          integer
+---@return table?
+function M.raw_schema_at(root_schema, root_data, dt, id)
+  local parts = dt:key_parts_of(id)
+  local s, d  = root_schema, root_data
+
+  for _, seg in ipairs(parts) do
+    local flat = M.flatten(s, d)
+    local idx  = tonumber(seg)
+
+    if idx and flat.items then
+      d = type(d) == "table" and d[idx] or nil
+      s = flat.items
+    elseif flat.properties and flat.properties[seg] then
+      d = type(d) == "table" and d[seg] or nil
+      s = flat.properties[seg]
+    elseif type(flat.additionalProperties) == "table" then
+      d = type(d) == "table" and d[seg] or nil
+      s = flat.additionalProperties
+    else
+      return nil
+    end
+  end
+
+  return s  -- intentionally not flattened
+end
+
 return M

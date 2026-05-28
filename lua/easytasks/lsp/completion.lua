@@ -42,6 +42,18 @@ end
 ---@return lsp.CompletionItem[]
 local function value_items(schema, open_quote, ctx)
     if not schema then return {} end
+    if schema.oneOf then
+        local items, seen = {}, {}
+        for _, sub in ipairs(schema.oneOf) do
+            for _, item in ipairs(value_items(schema_nav.flatten(sub, nil), open_quote, ctx)) do
+                if not seen[item.label] then
+                    seen[item.label] = true
+                    items[#items + 1] = item
+                end
+            end
+        end
+        return items
+    end
     if schema.enum then
         local descs = schema["x-enumDescriptions"]
         local items = {}
@@ -52,7 +64,7 @@ local function value_items(schema, open_quote, ctx)
                 or tostring(v)
             items[#items + 1] = {
                 label         = tostring(v),
-                kind          = CK.Value,
+                kind          = CK.Text,
                 detail        = s_util.get_type_label(schema),
                 documentation = descs and descs[i] or nil,
                 insertText    = insert,
@@ -98,7 +110,7 @@ local function value_items(schema, open_quote, ctx)
         items[#items + 1] = { label = "{}", kind = CK.Value, insertTextFormat = IF.Snippet, insertText = "{$1}" }
     end
     if not open_quote and (t == "string" or (type(t) == "table" and vim.tbl_contains(t, "string"))) then
-        items[#items + 1] = { label = '"', kind = CK.Value, insertText = '"' }
+        items[#items + 1] = { label = '"', kind = CK.Text, insertText = '"' }
     end
     return items
 end
@@ -238,7 +250,14 @@ function M.handler(context, params, callback)
             local dt_id = cst:get_tag(kvp_id)
             local sch
             if dt_id then
-                sch = schema_nav.schema_at(schema, data, dt, dt_id)
+                if in_array then
+                    -- flatten to pick the correct oneOf branch based on existing data, then step into items
+                    sch = schema_nav.schema_at(schema, data, dt, dt_id)
+                    sch = sch and sch.items
+                else
+                    -- no array context: preserve oneOf so value_items can offer all branches
+                    sch = schema_nav.raw_schema_at(schema, data, dt, dt_id)
+                end
             else
                 -- KVP not yet decoded (value absent/incomplete): navigate via parent scope + key name
                 local enc_id       = ancestor_of_kind(cst, kvp_id, K.TableSection, K.AotSection, K.InlineTable)
@@ -250,15 +269,15 @@ function M.handler(context, params, callback)
                     sch = parent_sch
                     for _, kd in ipairs(keys) do
                         if sch and sch.properties and sch.properties[kd.value] then
-                            sch = schema_nav.flatten(sch.properties[kd.value], nil)
+                            sch = sch.properties[kd.value]  -- keep raw to preserve oneOf
                         else
                             sch = nil; break
                         end
                     end
                 end
+                if in_array then sch = sch and schema_nav.flatten(sch, data).items end
             end
             local open_quote = tok_k == K.String and tok_d and tok_d.text:sub(1, 1) or nil
-            if in_array then sch = sch and sch.items end
             local path = dt_id and dt:key_parts_of(dt_id) or {}
             ---@type easytasks.EnumFuncContext
             local ctx = { data = data, path = path }
