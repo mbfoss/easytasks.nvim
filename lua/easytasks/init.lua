@@ -74,15 +74,13 @@ function M.enable()
         require("easytasks.util.log").enable(M.config.log.path, M.config.log.level)
     end
 
-    local schema = task_types.build_schema()
-
     local augroup = vim.api.nvim_create_augroup("easytasks_tasks_lsp", { clear = true })
     vim.api.nvim_create_autocmd("FileType", {
         pattern  = { "toml" },
         group    = augroup,
         callback = function(ev)
             if vim.fn.fnamemodify(ev.file, ":t") ~= M.config.tasks_filename then return end
-            tasks_lsp.start(ev.buf, { schema = schema })
+            tasks_lsp.start(ev.buf, { schema = task_types.build_schema() })
         end,
     })
 
