@@ -5,7 +5,7 @@ local ui = require("easytasks.ui")
 local _spawn_win
 
 ---@class easytasks.SpawnHandle
----@field job_id integer
+---@field stop fun() stop the spawned command
 ---@field wait   fun(): integer  yields the calling coroutine until the process exits
 
 --- Spawn a command in a terminal buffer.
@@ -41,11 +41,13 @@ function M.spawn(cmd, opts, bufnr)
     vim.api.nvim_set_current_win(_spawn_win)
 
     local waker
-    local job_id = vim.fn.jobstart(cmd, {
+    local job_id
+    job_id = vim.fn.jobstart(cmd, {
         term    = true,
         cwd     = opts.cwd,
         env     = opts.env,
         on_exit = function(_, code)
+            job_id = -1
             vim.schedule(function()
                 if waker then waker(code) end
             end)
@@ -59,8 +61,12 @@ function M.spawn(cmd, opts, bufnr)
     end
 
     return {
-        job_id = job_id,
-        wait   = function()
+        stop = function()
+            if job_id > 0 then
+                vim.fn.jobstop(job_id)
+            end
+        end,
+        wait = function()
             return coroutine.yield(function(w) waker = w end)
         end,
     }
