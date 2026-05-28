@@ -3,10 +3,13 @@
 --- location, and returns a list of completion values.
 local M = {}
 
+---@alias easytasks.EnumFunc fun(data: any, ctx: easytasks.EnumFuncContext):((string|{label:string,description:string?})[])
+
 ---@class easytasks.EnumFuncContext
 ---@field data any       decoded root data
 ---@field path string[]  key path from root to the field being completed (e.g. {"tasks","2","depends_on"})
 
+---@type table<string,easytasks.EnumFunc>
 local _registry = {
     -- Returns all task names except the one currently being edited.
     -- Useful for depends_on so a task cannot list itself as a dependency.
@@ -24,7 +27,7 @@ local _registry = {
         if type(data) == "table" and type(data.tasks) == "table" then
             for _, task in ipairs(data.tasks) do
                 if type(task) == "table" and type(task.name) == "string"
-                   and task.name ~= exclude then
+                    and task.name ~= exclude then
                     names[#names + 1] = task.name
                 end
             end
@@ -35,7 +38,7 @@ local _registry = {
 
 --- Register a custom enum generator.
 ---@param key string  the x-enumfunc value used in schema fields
----@param fn  fun(data: any, ctx: easytasks.EnumFuncContext): (string|{label:string,description:string?})[]
+---@param fn easytasks.EnumFunc
 function M.register(key, fn)
     _registry[key] = fn
 end
@@ -43,7 +46,7 @@ end
 --- Resolve a generator by key. Checks the registry first, then falls back to a
 --- dotted Lua global path (e.g. "mymod.sub.fn") for external integrations.
 ---@param  key string
----@return (fun(data: any, ctx: easytasks.EnumFuncContext): any[])?
+---@return easytasks.EnumFunc?
 function M.resolve(key)
     if _registry[key] then return _registry[key] end
     local obj = _G
