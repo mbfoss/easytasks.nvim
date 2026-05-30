@@ -28,7 +28,7 @@ local Signal = require("easytasks.util.Signal")
 ---@field collapse_char string?
 ---@field icon_hl string?
 ---@field indent_string string?
----@field folds boolean?  -- whether to bind zo/zc/za/zO/zC fold-style keymaps (default true)
+---@field collapsible boolean?  -- whether nodes can be expanded/collapsed (default true)
 
 local _ns_id = vim.api.nvim_create_namespace('keystoneTreeBuffer')
 
@@ -47,7 +47,7 @@ local _ns_id = vim.api.nvim_create_namespace('keystoneTreeBuffer')
 ---@field private _tree easytasks.util.Tree
 ---@field private _flat_ids any[]
 ---@field private _id_to_idx table<any, integer>
----@field private _folds boolean
+---@field private _collapsible boolean
 local TreeBuffer = {}
 TreeBuffer.__index = TreeBuffer
 
@@ -75,7 +75,7 @@ function TreeBuffer.new(opts)
         _tree           = Tree.new(),
         _flat_ids       = {}, ---@type any[]
         _id_to_idx      = {}, ---@type table<any, integer>
-        _folds          = opts.folds ~= false,
+        _collapsible    = opts.collapsible ~= false,
     }, TreeBuffer)
 end
 
@@ -158,7 +158,7 @@ function TreeBuffer:create_buffer(on_deleted)
     local function on_enter()
         local id, data = self:_get_cur_item()
         if not id or not data then return end
-        if data.expandable or self._tree:have_children(id) then
+        if self._collapsible and (data.expandable or self._tree:have_children(id)) then
             self:toggle_expand(id)
         else
             self._on_selection:emit(id, data.userdata)
@@ -170,7 +170,7 @@ function TreeBuffer:create_buffer(on_deleted)
         ["<2-LeftMouse>"] = { "Expand/collapse or select", on_enter },
     }
 
-    if self._folds then
+    if self._collapsible then
         keymaps["zo"] = { "Expand node", function()
             local id = self:_get_cur_item()
             if id then self:expand(id) end
@@ -220,10 +220,15 @@ end
 ---@return string line, table hl_calls, table extmarks
 function TreeBuffer:_render_node(flatnode, row)
     local id, data, depth = flatnode.id, flatnode.data, flatnode.depth
-    local expandable = data.expandable or self._tree:have_children(id)
-    local icon = expandable and (data.expanded and self._collapse_char or self._expand_char) or ""
     local indent = self._indent_cache[depth] or string.rep(self._indent_string, depth)
-    local prefix = icon ~= "" and (indent .. icon .. " ") or (indent .. self._expand_padding)
+    local prefix
+    if self._collapsible then
+        local expandable = data.expandable or self._tree:have_children(id)
+        local icon = expandable and (data.expanded and self._collapse_char or self._expand_char) or ""
+        prefix = icon ~= "" and (indent .. icon .. " ") or (indent .. self._expand_padding)
+    else
+        prefix = indent
+    end
 
     local text_chunks, virt = self._formatter(id, data.userdata, data.expanded)
     local line = prefix

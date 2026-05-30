@@ -353,7 +353,7 @@ function M.open()
         return
     end
 
-    _tb = TreeBuffer:new({ formatter = _formatter, filetype = "easytasks-status" })
+    _tb = TreeBuffer.new({ formatter = _formatter, filetype = "easytasks-status", collapsible = false })
 
     _tb:subscribe({
         on_selection = function(id, data)
