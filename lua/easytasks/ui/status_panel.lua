@@ -147,7 +147,7 @@ end
 local function _update_layout()
     if not _tb or not _win or not vim.api.nvim_win_is_valid(_win) then return end
     local is_empty = next(_known_runs) == nil
-    local buf = _tb:buf()
+    local buf = _tb:get_bufnr()
     vim.api.nvim_buf_clear_namespace(buf, _empty_ns, 0, -1)
     if is_empty then
         _close_output()
@@ -176,18 +176,18 @@ local function _is_buf_node(id)
     return type(id) == "string" and id:sub(1, 4) == "buf#"
 end
 
----@param data  any
----@param depth integer
+---@param id      any
+---@param data    any
 ---@return string[][], string[][]
-local function _formatter(_, data, depth)
-    if depth == 0 then
+local function _formatter(id, data, _expanded)
+    if _is_buf_node(id) then
+        ---@cast data easytasks.BufEntry
+        return { { "  ", nil }, { data.label, "Comment" } }, {}
+    else
         ---@cast data easytasks.RunEntry
         local badge = _state_badge[data.state] or _state_badge.idle
         local time  = os.date("%H:%M:%S", data.progress.start_time) --[[@as string]]
         return { { badge[1], badge[2] }, { time .. " ", "Comment" }, { data.task_name, nil } }, {}
-    else
-        ---@cast data easytasks.BufEntry
-        return { { "  ", nil }, { data.label, "Comment" } }, {}
     end
 end
 
@@ -213,7 +213,7 @@ local function _sync_buf_nodes(run_id, entry)
     for bid, buf_entry in pairs(current) do
         if not _known_bufs[bid] then
             _known_bufs[bid] = run_id
-            _tb:add_item(bid, buf_entry, run_id)
+            _tb:add_item(run_id, { id = bid, data = buf_entry })
         end
     end
 end
@@ -297,9 +297,10 @@ end
 ---@return integer?
 local function _cursor_bufnr()
     if not _tb then return nil end
-    local id, data = _tb:cursor_item()
-    if not id or not data then return nil end
-    if _is_buf_node(id) then
+    local item = _tb:get_cursor_item()
+    if not item then return nil end
+    local data = item.data
+    if _is_buf_node(item.id) then
         ---@cast data easytasks.BufEntry
         return data.bufnr and vim.api.nvim_buf_is_valid(data.bufnr) and data.bufnr or nil
     else
@@ -322,10 +323,10 @@ end
 local function on_state_change(run_id, entry)
     if not _tb then return end
     if _known_runs[run_id] then
-        _tb:update_item(run_id, entry)
+        _tb:set_item_data(run_id, entry)
     else
         _known_runs[run_id] = true
-        _tb:add_item(run_id, entry, nil, true)
+        _tb:add_item(nil, { id = run_id, data = entry, expanded = true })
     end
     _sync_buf_nodes(run_id, entry)
     _update_layout()
@@ -333,6 +334,7 @@ local function on_state_change(run_id, entry)
 end
 
 local function on_close()
+    if not _tb then return end
     exec.unsubscribe(on_state_change)
     vim.api.nvim_clear_autocmds({ group = _augroup })
     _close_output()
@@ -351,30 +353,34 @@ function M.open()
         return
     end
 
-    _tb                         = TreeBuffer.new(
-        {
-            formatter           = _formatter,
-            current_item_prefix = "",
-            on_selection        = function(id, data)
-                local bufnr
-                if _is_buf_node(id) then
-                    ---@cast data easytasks.BufEntry
-                    bufnr = data.bufnr
-                else
-                    ---@cast data easytasks.RunEntry
-                    bufnr = _update_info_buf(data)
-                end
-                if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-                    _show_output(bufnr)
-                    if _output_win and vim.api.nvim_win_is_valid(_output_win) then
-                        vim.api.nvim_set_current_win(_output_win)
-                    end
-                end
-            end,
-        })
+    _tb = TreeBuffer:new({ formatter = _formatter, filetype = "easytasks-status" })
 
-    local buf                   = _tb:buf()
-    vim.bo[buf].filetype        = "easytasks-status"
+    _tb:subscribe({
+        on_selection = function(id, data)
+            local d = data
+            local bufnr
+            if _is_buf_node(id) then
+                ---@cast d easytasks.BufEntry
+                bufnr = d.bufnr
+            else
+                ---@cast d easytasks.RunEntry
+                bufnr = _update_info_buf(d)
+            end
+            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+                _show_output(bufnr)
+                if _output_win and vim.api.nvim_win_is_valid(_output_win) then
+                    vim.api.nvim_set_current_win(_output_win)
+                end
+            end
+        end,
+    })
+
+    local buf = _tb:create_buffer(function()
+        if _win and vim.api.nvim_win_is_valid(_win) then
+            pcall(vim.api.nvim_win_close, _win, true)
+        end
+        on_close()
+    end)
 
     _win                        = utils.create_window(buf, false, _list_config(), function()
         _win = nil
@@ -430,7 +436,7 @@ function M.open()
     local all = exec.get_all()
     for _, run_id in ipairs(existing) do
         _known_runs[run_id] = true
-        _tb:add_item(run_id, all[run_id], nil)
+        _tb:add_item(nil, { id = run_id, data = all[run_id] })
         _sync_buf_nodes(run_id, all[run_id])
     end
 
