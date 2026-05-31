@@ -10,8 +10,10 @@ function Signal.new()
 end
 
 ---@param fn T
+---@return fun() unsubscribe
 function Signal:subscribe(fn)
     table.insert(self._listeners, fn)
+    return function() self:unsubscribe(fn) end
 end
 
 ---@param fn T

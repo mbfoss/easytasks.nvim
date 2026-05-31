@@ -93,7 +93,7 @@ function M.enable()
     })
 
 
-    require("easytasks.util.usercmd").register_user_cmd("EasyTasks",
+    require("easytasks.util.usercmd").register_user_cmd("Easytasks",
         function(cmd, args, cmd_opts)
             local action = args[1]
             table.remove(args, 1)
