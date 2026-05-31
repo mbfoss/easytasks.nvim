@@ -56,7 +56,7 @@ local function run_command(args)
     end
 
     if path == "" then
-        ui.notify_error(("tasks file (%s) not found"):format(M.config))
+        ui.notify_error(("tasks file (%s) not found"):format(M.config.tasks_filename))
         return
     end
 
@@ -86,8 +86,9 @@ function M.enable()
         pattern  = { "toml" },
         group    = augroup,
         callback = function(ev)
-            if vim.fn.fnamemodify(ev.file, ":t") ~= M.config.tasks_filename then return end
-            tasks_lsp.start(ev.buf, { schema = task_types.build_schema() })
+            if vim.fn.fnamemodify(ev.file, ":t") == M.config.tasks_filename then
+                tasks_lsp.start(ev.buf, { schema = task_types.build_schema() })
+            end
         end,
     })
 
