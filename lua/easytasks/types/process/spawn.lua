@@ -14,7 +14,7 @@ local _spawn_win
 --- `bufnr` must already be visible in a window.
 --- termopen handles all output rendering including ANSI colours.
 ---@param cmd  string|string[]
----@param opts {cwd?: string, env?: table<string,string>}
+---@param opts {cwd?: string, env?: table<string,string>, on_stdout?: fun(id: integer, data: string[], name: string), on_stderr?: fun(id: integer, data: string[], name: string)}
 ---@param bufnr integer  terminal buffer (must be visible in a window)
 ---@return easytasks.SpawnHandle
 function M.spawn(cmd, opts, bufnr)
@@ -43,10 +43,12 @@ function M.spawn(cmd, opts, bufnr)
     local waker
     local job_id
     job_id = vim.fn.jobstart(cmd, {
-        term    = true,
-        cwd     = opts.cwd,
-        env     = opts.env,
-        on_exit = function(_, code)
+        term      = true,
+        cwd       = opts.cwd,
+        env       = opts.env,
+        on_stdout = opts.on_stdout,
+        on_stderr = opts.on_stderr,
+        on_exit   = function(_, code)
             job_id = -1
             vim.schedule(function()
                 if waker then waker(code) end

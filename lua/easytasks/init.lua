@@ -27,6 +27,13 @@ function M.register_task_type(name, loader)
     task_types.register(name, loader)
 end
 
+--- Register a custom quickfix matcher for use in process tasks.
+---@param name string
+---@param fn   easytasks.QfMatcher
+function M.register_qfmatcher(name, fn)
+    require("easytasks.types.process").register_qfmatcher(name, fn)
+end
+
 local function _get_default_config()
     ---@type easytasks.Config
     return {
