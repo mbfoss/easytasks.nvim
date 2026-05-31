@@ -14,7 +14,7 @@ local log          = require("easytasks.util.log")
 ---@field task  table   the template data to encode and insert
 
 ---@class easytasks.TaskTypeDef
----@field run       fun(task: table, ctx: easytasks.RunCtx): boolean
+---@field run       fun(task: table, ctx: easytasks.RunCtx, on_done: fun(ok: boolean))
 ---@field schema    table?
 ---@field templates (easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[]))?
 
