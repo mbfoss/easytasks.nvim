@@ -51,14 +51,6 @@ local _badge = {
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
----@param entry easytasks.RunEntry
----@return string
-local function _elapsed(entry)
-    local s = math.max(0, (entry.progress.stop_time or os.time()) - entry.progress.start_time)
-    if s < 60 then return s .. "s" end
-    return math.floor(s / 60) .. "m" .. string.format("%02d", s % 60) .. "s"
-end
-
 ---@param run_id string
 ---@return integer?
 local function _run_idx(run_id)
@@ -89,7 +81,6 @@ local function _refresh_info_buf(entry)
     }
     if p.stop_time then
         table.insert(rows, { text = "stopped  " .. fmt(p.stop_time) })
-        table.insert(rows, { text = "elapsed  " .. _elapsed(entry) })
     end
     if entry.waiting_for and #entry.waiting_for > 0 then
         table.insert(rows, { text = "" })
@@ -193,9 +184,6 @@ local function _build_winbar(width)
         local is_active = run_idx == active_idx
         local tab_hl    = is_active and "%#EasyTasksActiveTab#" or "%#WinBar#"
 
-        local time_str = _elapsed(entry)
-        if entry.state == "waiting" then time_str = "wait" end
-
         -- sub-page indicator on the active tab when there are multiple pages;
         -- each page name is its own clickable region
         local page_sfx = ""
@@ -204,7 +192,7 @@ local function _build_winbar(width)
             local names = { "info" }
             for _, be in ipairs(entry.bufnrs) do table.insert(names, be.label) end
             for pi, name in ipairs(names) do
-                local page_id = run_idx * 10 + (pi - 1)
+                local page_id = run_idx * 10 + pi
                 if pi - 1 == _active_page then
                     parts[#parts + 1] = string.format(
                         "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, name)
@@ -224,7 +212,6 @@ local function _build_winbar(width)
         push(2, b.icon .. " ")
         push(3, tab_hl)
         push(1, entry.task_name)
-        push(2, " " .. time_str)
         push(3, "%X")
         if page_sfx ~= "" then push(3, page_sfx) end
         push(3, "%#WinBar#")
@@ -288,7 +275,8 @@ _G._EasyTasksWbc = function(id)
         -- tab-level click: land on first terminal if present, else info
         _active_page = (entry and #entry.bufnrs > 0) and 1 or 0
     else
-        _active_page = page_idx
+        -- page click: pi=1→info (page 0), pi=2→bufnr[1] (page 1), etc.
+        _active_page = page_idx - 1
     end
     _show_active()
     _refresh_winbar()
@@ -303,11 +291,9 @@ local function _on_state_change(run_id, entry)
     _run_map[run_id] = entry
 
     if is_new then
-        table.insert(_runs, 1, run_id)
-        if not _active_run_id then
-            _active_run_id = run_id
-            _active_page   = #entry.bufnrs > 0 and 1 or 0
-        end
+        table.insert(_runs, run_id)
+        _active_run_id = run_id
+        _active_page   = #entry.bufnrs > 0 and 1 or 0
     end
 
     if _active_run_id == run_id then
@@ -367,14 +353,14 @@ function M.open()
     local all = exec.get_all()
     local ids = vim.tbl_keys(all)
     table.sort(ids, function(a, b)
-        return (tonumber(a:match("#(%d+)$")) or 0) > (tonumber(b:match("#(%d+)$")) or 0)
+        return (tonumber(a:match("#(%d+)$")) or 0) < (tonumber(b:match("#(%d+)$")) or 0)
     end)
     for _, id in ipairs(ids) do
         table.insert(_runs, id)
         _run_map[id] = all[id]
     end
     if #_runs > 0 then
-        _active_run_id = _runs[1]
+        _active_run_id = _runs[#_runs]
         local e = _run_map[_active_run_id]
         _active_page = (e and #e.bufnrs > 0) and 1 or 0
     end
