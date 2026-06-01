@@ -5,7 +5,7 @@ local _cache       = {} ---@type table
 local _dirty       = false
 
 ---@return boolean
-function M.in_workspace()
+function M.in_project()
     local root = M.find_root()
     return root ~= nil
 end
@@ -98,7 +98,7 @@ function M.init()
     })
 end
 
---- Store data under a namespace key in the workspace storage file.
+--- Store data under a namespace key in the project storage file.
 ---@param namespace string
 ---@param data table
 ---@return boolean,string?
@@ -113,7 +113,7 @@ function M.store_data(namespace, data)
     return true
 end
 
---- Load data for a namespace key from the workspace storage file.
+--- Load data for a namespace key from the project storage file.
 ---@param namespace string
 ---@return table|nil,string?
 function M.load_data(namespace)

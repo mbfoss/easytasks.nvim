@@ -1,7 +1,7 @@
 local M            = {}
 
 local cfg          = require("easytasks.config")
-local workspace    = require("easytasks.workspace")
+local project      = require("easytasks.project")
 local tasks_lsp    = require("easytasks.lsp")
 local task_types   = require("easytasks.types")
 local status_panel = require("easytasks.ui.status_panel")
@@ -32,7 +32,7 @@ M.config = cfg.current
 local enabled = false
 
 local function run_command()
-    local cwd, err = workspace.find_root()
+    local cwd, err = project.find_root()
     if not cwd then
         ui.notify_error(err or "not in a project root")
         return
@@ -111,7 +111,7 @@ function M.setup(opts)
     cfg.current = vim.tbl_deep_extend("force", cfg.default(), opts or {})
     M.config = cfg.current
 
-    workspace.init()
+    project.init()
 
     if cfg.current.enabled then
         M.enable()
@@ -121,8 +121,8 @@ function M.setup(opts)
 end
 
 ---@return boolean
-function M.in_workspace()
-    return workspace.in_workspace()
+function M.in_project()
+    return project.in_project()
 end
 
 --- Store data under a namespace key in the workspace storage file.
@@ -130,14 +130,14 @@ end
 ---@param data table
 ---@return boolean,string?
 function M.store_data(namespace, data)
-    return workspace.store_data(namespace, data)
+    return project.store_data(namespace, data)
 end
 
 --- Load data for a namespace key from the workspace storage file.
 ---@param namespace string
 ---@return table|nil,string?
 function M.load_data(namespace)
-    return workspace.load_data(namespace)
+    return project.load_data(namespace)
 end
 
 return M
