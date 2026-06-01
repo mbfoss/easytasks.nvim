@@ -12,4 +12,10 @@ function M.ordered(t, keys)
     })
 end
 
+function M.ordered_keys_of(t)
+    if type(t) ~= "table" then return nil end
+    local mt = getmetatable(t)
+    return mt and type(mt.keys_order) == "table" and mt.keys_order or nil
+end
+
 return M
