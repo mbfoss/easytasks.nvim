@@ -1,5 +1,6 @@
 local M          = {}
 
+local table_util = require("easytasks.util.table_util")
 local parser     = require("easytasks.toml.parser")
 local DecodeTree = require("easytasks.toml.DecodeTree")
 local Cst        = require("easytasks.toml.Cst")
@@ -45,6 +46,13 @@ local function evaluate(cst, with_type_map)
     local inline_table_ids   = {}
     local dotted_key_ids     = {}
     local explicit_table_ids = {}
+
+    local key_orders = {}  ---@type table<table, string[]>
+    local function track_key(tbl, key)
+        local ko = key_orders[tbl]
+        if not ko then ko = {}; key_orders[tbl] = ko end
+        ko[#ko + 1] = key
+    end
 
     local root_id = dt:root_id()
     dt:add_range_by_id(root_id, { 0, 0, 0, 0 })
@@ -99,6 +107,7 @@ local function evaluate(cst, with_type_map)
                 dt:add_range_by_id(next_id, key_range)
             else
                 cur_table[key] = vim.empty_dict()
+                track_key(cur_table, key)
                 local new_id   = dt:add_child(cur_id, key, key_range)
                 kind_by_id[new_id] = "Table"
                 set_type(new_id, "table")
@@ -162,6 +171,7 @@ local function evaluate(cst, with_type_map)
             if val_data then dt:set_value_range(child_id, val_data.range) end
             cst:set_tag(kvp_id, child_id)
             leaf_table[key] = eval_value(val_id, val_data, child_id)
+            track_key(leaf_table, key)
         end
     end
 
@@ -214,6 +224,7 @@ local function evaluate(cst, with_type_map)
                 if vd then dt:set_value_range(sub_id, vd.range) end
                 cst:set_tag(kvp_id, sub_id)
                 leaf_tbl[key] = eval_value(vi, vd, sub_id)
+                track_key(leaf_tbl, key)
             end
         end
 
@@ -222,6 +233,7 @@ local function evaluate(cst, with_type_map)
                 process_inline_kvp(kvp_id, result, dt_id)
             end
         end
+        table_util.ordered(result, key_orders[result] or {})
         return result
     end
 
@@ -318,6 +330,7 @@ local function evaluate(cst, with_type_map)
                     end
                     if not next_id then
                         current_table[key] = vim.empty_dict()
+                        track_key(current_table, key)
                         next_id = dt:add_child(current_id, key, key_range)
                         kind_by_id[next_id] = "Table"
                     else
@@ -344,6 +357,7 @@ local function evaluate(cst, with_type_map)
             if invalid then current_table = dead_end_table; current_id = nil end
             if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
+            if not invalid then table_util.ordered(current_table, key_orders[current_table] or {}) end
 
         elseif d.kind == K.AotSection then
             current_table = root
@@ -373,6 +387,7 @@ local function evaluate(cst, with_type_map)
                     end
                     if not next_id then
                         current_table[key] = {}
+                        track_key(current_table, key)
                         next_id = dt:add_child(current_id, key, sec_range)
                         kind_by_id[next_id] = "ArrayOfTables"
                     else
@@ -408,6 +423,7 @@ local function evaluate(cst, with_type_map)
                         end
                         if not next_id then
                             current_table[key] = vim.empty_dict()
+                            track_key(current_table, key)
                             next_id = dt:add_child(current_id, key, key_data.range or sec_range)
                             kind_by_id[next_id] = "Table"
                         end
@@ -422,6 +438,7 @@ local function evaluate(cst, with_type_map)
             if invalid then current_table = dead_end_table; current_id = nil end
             if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
+            if not invalid then table_util.ordered(current_table, key_orders[current_table] or {}) end
 
         elseif d.kind == K.KeyValuePair then
             process_kvp_at(sec_id, root, dt:root_id())
@@ -434,6 +451,7 @@ local function evaluate(cst, with_type_map)
         for tid, t in pairs(type_by_id) do value_types[tid] = t end
     end
 
+    table_util.ordered(root, key_orders[root] or {})
     return root, dt, errors, value_types
 end
 

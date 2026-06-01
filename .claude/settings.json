@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git -C /Users/Dev/.config/nvim/pack/plugins/opt/plenary.nvim log --oneline -3)",
-      "Bash(git -C /Users/Dev/.config/nvim/pack/plugins/opt/plenary.nvim describe --tags --abbrev=0)"
+      "Bash(git -C /Users/Dev/.config/nvim/pack/plugins/opt/plenary.nvim describe --tags --abbrev=0)",
+      "Bash(nvim --headless -u tests/init.lua -c \"lua require\\('plenary.test_harness'\\).test_directory\\('tests/', { minimal_init = 'tests/init.lua', sequential = true, filter = 'runner' }\\)\")"
     ]
   }
 }
