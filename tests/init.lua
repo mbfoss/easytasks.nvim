@@ -1,9 +1,5 @@
-local plenary_dir = os.getenv("NVIM_PLENARY_DIR") or "/tmp/plenary.nvim"
-local is_not_a_directory = vim.fn.isdirectory(plenary_dir) == 0
-if is_not_a_directory then
-  print("cloning plenary into " .. plenary_dir)
-  vim.fn.system({ "git", "clone", "https://github.com/nvim-lua/plenary.nvim", plenary_dir })
-end
+local plenary_dir = os.getenv("NVIM_PLENARY_DIR")
+    or vim.fn.expand("~/.config/nvim/pack/plugins/opt/plenary.nvim")
 
 vim.opt.rtp:append(".")
 vim.opt.rtp:append(plenary_dir)

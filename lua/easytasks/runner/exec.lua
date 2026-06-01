@@ -491,6 +491,7 @@ end
 function M.list(toml_path)
     local _, ordered, err = load_tasks(toml_path)
     if not ordered then return nil, err end
+    table.sort(ordered)
     return ordered
 end
 
