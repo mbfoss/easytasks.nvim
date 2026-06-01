@@ -8,7 +8,7 @@ M.ordered = table_util.ordered
 ---@param s string
 ---@return table
 function M.raw(s)
-    return setmetatable({}, { __toml_raw = s })
+    return setmetatable({}, { _toml_raw = s })
 end
 
 --- Returns the verbatim string if v was created with M.raw(), otherwise nil.
@@ -17,7 +17,7 @@ end
 local function raw_value(v)
     if type(v) ~= "table" then return nil end
     local mt = getmetatable(v)
-    return mt and type(mt.__toml_raw) == "string" and mt.__toml_raw or nil
+    return mt and type(mt._toml_raw) == "string" and mt._toml_raw or nil
 end
 
 

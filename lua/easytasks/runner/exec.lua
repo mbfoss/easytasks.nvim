@@ -489,10 +489,10 @@ end
 ---@param toml_path string
 ---@return string[]?, string?
 function M.list(toml_path)
-    local _, ordered, err = load_tasks(toml_path)
-    if not ordered then return nil, err end
+    local by_name, ordered, err = load_tasks(toml_path)
+    if not ordered or not by_name then return nil, err end
     table.sort(ordered)
-    return ordered
+    return vim.tbl_map(function(name) return by_name[name] end, ordered)
 end
 
 --- Stop all active instances of a task.

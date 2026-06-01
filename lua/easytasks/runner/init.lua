@@ -24,9 +24,9 @@ function M.state(task_name)
     return exec.state(task_name)
 end
 
---- Return the sorted list of task names from a TOML file, or nil + error string.
+--- Return the sorted list of task tables from a TOML file, or nil + error string.
 ---@param toml_path string
----@return string[]?, string?
+---@return table[]?, string?
 function M.list_tasks(toml_path)
     return exec.list(toml_path)
 end

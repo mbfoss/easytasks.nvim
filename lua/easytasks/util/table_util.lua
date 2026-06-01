@@ -6,7 +6,7 @@ local M = {}
 ---@param keys string[]
 ---@return table
 function M.ordered(t, keys)
-    return setmetatable(t, { __toml_order = keys })
+    return setmetatable(t, { keys_order = keys })
 end
 
 --- Returns the key order list if t was created with M.ordered(), otherwise nil.
@@ -15,7 +15,7 @@ end
 function M.ordered_keys_of(t)
     if type(t) ~= "table" then return nil end
     local mt = getmetatable(t)
-    return mt and type(mt.__toml_order) == "table" and mt.__toml_order or nil
+    return mt and type(mt.keys_order) == "table" and mt.keys_order or nil
 end
 
 return M
