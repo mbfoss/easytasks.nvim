@@ -121,13 +121,14 @@ end
 --- Store data under a namespace key in the workspace storage file.
 ---@param namespace string
 ---@param data table
+---@return boolean,string?
 function M.store_data(namespace, data)
-    workspace.store_data(namespace, data)
+    return workspace.store_data(namespace, data)
 end
 
 --- Load data for a namespace key from the workspace storage file.
 ---@param namespace string
----@return table|nil
+---@return table|nil,string?
 function M.load_data(namespace)
     return workspace.load_data(namespace)
 end

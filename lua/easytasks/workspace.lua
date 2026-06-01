@@ -47,27 +47,27 @@ end
 --- Reports an error if not in a project root.
 ---@param namespace string
 ---@param data table
+---@return boolean,string?
 function M.store_data(namespace, data)
     local root, err = M.find_root()
     if not root then
-        vim.notify("easytasks: " .. (err or "unknown error"), vim.log.levels.ERROR)
-        return
+        return false, err
     end
     local path = storage_path(root)
     local all = read_json(path)
     all[namespace] = data
     write_json(path, all)
+    return true
 end
 
 --- Load data for a namespace key from the workspace storage file.
 --- Returns nil and reports an error if not in a project root.
 ---@param namespace string
----@return table|nil
+---@return table|nil,string?
 function M.load_data(namespace)
     local root, err = M.find_root()
     if not root then
-        vim.notify("easytasks: " .. (err or "unknown error"), vim.log.levels.ERROR)
-        return nil
+        return nil, err
     end
     local all = read_json(storage_path(root))
     return all[namespace]
