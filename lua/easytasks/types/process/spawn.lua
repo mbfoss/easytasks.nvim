@@ -9,8 +9,7 @@ local _spawn_win
 ---@field on_exit fun(cb: fun(code: integer))  register a callback invoked when the process exits
 
 --- Spawn a command in a terminal buffer.
---- Must be called from within a coroutine (started with async.go).
---- Returns immediately with a handle; call `handle.wait()` to yield until exit.
+--- Returns immediately with a handle; call `handle.on_exit(cb)` to be notified when the process exits.
 --- `bufnr` must already be visible in a window.
 --- termopen handles all output rendering including ANSI colours.
 ---@param cmd  string|string[]
