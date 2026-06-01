@@ -9,6 +9,7 @@ local M            = {}
 ---@field enabled boolean
 ---@field tasks_filename string
 ---@field log easytasks.LogConfig
+---@field save_buffers easytasks.SaveBuffersConfig
 
 local tasks_lsp    = require("easytasks.lsp")
 local task_types   = require("easytasks.types")
@@ -40,6 +41,10 @@ local function _get_default_config()
         enabled        = true,
         tasks_filename = "tasks.toml",
         log            = { enabled = false },
+        save_buffers   = {
+            include_globs = {},
+            exclude_globs = {},
+        },
     }
 end
 
@@ -48,15 +53,12 @@ M.config = _get_default_config()
 
 local enabled = false
 
----@param args string[]
-local function run_command(args)
-    local path = args[1]
-    if not path or path == "" then
-        path = vim.fn.findfile(M.config.tasks_filename, vim.fn.getcwd() .. ";") --[[@as string]]
-    end
-
-    if path == "" then
-        ui.notify_error(("tasks file (%s) not found"):format(M.config.tasks_filename))
+local function run_command()
+    local cwd = vim.fn.getcwd() --[[@as string]]
+    local path = vim.fs.normalize(cwd .. "/" .. M.config.tasks_filename)
+    ---@diagnostic disable-next-line: undefined-field
+    if not vim.uv.fs_stat(path) then
+        ui.notify_error(("tasks file (%s) not found — not in a project root"):format(M.config.tasks_filename))
         return
     end
 
@@ -70,6 +72,7 @@ local function run_command(args)
         prompt = "Run task:",
     }, function(choice)
         if not choice then return end
+        require("easytasks.save_buffers").save(cwd, M.config.save_buffers)
         status_panel.open()
         M.runner.run(choice, path)
     end)
@@ -100,7 +103,7 @@ function M.enable()
             local action = args[1]
             table.remove(args, 1)
             if action == nil or action == "" or action == "run" then
-                run_command(args)
+                run_command()
             elseif action == "toggle" then
                 require("easytasks.ui.status_panel").toggle()
             else
