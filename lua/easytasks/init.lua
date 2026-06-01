@@ -125,7 +125,7 @@ function M.in_project()
     return project.in_project()
 end
 
---- Store data under a namespace key in the workspace storage file.
+--- Store data under a namespace key in the project storage file.
 ---@param namespace string
 ---@param data table
 ---@return boolean,string?
@@ -133,7 +133,7 @@ function M.store_data(namespace, data)
     return project.store_data(namespace, data)
 end
 
---- Load data for a namespace key from the workspace storage file.
+--- Load data for a namespace key from the project storage file.
 ---@param namespace string
 ---@return table|nil,string?
 function M.load_data(namespace)

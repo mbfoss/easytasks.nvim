@@ -14,7 +14,7 @@ M.base_properties = {
     save_buffers = {
         type        = "boolean",
         default     = false,
-        description = "If true, all modified workspace buffers will be saved before running the task",
+        description = "If true, all modified project buffers will be saved before running the task",
     },
     if_running = {
         type                  = "string",
