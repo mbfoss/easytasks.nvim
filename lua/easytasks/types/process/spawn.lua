@@ -61,6 +61,16 @@ function M.spawn(cmd, opts, bufnr)
         return { stop = function() end, on_exit = function(cb) cb(-1) end }
     end
 
+    vim.api.nvim_create_autocmd("TermClose", {
+        buffer   = bufnr,
+        once     = true,
+        callback = function()
+            for _, key in ipairs({ "i", "a", "A", "I", "o", "O" }) do
+                vim.keymap.set("n", key, "<Nop>", { buffer = bufnr, nowait = true })
+            end
+        end,
+    })
+
     return {
         stop = function()
             if job_id > 0 then
