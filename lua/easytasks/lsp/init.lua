@@ -18,7 +18,7 @@ local ms            = vim.lsp.protocol.Methods
 ---@type table<vim.lsp.protocol.Method, fun(context: table, params: table, callback: fun(err: lsp.ResponseError?, result: any))>
 local handlers      = {}
 
----@type table<integer, {client_id:integer, context:easytasks.LspBufferContext, autocmd_ids:integer[]}>
+---@type table<integer, {client_id:integer, context:easytasks.LspBufferContext}>
 local attached      = {}
 
 local features      = {
@@ -33,6 +33,10 @@ local features      = {
 ---@type lsp.InitializeResult
 local initialize_result = {
   capabilities = {
+    textDocumentSync                 = {
+      openClose = true,
+      change    = vim.lsp.protocol.TextDocumentSyncKind.Full,
+    },
     hoverProvider                    = true,
     completionProvider               = { triggerCharacters = { ".", "[", '"', "=", " " } },
     codeActionProvider               = { codeActionKinds = { "quickfix", "refactor.extract" } },
@@ -68,12 +72,9 @@ end
 
 -- ─── Buffer context ──────────────────────────────────────────────────────────
 
----@param bufnr integer
 ---@param context easytasks.LspBufferContext
-local function update_context(bufnr, context)
-  local buflines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  table.insert(buflines, "\n") -- trailing new lines may not be added by neovim 
-  local text            = table.concat(buflines, "\n")
+---@param text string
+local function update_context(context, text)
   local parsed          = parser.parse(text)
   context.cst           = parsed.cst
   context.parse_errors  = parsed.errors
@@ -81,6 +82,14 @@ local function update_context(bufnr, context)
   context.data          = decoded.data
   context.decode_errors = decoded.errors
   context.decode_tree   = decoded.decode_tree
+end
+
+---@param bufnr integer
+---@return string
+local function buf_text(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  table.insert(lines, "\n") -- trailing newlines may not be added by neovim
+  return table.concat(lines, "\n")
 end
 
 ---@param bufnr integer
@@ -101,38 +110,12 @@ end
 -- ─── Attach / detach ────────────────────────────────────────────────────────
 
 ---@param context easytasks.LspBufferContext
----@param autocmd_ids integer[]
-local function detach(context, autocmd_ids)
+local function detach(context)
   if context.debounce_timer then
     vim.fn.timer_stop(context.debounce_timer)
     context.debounce_timer = nil
   end
-  for _, id in ipairs(autocmd_ids) do
-    pcall(vim.api.nvim_del_autocmd, id)
-  end
   vim.diagnostic.reset(M.namespace, context.bufnr)
-end
-
----@param context easytasks.LspBufferContext
----@param client_id integer
----@return integer[] autocmd_ids
-local function attach(context, client_id)
-  local bufnr      = context.bufnr
-  local group      = vim.api.nvim_create_augroup("easytasks_toml_diag_" .. bufnr, { clear = true })
-  local autocmd_ids = {}
-
-  for _, event in ipairs({ "BufEnter", "TextChanged", "TextChangedI", "InsertLeave", "BufWritePost" }) do
-    autocmd_ids[#autocmd_ids + 1] = vim.api.nvim_create_autocmd(event, {
-      group    = group,
-      buffer   = bufnr,
-      callback = function()
-        update_context(bufnr, context)
-        schedule_diagnostics(bufnr, context, client_id)
-      end,
-    })
-  end
-
-  return autocmd_ids
 end
 
 -- ─── Dispatcher (loopback RPC interface) ────────────────────────────────────
@@ -155,7 +138,24 @@ local function make_dispatcher(default_context)
       handler(ctx, params, callback)
       return true, nil
     end,
-    notify     = function(_, _) end,
+    notify = function(method, params)
+      if not (params and params.textDocument) then return end
+      local bufnr = vim.uri_to_bufnr(params.textDocument.uri)
+      local entry = attached[bufnr]
+      if not entry then return end
+
+      local text
+      if method == ms.textDocument_didChange then
+        text = params.contentChanges[1] and params.contentChanges[1].text
+      elseif method == ms.textDocument_didOpen then
+        text = params.textDocument.text
+      end
+
+      if text then
+        update_context(entry.context, text)
+        schedule_diagnostics(bufnr, entry.context, entry.client_id)
+      end
+    end,
     is_closing = function() return false end,
     terminate  = function() end,
   }
@@ -186,8 +186,8 @@ function M.start(buf, opts)
 
   local client_id = vim.lsp.start(client_cfg, { bufnr = buf, silent = false })
   if client_id then
-    local autocmd_ids = attach(context, client_id)
-    attached[buf] = { client_id = client_id, context = context, autocmd_ids = autocmd_ids }
+    update_context(context, buf_text(buf))
+    attached[buf] = { client_id = client_id, context = context }
   end
 
   return client_id
@@ -198,7 +198,7 @@ function M.stop(buf)
   local entry = attached[buf]
   if not entry then return end
 
-  detach(entry.context, entry.autocmd_ids)
+  detach(entry.context)
 
   local client = vim.lsp.get_client_by_id(entry.client_id)
   if client then client:stop(true) end
