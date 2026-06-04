@@ -1,8 +1,36 @@
-local M        = {}
-local str_util = require('easytasks.util.str_util')
-local _notify  = require('easytasks.ui')
+local M = {}
 
----@alias easytasks.usercmd.subcommand_fn fun(cmd:string,rest:string[]):string[]
+---@param str string
+---@return string[]
+local function _split_args(str)
+    local args = {}
+    local i = 1
+    local len = #str
+    local part = {}
+
+    while i <= len do
+        local c = str:sub(i, i)
+        if c == '\\' and i < len then
+            table.insert(part, str:sub(i + 1, i + 1))
+            i = i + 2
+        elseif c:match('%s') then
+            if #part > 0 then
+                table.insert(args, table.concat(part))
+                part = {}
+            end
+            i = i + 1
+        else
+            table.insert(part, c)
+            i = i + 1
+        end
+    end
+    if #part > 0 then
+        table.insert(args, table.concat(part))
+    end
+    return args
+end
+
+---@alias easytasks.usercmd.subcommand_fn fun(cmd:string,rest:string[],arg_lead:string):string[]
 
 ---@alias easytasks.usercmd.run_fn
 ---| fun(cmd:string,args:string[],opts:vim.api.keyset.create_user_command.command_args)
@@ -20,18 +48,18 @@ local function _complete(subcommand_fn, arg_lead, cmd_line)
         return out
     end
 
-    local args = str_util.split_shell_args(cmd_line)
+    local args = _split_args(cmd_line)
     if cmd_line:match("%s+$") then
         table.insert(args, ' ')
     end
 
     local cmd = args[1]
     if #args == 1 then
-        return filter(subcommand_fn(cmd, {}))
+        return filter(subcommand_fn(cmd, {}, arg_lead))
     elseif #args >= 2 then
         local rest = { unpack(args, 2) }
         rest[#rest] = nil
-        return filter(subcommand_fn(cmd, rest))
+        return filter(subcommand_fn(cmd, rest, arg_lead))
     end
     return {}
 end
@@ -40,10 +68,13 @@ end
 ---@param run_fn easytasks.usercmd.run_fn
 ---@param opts vim.api.keyset.create_user_command.command_args
 local function _dispatch(cmd, run_fn, opts)
-    local args = str_util.split_shell_args(opts.args)
+    local args = _split_args(opts.args)
     local ok, err = pcall(run_fn, cmd, args, opts)
     if not ok then
-        _notify.notify_error(cmd .. " command error\n" .. tostring(err))
+        vim.notify(
+            "[easytasks.nvim] " .. cmd .. " command error\n" .. tostring(err),
+            vim.log.levels.ERROR
+        )
     end
 end
 

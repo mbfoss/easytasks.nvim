@@ -118,7 +118,10 @@ function M.enable()
         {
             desc = "Easytasks",
             subcommand_fn = function(cmd, rest)
-                return { "toggle", "run", "restart", "jump" }
+                if cmd == "Easytasks" and #rest == 0 then
+                    return { "toggle", "run", "restart", "jump" }
+                end
+                return {}
             end
         })
 end
