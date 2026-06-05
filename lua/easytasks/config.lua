@@ -16,7 +16,7 @@ local M = {}
 function M.default()
     return {
         enabled          = true,
-        tasks_filename   = "tasks.toml",
+        tasks_filename   = "tasks.lua",
         storage_filename = ".task-data.json",
         log              = { enabled = false },
         save_buffers     = {

@@ -1,5 +1,3 @@
-local schema_mod = require("easytasks.types.schema")
-
 ---@alias easytasks.TypeLoader string|fun(): easytasks.TaskTypeDef|easytasks.TaskTypeDef
 
 ---@class easytasks.Types
@@ -60,11 +58,6 @@ function M.get_all()
         result[name] = _resolve(name)
     end
     return result
-end
-
----@return table JSON Schema
-function M.build_schema()
-    return schema_mod.build(M.get_all())
 end
 
 -- Built-in task types (loaded lazily on first use)

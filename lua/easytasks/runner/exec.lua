@@ -1,22 +1,14 @@
 --- Task execution engine.
---- Handles TOML loading, dependency resolution, coroutine scheduling,
+--- Handles Lua task file loading, dependency resolution, coroutine scheduling,
 --- and task state tracking.
 local async        = require("easytasks.util.async")
 local Signal       = require("easytasks.util.Signal")
-local parser       = require("easytasks.toml.parser")
-local decoder      = require("easytasks.toml.decoder")
 local task_types   = require("easytasks.types")
 local notify       = require("easytasks.ui")
 local log          = require("easytasks.util.log")
 
----@class easytasks.TaskTemplate
----@field label string  shown in vim.ui.select
----@field task  table   the template data to encode and insert
-
 ---@class easytasks.TaskTypeDef
----@field run       fun(task: table, ctx: easytasks.RunCtx, on_done: fun(ok: boolean))
----@field schema    table?
----@field templates (easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[]))?
+---@field run fun(task: table, ctx: easytasks.RunCtx, on_done: fun(ok: boolean))
 
 ---@class easytasks.BufEntry
 ---@field bufnr    integer
@@ -83,24 +75,29 @@ function M.get_all()
     return vim.tbl_extend("force", {}, _running)
 end
 
--- ─── TOML loading ────────────────────────────────────────────────────────────
+-- ─── Lua file loading ────────────────────────────────────────────────────────
 
----@param toml_path string
+---@param lua_path string
 ---@return table<string,table>?, string[]?, string?
-local function load_tasks(toml_path)
-    log.debug("load_tasks: %s", toml_path)
-    local lines = vim.fn.readfile(toml_path)
-    if not lines then return nil, nil, "cannot read " .. toml_path end
-    local text    = table.concat(lines, "\n") .. "\n"
-    local parsed  = parser.parse(text)
-    local decoded = decoder.decode(parsed.cst)
-    if not decoded.data or not decoded.data.tasks then
-        log.warn("load_tasks: no tasks table in %s", toml_path)
-        return nil, nil, "no tasks table in " .. toml_path
+local function load_tasks(lua_path)
+    log.debug("load_tasks: %s", lua_path)
+    local fn, load_err = loadfile(lua_path)
+    if not fn then
+        log.warn("load_tasks: cannot load %s: %s", lua_path, tostring(load_err))
+        return nil, nil, "cannot load " .. lua_path .. ": " .. tostring(load_err)
+    end
+    local ok, result = pcall(fn)
+    if not ok then
+        log.warn("load_tasks: error running %s: %s", lua_path, tostring(result))
+        return nil, nil, "error in " .. lua_path .. ": " .. tostring(result)
+    end
+    if type(result) ~= "table" then
+        log.warn("load_tasks: %s must return a table", lua_path)
+        return nil, nil, lua_path .. " must return a list of task tables"
     end
     local by_name = {}
     local ordered = {} ---@type string[]
-    for _, task in ipairs(decoded.data.tasks) do
+    for _, task in ipairs(result) do
         if task.name and not by_name[task.name] then
             by_name[task.name] = task
             table.insert(ordered, task.name)
@@ -385,10 +382,10 @@ end
 -- ─── Public ──────────────────────────────────────────────────────────────────
 
 ---@param task_name string
----@param toml_path string
-function M.run(task_name, toml_path)
-    log.info("M.run: task=%s path=%s", task_name, toml_path)
-    local tasks, _, err = load_tasks(toml_path)
+---@param lua_path  string
+function M.run(task_name, lua_path)
+    log.info("M.run: task=%s path=%s", task_name, lua_path)
+    local tasks, _, err = load_tasks(lua_path)
     if not tasks then
         log.error("M.run: load failed: %s", tostring(err))
         fail_immediately(task_name, err or "load error")
@@ -476,19 +473,19 @@ function M.run(task_name, toml_path)
     end
 end
 
---- Run a task whose definition is supplied inline, not from a TOML file.
+--- Run a task whose definition is supplied inline, not from the tasks lua file.
 ---@param task_name string
----@param task_def  table  task data (same shape as a decoded TOML task entry)
+---@param task_def  table  task data
 function M.run_ephemeral(task_name, task_def)
     log.info("M.run_ephemeral: task=%s", task_name)
     task_def.name = task_name
     launch(task_name, { [task_name] = task_def }, nil, true)
 end
 
----@param toml_path string
+---@param lua_path string
 ---@return string[]?, string?
-function M.list(toml_path)
-    local _, ordered, err = load_tasks(toml_path)
+function M.list(lua_path)
+    local _, ordered, err = load_tasks(lua_path)
     return ordered, err
 end
 
