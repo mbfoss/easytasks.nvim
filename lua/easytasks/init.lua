@@ -6,15 +6,6 @@ local task_types   = require("easytasks.types")
 local status_panel = require("easytasks.ui.status_panel")
 local ui           = require("easytasks.ui")
 
--- Captured at load time: the lua/ directory of this plugin.
--- Used to inject type definitions into lua-ls when a tasks file is opened.
-local _plugin_lua_dir = vim.fn.fnamemodify(
-    debug.getinfo(1, "S").source:sub(2), -- strip leading "@" from chunk source
-    ":h:h"                               -- up from lua/easytasks/init.lua → lua/
-)
-
-local _lsp_aug = vim.api.nvim_create_augroup("EasytasksLsp", { clear = false })
-
 M.runner           = require("easytasks.runner")
 
 --- Register a task type. Can be called before or after setup().
@@ -86,40 +77,9 @@ local function restart_command()
     M.runner.run(_last_task.name, _last_task.path)
 end
 
----@param client any  vim.lsp.Client
-local function _inject_lua_ls_library(client)
-    local settings = vim.deepcopy(client.config.settings or {})
-    local lib = vim.tbl_get(settings, "Lua", "workspace", "library") or {}
-    if type(lib) ~= "table" then lib = {} end
-
-    local norm = vim.fn.fnamemodify(_plugin_lua_dir, ":p")
-    for _, p in ipairs(lib) do
-        if vim.fn.fnamemodify(p, ":p") == norm then return end
-    end
-
-    table.insert(lib, _plugin_lua_dir)
-    settings.Lua                       = settings.Lua or {}
-    settings.Lua.workspace             = settings.Lua.workspace or {}
-    settings.Lua.workspace.library     = lib
-    client.config.settings             = settings
-    client.notify("workspace/didChangeConfiguration", { settings = settings })
-end
-
 function M.enable()
     if enabled then return end
     enabled = true
-
-    vim.api.nvim_create_autocmd("LspAttach", {
-        group    = _lsp_aug,
-        callback = function(args)
-            local fname = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(args.buf), ":t")
-            if fname ~= cfg.current.tasks_filename then return end
-            local client = vim.lsp.get_client_by_id(args.data.client_id) ---@type any
-            if not client then return end
-            if client.name ~= "lua_ls" and client.name ~= "sumneko_lua" then return end
-            _inject_lua_ls_library(client)
-        end,
-    })
 
     if cfg.current.log.enabled then
         require("easytasks.util.log").enable(cfg.current.log.path, cfg.current.log.level)
@@ -157,20 +117,6 @@ function M.disable()
     enabled = false
 end
 
----@param opts easytasks.Config?
-function M.setup(opts)
-    cfg.current = vim.tbl_deep_extend("force", cfg.default(), opts or {})
-    M.config = cfg.current
-
-    project.init()
-
-    if cfg.current.enabled then
-        M.enable()
-    else
-        M.disable()
-    end
-end
-
 ---@return boolean
 function M.in_project()
     return project.in_project()
@@ -199,6 +145,20 @@ end
 ---@return table|nil,string?
 function M.load_data(namespace)
     return project.load_data(namespace)
+end
+
+---@param opts easytasks.Config?
+function M.setup(opts)
+    cfg.current = vim.tbl_deep_extend("force", cfg.default(), opts or {})
+    M.config = cfg.current
+
+    project.init()
+
+    if cfg.current.enabled then
+        M.enable()
+    else
+        M.disable()
+    end
 end
 
 return M

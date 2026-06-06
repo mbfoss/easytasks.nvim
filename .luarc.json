@@ -4,7 +4,10 @@
     "version": "LuaJIT"
   },
   "workspace": {
-    "library": ["${3rd}/luv/library"],
+"library": [
+	"${3rd}/luv/library",
+	"/Users/Dev/.config/nvim/pack/plugins/opt/easytasks.nvim/lua"
+	],
     "checkThirdParty": false
   },
   "diagnostics": {
