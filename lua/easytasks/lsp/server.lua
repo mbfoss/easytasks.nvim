@@ -67,38 +67,72 @@ local INITIALIZE_RESULT = {
 
 -- ── Document helpers ──────────────────────────────────────────────────────────
 
+---@type table<string, integer>  uri → generation counter; incremented on every change
+local parse_gen = {}
+
+-- Run parse → decode → publish diagnostics as a coroutine.
+-- Between each major step we yield back to the libuv event loop via a
+-- zero-delay timer, giving pending stdin data a chance to be processed.
+-- If a newer change arrived (parse_gen advanced), we stop early.
+---@param uri  string
+---@param text string
+---@param gen  integer
+local function run_parse(uri, text, gen)
+    local function current() return parse_gen[uri] == gen end
+
+    local co = coroutine.create(function()
+        -- Step 1: parse
+        local lines  = vim.split(text, "\n", { plain = true })
+        local parsed = parser.parse(text)
+        coroutine.yield()
+
+        if not current() then return end
+
+        -- Step 2: decode
+        local ctx = {
+            bufnr = nil, schema = schema, text = text, lines = lines,
+            cst = parsed.cst, parse_errors = parsed.errors,
+            data = nil, decode_errors = {}, decode_tree = nil, parse_results = nil,
+        }
+        if parsed.cst then
+            local decoded     = decoder.decode(parsed.cst)
+            ctx.data          = decoded.data
+            ctx.decode_errors = decoded.errors
+            ctx.decode_tree   = decoded.decode_tree
+        end
+        coroutine.yield()
+
+        if not current() then return end
+
+        -- Step 3: publish diagnostics
+        documents[uri] = ctx
+        local diags = diagnostics.build(nil, ctx)
+        write_msg({
+            jsonrpc = "2.0",
+            method  = "textDocument/publishDiagnostics",
+            params  = { uri = uri, diagnostics = diags },
+        })
+    end)
+
+    local function step()
+        if coroutine.status(co) == "dead" then return end
+        local ok, err = coroutine.resume(co)
+        if not ok then log("parse error: " .. tostring(err)); return end
+        if coroutine.status(co) ~= "dead" then
+            local t = uv.new_timer()
+            t:start(0, 0, function() t:close(); step() end)
+        end
+    end
+
+    step()
+end
+
 ---@param uri  string
 ---@param text string
 local function update_document(uri, text)
-    local lines  = vim.split(text, "\n", { plain = true })
-    local parsed = parser.parse(text)
-    local ctx    = {
-        bufnr         = nil,
-        schema        = schema,
-        text          = text,
-        lines         = lines,
-        cst           = parsed.cst,
-        parse_errors  = parsed.errors,
-        data          = nil,
-        decode_errors = {},
-        decode_tree   = nil,
-        parse_results = nil,
-    }
-    if parsed.cst then
-        local decoded         = decoder.decode(parsed.cst)
-        ctx.data          = decoded.data
-        ctx.decode_errors = decoded.errors
-        ctx.decode_tree   = decoded.decode_tree
-    end
-    documents[uri] = ctx
-
-    -- Publish diagnostics as a notification (no round-trip needed).
-    local diags = diagnostics.build(nil, ctx)
-    write_msg({
-        jsonrpc = "2.0",
-        method  = "textDocument/publishDiagnostics",
-        params  = { uri = uri, diagnostics = diags },
-    })
+    local gen = (parse_gen[uri] or 0) + 1
+    parse_gen[uri] = gen
+    run_parse(uri, text, gen)
 end
 
 -- ── Incremental text application ─────────────────────────────────────────────
@@ -125,33 +159,8 @@ local function apply_incremental(text, change)
     return table.concat(before, "\n") .. change.text .. table.concat(after, "\n")
 end
 
--- ── Change debounce ───────────────────────────────────────────────────────────
-local DEBOUNCE_MS = 200
-
----@type table<string, string>  uri → always-current raw text (updated on every keystroke)
+---@type table<string, string>  uri → always-current raw text (updated on every change)
 local doc_text = {}
----@type table<string, any>
-local parse_timer = {}
-
--- Debounce parse/decode for a URI. The timer reads from doc_text so multiple
--- rapid changes collapse into a single parse of the latest text.
----@param uri string
-local function schedule_parse(uri)
-    local t = parse_timer[uri]
-    if t then
-        t:stop()
-    else
-        t = uv.new_timer()
-        parse_timer[uri] = t
-    end
-    t:start(DEBOUNCE_MS, 0, function()
-        t:stop()
-        t:close()
-        parse_timer[uri] = nil
-        local text = doc_text[uri]
-        if text then update_document(uri, text) end
-    end)
-end
 
 -- ── Request / notification dispatch ─────────────────────────────────────────
 
@@ -234,15 +243,13 @@ local function dispatch(msg)
             end
         end
         doc_text[uri] = text
-        schedule_parse(uri)
+        update_document(uri, text)
         return
     end
 
     if method == "textDocument/didClose" then
         local uri = params.textDocument.uri
         doc_text[uri] = nil
-        local t = parse_timer[uri]
-        if t then t:stop(); t:close(); parse_timer[uri] = nil end
         documents[uri] = nil
         return
     end
