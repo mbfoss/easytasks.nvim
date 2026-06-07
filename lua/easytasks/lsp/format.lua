@@ -9,17 +9,16 @@ local toml_format = require("easytasks.toml.formatter")
 --------------------------------------------------------------------------------
 
 ---@param context easytasks.LspBufferContext
----@param bufnr integer
+---@param text string
 ---@return lsp.TextEdit? edit
 ---@return string? err
-function M.build_edit(context, bufnr)
+function M.build_edit(context, text)
   local schema = context.schema
   if not schema then
     return nil, "schema not configured"
   end
 
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local text = table.concat(lines, "\n")
+  local lines  = vim.split(text, "\n", { plain = true })
   local parsed = parser.parse(text)
 
   if parsed.errors and #parsed.errors > 0 then
@@ -30,9 +29,9 @@ function M.build_edit(context, bufnr)
   end
   context.cst = parsed.cst
 
-  local new_text = toml_format.format(parsed.cst)
+  local new_text   = toml_format.format(parsed.cst)
   local line_count = #lines
-  local last_line = lines[line_count] or ""
+  local last_line  = lines[line_count] or ""
 
   return {
     newText = new_text,
@@ -48,19 +47,25 @@ end
 --------------------------------------------------------------------------------
 
 ---@param context easytasks.LspBufferContext
----@param params lsp.DocumentFormattingParams|lsp.DocumentRangeFormattingParams
----@param callback fun(err?: lsp.ResponseError, result?: lsp.TextEdit[]|nil)
+---@param params  table
+---@param callback fun(err?: table, result?: table[]|nil)
 function M.handler(context, params, callback)
-  local bufnr = context.bufnr or vim.uri_to_bufnr(params.textDocument.uri)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    callback(nil, nil)
-    return
+  local text
+  if context.text then
+    text = context.text
+  else
+    local bufnr = context.bufnr or vim.uri_to_bufnr(params.textDocument.uri)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      callback(nil, nil)
+      return
+    end
+    text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
   end
 
-  local edit, err = M.build_edit(context, bufnr)
+  local edit, err = M.build_edit(context, text)
   if not edit then
     callback({
-      code = vim.lsp.protocol.ErrorCodes.RequestFailed,
+      code    = vim.lsp.protocol.ErrorCodes.RequestFailed,
       message = err or "cannot format document",
     }, nil)
     return

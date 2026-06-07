@@ -1,5 +1,5 @@
 ---@class easytasks.LspBufferContext
----@field bufnr         number
+---@field bufnr         number|nil
 ---@field cst           easytasks.toml.Cst
 ---@field parse_errors  table
 ---@field data          any
@@ -10,6 +10,8 @@
 ---@field last_updated  integer|nil Timestamp or btick when the cache was updated
 ---@field config        table|nil   Optional buffer-local configuration overrides
 ---@field debounce_timer number?
+---@field text          string?     Raw document text (set by subprocess server)
+---@field lines         string[]?   Document text split on "\n" (set by subprocess server)
 local BufferContext = {}
 BufferContext.__index = BufferContext
 

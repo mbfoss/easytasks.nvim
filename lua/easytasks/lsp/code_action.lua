@@ -1,9 +1,6 @@
 local M          = {}
 
 local Cst        = require("easytasks.toml.Cst")
-local encoder    = require("easytasks.toml.encoder")
-local async      = require("easytasks.util.async")
-local _notify    = require("easytasks.ui")
 local K          = Cst.Kind
 
 local kind_names = {}
@@ -116,37 +113,19 @@ local function dump_errors_to_string(parse_results)
 end
 
 --------------------------------------------------------------------------------
--- Template pending registry
---------------------------------------------------------------------------------
-
----@class easytasks.TemplateActionEntry
----@field bufnr      integer
----@field row        integer   0-indexed cursor row at action creation time
----@field col        integer   0-indexed cursor col at action creation time
----@field kind       "array"|"aot"
----@field type_name  string
----@field templates  easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[])
----@field indent     string   leading whitespace for inline-array items
-
----@type table<integer, easytasks.TemplateActionEntry>
-local _pending     = {}
-local _pending_seq = 0
-
---------------------------------------------------------------------------------
 -- Between-tasks detection
 --------------------------------------------------------------------------------
 
 -- Returns the indentation of the first inline-table item inside an Array node,
 -- falling back to two spaces if none exist yet.
----@param bufnr  integer
+---@param lines  string[]
 ---@param cst    easytasks.toml.Cst
 ---@param arr_id integer
 ---@return string
-local function array_item_indent(bufnr, cst, arr_id)
+local function array_item_indent(lines, cst, arr_id)
     for _, vd in cst:iter_values(arr_id) do
         if vd.kind == K.InlineTable then
-            local r1   = vd.range[1]
-            local line = vim.api.nvim_buf_get_lines(bufnr, r1, r1 + 1, false)[1] or ""
+            local line = lines[vd.range[1] + 1] or ""  -- range is 0-indexed
             return line:match("^(%s*)") or "  "
         end
     end
@@ -154,12 +133,7 @@ local function array_item_indent(bufnr, cst, arr_id)
 end
 
 -- Determine whether the cursor is in a position where a task template can be
--- inserted.  Returns the insertion kind and the relevant CST node id, or nil.
---
--- "array" → cursor is between items inside the inline tasks array
---           (closest Array/InlineTable ancestor is an Array whose path is ["tasks"])
--- "aot"   → cursor is inside a [[tasks]] AotSection but not inside a KVP
---           (e.g. on the header line, a trailing blank line, or a comment)
+-- inserted. Returns the insertion kind and the relevant CST node id, or nil.
 ---@param cst easytasks.toml.Cst
 ---@param dt  easytasks.toml.DecodeTree
 ---@param row integer
@@ -169,8 +143,6 @@ end
 local function tasks_insertion_ctx(cst, dt, row, col)
     local tok_id = cst:token_at(row, col)
 
-    -- Inline array: the nearest Array/InlineTable ancestor must be an Array.
-    -- If InlineTable is closer, we are inside a task item, not between items.
     local anc = cst:ancestor_of_kind(tok_id, K.Array, K.InlineTable)
     if anc and cst:kind(anc) == K.Array then
         local is_tasks = false
@@ -179,7 +151,6 @@ local function tasks_insertion_ctx(cst, dt, row, col)
             local parts = dt:key_parts_of(tag)
             is_tasks = #parts == 1 and parts[1] == "tasks"
         else
-            -- Array not yet decoded; fall back to the parent KVP's key text.
             local kvp_id = cst:ancestor_of_kind(anc, K.KeyValuePair)
             if kvp_id then
                 local keys = cst:get_keys(kvp_id)
@@ -189,9 +160,6 @@ local function tasks_insertion_ctx(cst, dt, row, col)
         if is_tasks then return "array", anc end
     end
 
-
-    -- AoT: inside a [[tasks]] section body, not inside any key-value pair,
-    -- and no KVP in the section starts after the cursor (cursor is at the tail).
     if not cst:ancestor_of_kind(tok_id, K.KeyValuePair) then
         local aot_id = cst:ancestor_of_kind(tok_id, K.AotSection)
         if aot_id then
@@ -199,8 +167,6 @@ local function tasks_insertion_ctx(cst, dt, row, col)
             if hdr_id then
                 local keys = cst:get_keys(hdr_id)
                 if #keys == 1 and keys[1].value == "tasks" then
-                    -- Find the direct child of aot_id that contains tok_id,
-                    -- then walk forward via next_sibling_id for any KVP.
                     ---@type integer?
                     local anchor = tok_id
                     while anchor and cst:parent_id(anchor) ~= aot_id do
@@ -220,9 +186,6 @@ local function tasks_insertion_ctx(cst, dt, row, col)
         end
     end
 
-    -- Document root: walk up from tok_id; if every node is trivial
-    -- (Whitespace, Newline, Comment) or Document, the cursor is floating
-    -- at root — covers empty files, blank lines, and comment-only lines.
     local trivial = {
         [K.Whitespace] = true,
         [K.Newline] = true,
@@ -240,79 +203,6 @@ local function tasks_insertion_ctx(cst, dt, row, col)
     if at_root then return "aot", nil end
 
     return nil
-end
-
---------------------------------------------------------------------------------
--- Template application
---------------------------------------------------------------------------------
-
----@param entry easytasks.TemplateActionEntry
----@param tmpl  easytasks.TaskTemplate
-local function apply_template(entry, tmpl)
-    if not vim.api.nvim_buf_is_valid(entry.bufnr) then return end
-    vim.api.nvim_win_set_cursor(0, { entry.row + 1, entry.col })
-
-    local lines
-    if entry.kind == "array" then
-        local encoded = encoder.encode_inline(tmpl.task, { multiline = true, indent = entry.indent })
-        lines = vim.split(encoded, "\n", { plain = true })
-        lines[#lines] = lines[#lines]
-    else
-        local block = encoder.encode_aot_entry("tasks", tmpl.task)
-        lines = vim.split(block, "\n", { plain = true })
-    end
-    vim.api.nvim_put(lines, "c", false, true)
-end
-
---------------------------------------------------------------------------------
--- Execute command handler
---------------------------------------------------------------------------------
-
----@param context  easytasks.LspBufferContext
----@param params   { command: string, arguments?: any[] }
----@param callback fun(err?: lsp.ResponseError, result?: any)
-function M.execute_command(context, params, callback)
-    if params.command ~= "easytasks/insertTemplate" then
-        callback(nil, nil)
-        return
-    end
-
-    local id    = params.arguments and params.arguments[1]
-    local entry = id and _pending[id]
-    if not entry then
-        callback(nil, nil); return
-    end
-    _pending[id] = nil -- consume once
-
-    local function show_select(templates)
-        if not templates or #templates == 0 then
-            _notify.notify_warning("no templates for type: " .. entry.type_name)
-            return
-        end
-        vim.ui.select(
-            templates,
-            {
-                prompt      = "Choose " .. entry.type_name .. " template:",
-                format_item = function(item) return item.label end,
-            },
-            function(choice)
-                if choice then
-                    vim.schedule(function() apply_template(entry, choice) end)
-                end
-            end
-        )
-    end
-
-    if type(entry.templates) == "function" then
-        local fn = entry.templates ---@cast fn function
-        async.go(fn, function(ok, result)
-            if ok then show_select(result --[[@as easytasks.TaskTemplate[] ]]) end
-        end)
-    else
-        show_select(entry.templates --[[@as easytasks.TaskTemplate[] ]])
-    end
-
-    callback(nil, nil)
 end
 
 --------------------------------------------------------------------------------
@@ -338,33 +228,37 @@ function M.handler(context, params, callback)
 
         if ins_kind then
             local task_types = require("easytasks.types")
-            -- Sort by type name so the action order is deterministic
             local type_names = vim.tbl_keys(task_types.get_all())
             table.sort(type_names)
+
+            -- Resolve buffer lines for indent detection (context.lines on server,
+            -- buffer API on client).
+            local buf_lines = context.lines
+                or (context.bufnr and vim.api.nvim_buf_get_lines(context.bufnr, 0, -1, false))
+                or {}
+
             for _, type_name in ipairs(type_names) do
                 local type_def = task_types.get_all()[type_name]
                 if type_def.templates then
                     local indent = ""
                     if ins_kind == "array" and node_id then
-                        indent = array_item_indent(context.bufnr, context.cst, node_id)
+                        indent = array_item_indent(buf_lines, context.cst, node_id)
                     end
-                    _pending_seq = _pending_seq + 1
-                    _pending[_pending_seq] = {
-                        bufnr     = context.bufnr,
-                        row       = row,
-                        col       = col,
-                        kind      = ins_kind,
-                        type_name = type_name,
-                        templates = type_def.templates,
-                        indent    = indent,
-                    }
                     table.insert(actions, {
                         title   = "Add `" .. type_name .. "` task template",
                         kind    = vim.lsp.protocol.CodeActionKind.RefactorExtract,
                         command = {
                             title     = "Add `" .. type_name .. "` task template",
                             command   = "easytasks/insertTemplate",
-                            arguments = { _pending_seq },
+                            -- All data needed for client-side execution passed inline.
+                            arguments = { {
+                                uri       = params.textDocument.uri,
+                                row       = row,
+                                col       = col,
+                                kind      = ins_kind,
+                                type_name = type_name,
+                                indent    = indent,
+                            } },
                         },
                     })
                 end
