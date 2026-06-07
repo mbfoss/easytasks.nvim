@@ -246,8 +246,14 @@ function M.handler(context, params, callback)
                 end
             else
                 -- Incomplete KVP (no value yet): navigate via enclosing scope + key name.
-                local enc_id     = cst:ancestor_of_kind(kvp_id, K.TableSection, K.AotSection, K.InlineTable)
-                local enc_dt     = enc_id and cst:get_tag(enc_id) or dt:root_id()
+                local enc_id  = cst:ancestor_of_kind(kvp_id, K.TableSection, K.AotSection, K.InlineTable)
+                local enc_tag = enc_id and cst:get_tag(enc_id)
+                -- Untagged enclosing InlineTable means the node is outside the decoded tree
+                -- (e.g. duplicate key). Don't fall back to root — schema is unknown.
+                if enc_id and cst:kind(enc_id) == K.InlineTable and not enc_tag then
+                    callback(nil, empty_result); return
+                end
+                local enc_dt     = enc_tag or dt:root_id()
                 local parent_sch = schema_nav.schema_at(schema, data, dt, enc_dt)
                     or schema_nav.flatten(schema, data)
                 sch = schema_for_keys(parent_sch, cst:get_keys(kvp_id))
@@ -265,8 +271,13 @@ function M.handler(context, params, callback)
             local dt_id     = cst:get_tag(kvp_id)
             local parent_id = dt_id and dt:get_parent_id(dt_id)
             if not parent_id then
-                local enc_id = cst:ancestor_of_kind(kvp_id, K.TableSection, K.AotSection, K.InlineTable)
-                parent_id    = enc_id and cst:get_tag(enc_id) or dt:root_id()
+                local enc_id  = cst:ancestor_of_kind(kvp_id, K.TableSection, K.AotSection, K.InlineTable)
+                local enc_tag = enc_id and cst:get_tag(enc_id)
+                -- Untagged enclosing InlineTable: outside the decoded tree, schema unknown.
+                if enc_id and cst:kind(enc_id) == K.InlineTable and not enc_tag then
+                    callback(nil, empty_result); return
+                end
+                parent_id = enc_tag or dt:root_id()
             end
             callback(nil, result(key_items(schema_for_node(schema, data, dt, parent_id))))
         end
@@ -277,7 +288,12 @@ function M.handler(context, params, callback)
 
     local scope_id = cst:ancestor_of_kind(tok_id, K.InlineTable, K.TableSection, K.AotSection)
     if scope_id then
-        callback(nil, result(key_items(schema_for_node(schema, data, dt, cst:get_tag(scope_id)))))
+        local scope_tag = cst:get_tag(scope_id)
+        -- Untagged InlineTable: outside the decoded tree (e.g. duplicate key). Schema unknown.
+        if not scope_tag and cst:kind(scope_id) == K.InlineTable then
+            callback(nil, empty_result); return
+        end
+        callback(nil, result(key_items(schema_for_node(schema, data, dt, scope_tag))))
         return
     end
 
