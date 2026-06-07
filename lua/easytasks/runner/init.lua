@@ -17,6 +17,14 @@ function M.stop(task_name)
     exec.stop(task_name)
 end
 
+--- Dispose a finished run: delete its buffers and remove it from state.
+--- Returns false + error string if the run is still active.
+---@param run_id string
+---@return boolean ok, string? err
+function M.dispose(run_id)
+    return exec.dispose(run_id)
+end
+
 --- Return the current execution state of a task.
 ---@param task_name string
 ---@return easytasks.TaskState

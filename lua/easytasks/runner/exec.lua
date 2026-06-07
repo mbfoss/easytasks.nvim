@@ -15,6 +15,7 @@ local log          = require("easytasks.util.log")
 
 ---@class easytasks.TaskTypeDef
 ---@field run       fun(task: table, ctx: easytasks.RunCtx, on_done: fun(ok: boolean))
+---@field dispose   (fun(bufnrs: easytasks.BufEntry[]))?  optional cleanup called when the run is disposed
 ---@field schema    table?
 ---@field templates (easytasks.TaskTemplate[]|(fun(): easytasks.TaskTemplate[]))?
 
@@ -42,6 +43,7 @@ local log          = require("easytasks.util.log")
 
 ---@class easytasks.RunEntry
 ---@field task_name      string
+---@field task_type      string?
 ---@field state          easytasks.TaskState
 ---@field waiting_for    string[]?
 ---@field progress       easytasks.RunProgress
@@ -72,6 +74,15 @@ function M.subscribe(fn) _on_state_change:subscribe(fn) end
 
 ---@param fn fun(run_id: string, entry: easytasks.RunEntry)
 function M.unsubscribe(fn) _on_state_change:unsubscribe(fn) end
+
+---@type easytasks.util.Signal<fun(run_id: string)>
+local _on_dispose = Signal.new()
+
+---@param fn fun(run_id: string)
+function M.subscribe_dispose(fn) _on_dispose:subscribe(fn) end
+
+---@param fn fun(run_id: string)
+function M.unsubscribe_dispose(fn) _on_dispose:unsubscribe(fn) end
 
 local function notify_change(run_id)
     local entry = _running[run_id]
@@ -186,6 +197,7 @@ local function run_task_coro(name, tasks, run_id, ephemeral)
         log.debug("run_task_coro: new run_id=%s", run_id)
         entry = {
             task_name = name,
+            task_type = task.type,
             state     = "running",
             bufnrs    = {},
             done      = Signal.new(),
@@ -509,6 +521,39 @@ function M.stop(task_name)
         end
     end
     log.debug("M.stop: stop_requested on %d entries for task=%s", count, task_name)
+end
+
+--- Dispose a finished run: invoke the type's dispose hook (if any), delete all
+--- tracked buffers, remove the entry from state, and emit the dispose signal.
+--- Returns false + error string if the run is still active.
+---@param run_id string
+---@return boolean ok, string? err
+function M.dispose(run_id)
+    local entry = _running[run_id]
+    if not entry then return false, "run not found: " .. run_id end
+    local s = entry.state
+    if s == "running" or s == "waiting" then
+        return false, "task is still active; stop it first"
+    end
+
+    -- Remove from state and notify subscribers first so the status panel can
+    -- switch away from the buffer synchronously before we delete it.
+    _running[run_id] = nil
+    log.info("M.dispose: disposed run_id=%s task=%s", run_id, entry.task_name)
+    _on_dispose:emit(run_id)
+
+    local type_def = entry.task_type and task_types.get(entry.task_type)
+    if type_def and type_def.dispose then
+        log.debug("M.dispose: calling type dispose for run_id=%s type=%s", run_id, entry.task_type)
+        pcall(type_def.dispose, entry.bufnrs)
+    else
+        for _, be in ipairs(entry.bufnrs) do
+            if vim.api.nvim_buf_is_valid(be.bufnr) then
+                pcall(vim.api.nvim_buf_delete, be.bufnr, { force = true })
+            end
+        end
+    end
+    return true
 end
 
 --- Return the state of the most recent run for a task, or "idle" if none.

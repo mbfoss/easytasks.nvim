@@ -1,29 +1,29 @@
-local utils = require('easytasks.ui.utils')
-local exec  = require('easytasks.runner.exec')
+local utils             = require('easytasks.ui.utils')
+local exec              = require('easytasks.runner.exec')
 
 ---@class easytasks.ui.status_panel
-local M = {}
+local M                 = {}
 
 -- ── State ─────────────────────────────────────────────────────────────────────
 
-local _win          = nil ---@type integer?
-local _height_ratio = nil ---@type number?
+local _win              = nil ---@type integer?
+local _height_ratio     = nil ---@type number?
 
-local _runs           = {} ---@type string[]   run_ids, newest first
-local _run_map        = {} ---@type table<string, easytasks.RunEntry>
+local _runs             = {} ---@type string[]   run_ids, newest first
+local _run_map          = {} ---@type table<string, easytasks.RunEntry>
 local _known_buf_counts = {} ---@type table<string, integer>  bufnr count as of last notification
 
-local _active_run_id = nil ---@type string?
-local _active_page   = 0   -- 0 = info scratch, 1..n = entry.bufnrs index
+local _active_run_id    = nil ---@type string?
+local _active_page      = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
-local _jump_mode = false
-local _JUMP_KEYS = "asdfjkl;ghwertyuiopzxcvbnm"
+local _jump_mode        = false
+local _JUMP_KEYS        = "asdfjkl;ghwertyuiopzxcvbnm"
 
-local _info_buf  = nil ---@type integer?
-local _empty_buf = nil ---@type integer?
+local _info_buf         = nil ---@type integer?
+local _empty_buf        = nil ---@type integer?
 
-local _augroup    = vim.api.nvim_create_augroup("EasyTasksStatusPanel", { clear = true })
-local _info_hl_ns = vim.api.nvim_create_namespace("EasyTasksInfoBuf")
+local _augroup          = vim.api.nvim_create_augroup("EasyTasksStatusPanel", { clear = true })
+local _info_hl_ns       = vim.api.nvim_create_namespace("EasyTasksInfoBuf")
 
 -- ── Highlights ────────────────────────────────────────────────────────────────
 
@@ -37,21 +37,22 @@ local function _setup_hl()
         return ok and hl.bg or nil
     end
     vim.api.nvim_set_hl(0, "EasyTasksActiveTab", { fg = fg("Title"), bg = bg("WinBar"), bold = true, default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksBadgeOk",   { link = "DiagnosticOk",    default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksBadgeErr",  { link = "DiagnosticError", default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksBadgeWarn", { link = "DiagnosticWarn",  default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksBadgeHint", { link = "DiagnosticHint",  default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksJumpKey",   { fg = fg("FlashLabel") or 0xff007c, bg = bg("WinBar"), bold = true, default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksBadgeOk", { link = "DiagnosticOk", default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksBadgeErr", { link = "DiagnosticError", default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksBadgeWarn", { link = "DiagnosticWarn", default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksBadgeHint", { link = "DiagnosticHint", default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksJumpKey",
+        { fg = fg("Todo") or 0xff007c, bg = bg("WinBar"), bold = true, default = true })
 end
 
 ---@type table<easytasks.TaskState, {icon:string, hl:string}>
 local _badge = {
     running = { icon = "●", hl = "EasyTasksBadgeWarn" },
     waiting = { icon = "◌", hl = "EasyTasksBadgeWarn" },
-    ok      = { icon = "●", hl = "EasyTasksBadgeOk"   },
-    failed  = { icon = "●", hl = "EasyTasksBadgeErr"  },
+    ok      = { icon = "●", hl = "EasyTasksBadgeOk" },
+    failed  = { icon = "●", hl = "EasyTasksBadgeErr" },
     stopped = { icon = "■", hl = "EasyTasksBadgeHint" },
-    idle    = { icon = "●", hl = "Comment"             },
+    idle    = { icon = "●", hl = "Comment" },
 }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,15 +74,15 @@ local function _refresh_info_buf(entry)
         _info_buf = utils.create_sratch_buffer(false, { bufhidden = "hide" })
     end
 
-    local p   = entry.progress
-    local fmt = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
-    local b   = _badge[entry.state] or _badge.idle
+    local p    = entry.progress
+    local fmt  = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
+    local b    = _badge[entry.state] or _badge.idle
 
     ---@type {text:string, hl:string?, col:integer?}[]
     local rows = {
         { text = entry.task_name },
         { text = "" },
-        { text = "status   " .. entry.state, hl = b.hl, col = #"status   " },
+        { text = "status   " .. entry.state,      hl = b.hl, col = #"status   " },
         { text = "started  " .. fmt(p.start_time) },
     }
     if p.stop_time then
@@ -183,7 +184,7 @@ local function _build_winbar(width)
     local function push(kind, text) items[#items + 1] = { kind, text } end
 
     for run_idx, run_id in ipairs(_runs) do
-        local entry     = _run_map[run_id]
+        local entry = _run_map[run_id]
         if not entry then goto continue end
         local b         = _badge[entry.state] or _badge.idle
         local is_active = run_idx == active_idx
@@ -191,7 +192,7 @@ local function _build_winbar(width)
 
         -- sub-page indicator on the active tab when there are multiple pages;
         -- each page name is its own clickable region
-        local page_sfx = ""
+        local page_sfx  = ""
         if is_active and #entry.bufnrs > 0 then
             local parts = {}
             local names = { "info" }
@@ -249,11 +250,11 @@ local function _build_winbar(width)
         local overflow  = vis_w - width
         local base_cut  = math.floor(overflow / n_crop)
         local remainder = overflow % n_crop
-        local ci = 0
+        local ci        = 0
         for _, it in ipairs(items) do
             local text = it[2]
             if it[1] == 1 then
-                ci = ci + 1
+                ci           = ci + 1
                 local cut    = base_cut + (ci <= remainder and 1 or 0)
                 local cw     = vim.fn.strdisplaywidth(text)
                 local target = math.max(cw - cut, 2)
@@ -306,7 +307,9 @@ local function _best_page(entry)
     local best_idx, best_pri = 0, -1
     for i, be in ipairs(entry.bufnrs) do
         local pri = be.priority or 0
-        if pri > best_pri then best_pri = pri; best_idx = i end
+        if pri > best_pri then
+            best_pri = pri; best_idx = i
+        end
     end
     return best_idx
 end
@@ -314,8 +317,8 @@ end
 ---@param run_id string
 ---@param entry  easytasks.RunEntry
 local function _on_state_change(run_id, entry)
-    local is_new     = _run_map[run_id] == nil
-    local prev_count = _known_buf_counts[run_id] or 0
+    local is_new              = _run_map[run_id] == nil
+    local prev_count          = _known_buf_counts[run_id] or 0
     _run_map[run_id]          = entry
     _known_buf_counts[run_id] = #entry.bufnrs
 
@@ -347,12 +350,33 @@ end
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 
+---@param run_id string
+local function _on_dispose(run_id)
+    local idx = _run_idx(run_id)
+    if not idx then return end
+    table.remove(_runs, idx)
+    _run_map[run_id]          = nil
+    _known_buf_counts[run_id] = nil
+
+    if _active_run_id == run_id then
+        _active_run_id = _runs[#_runs]
+        local e = _active_run_id and _run_map[_active_run_id]
+        _active_page = e and _best_page(e) or 0
+        -- Switch synchronously so the window leaves the buffer before it is deleted.
+        _show_active()
+        _refresh_winbar()
+    else
+        vim.schedule(_refresh_winbar)
+    end
+end
+
 local function _on_close()
     exec.unsubscribe(_on_state_change)
+    exec.unsubscribe_dispose(_on_dispose)
     vim.api.nvim_clear_autocmds({ group = _augroup })
-    _win           = nil
-    _active_run_id = nil
-    _active_page   = 0
+    _win              = nil
+    _active_run_id    = nil
+    _active_page      = 0
     _runs             = {}
     _run_map          = {}
     _known_buf_counts = {}
@@ -371,7 +395,7 @@ function M.open()
 
     local prev_win = vim.api.nvim_get_current_win()
     vim.cmd("bot split")
-    _win = vim.api.nvim_get_current_win()
+    _win                        = vim.api.nvim_get_current_win()
 
     vim.wo[_win].winfixheight   = true
     vim.wo[_win].winfixbuf      = true
@@ -381,9 +405,9 @@ function M.open()
     vim.wo[_win].spell          = false
     vim.wo[_win].wrap           = false
 
-    local height = _height_ratio
+    local height                = _height_ratio
         and math.max(6, math.floor(vim.o.lines * _height_ratio))
-        or  math.max(6, math.floor(vim.o.lines * 0.22))
+        or math.max(6, math.floor(vim.o.lines * 0.22))
     vim.api.nvim_win_set_height(_win, height)
 
     vim.api.nvim_set_current_win(prev_win)
@@ -408,6 +432,7 @@ function M.open()
     _refresh_winbar()
 
     exec.subscribe(_on_state_change)
+    exec.subscribe_dispose(_on_dispose)
 
     vim.api.nvim_create_autocmd("WinClosed", {
         group    = _augroup,

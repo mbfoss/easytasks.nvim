@@ -59,6 +59,63 @@ local function run_command()
     end)
 end
 
+local function stop_command()
+    local all = require("easytasks.runner.exec").get_all()
+    local names = {}
+    local seen = {}
+    for _, entry in pairs(all) do
+        if not entry.ephemeral
+            and (entry.state == "running" or entry.state == "waiting")
+            and not seen[entry.task_name]
+        then
+            seen[entry.task_name] = true
+            table.insert(names, entry.task_name)
+        end
+    end
+    table.sort(names)
+    if #names == 0 then
+        ui.notify_warning("no running tasks")
+        return
+    end
+    vim.ui.select(names, { prompt = "Stop task:" }, function(choice)
+        if not choice then return end
+        M.runner.stop(choice)
+    end)
+end
+
+local function dispose_command()
+    local all = require("easytasks.runner.exec").get_all()
+    ---@type {run_id:string, label:string}[]
+    local entries = {}
+    for run_id, entry in pairs(all) do
+        if not entry.ephemeral
+            and entry.state ~= "running"
+            and entry.state ~= "waiting"
+        then
+            table.insert(entries, {
+                run_id = run_id,
+                label  = entry.task_name .. "  [" .. entry.state .. "]",
+            })
+        end
+    end
+    table.sort(entries, function(a, b) return a.label < b.label end)
+    if #entries == 0 then
+        ui.notify_warning("no finished tasks to dispose")
+        return
+    end
+    local labels = vim.tbl_map(function(e) return e.label end, entries)
+    vim.ui.select(labels, { prompt = "Dispose task:" }, function(choice)
+        if not choice then return end
+        for _, e in ipairs(entries) do
+            if e.label == choice then
+                local ok, err = M.runner.dispose(e.run_id)
+                if not ok then ui.notify_error(err or "dispose failed") end
+                return
+            end
+        end
+    end)
+end
+
 local function restart_command()
     if not _last_task then
         ui.notify_warning("no task has been run yet")
@@ -107,6 +164,10 @@ function M.enable()
                 run_command()
             elseif action == "restart" then
                 restart_command()
+            elseif action == "stop" then
+                stop_command()
+            elseif action == "dispose" then
+                dispose_command()
             elseif action == "toggle" then
                 require("easytasks.ui.status_panel").toggle()
             elseif action == "jump" then
@@ -119,7 +180,7 @@ function M.enable()
             desc = "Easytasks",
             subcommand_fn = function(cmd, rest)
                 if cmd == "Easytasks" and #rest == 0 then
-                    return { "toggle", "run", "restart", "jump" }
+                    return { "toggle", "run", "restart", "stop", "dispose", "jump" }
                 end
                 return {}
             end

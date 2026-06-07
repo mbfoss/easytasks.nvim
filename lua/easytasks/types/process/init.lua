@@ -43,6 +43,14 @@ end
 local M = {
     register_qfmatcher = register_qfmatcher,
 
+    dispose = function(bufnrs)
+        for _, be in ipairs(bufnrs) do
+            if vim.api.nvim_buf_is_valid(be.bufnr) then
+                pcall(vim.api.nvim_buf_delete, be.bufnr, { force = true })
+            end
+        end
+    end,
+
     run = function(task, ctx, on_done)
         if not task.command then
             _notify.notify_error("process task '" .. task.name .. "' has no command")
