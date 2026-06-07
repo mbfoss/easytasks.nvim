@@ -4,13 +4,16 @@
     "version": "LuaJIT"
   },
   "workspace": {
-"library": [
-	"${3rd}/luv/library",
-	"/Users/Dev/.config/nvim/pack/plugins/opt/easytasks.nvim/lua"
-	],
+    "library": [
+      "${3rd}/luv/library",
+      "/Users/Dev/homebrew/Cellar/neovim/0.12.2/share/nvim/runtime/lua",
+      "/Users/Dev/.config/nvim/pack/plugins/opt/easytasks.nvim/lua"
+    ],
     "checkThirdParty": false
   },
   "diagnostics": {
-    "globals": ["vim"]
+    "globals": [
+      "vim"
+    ]
   }
 }
