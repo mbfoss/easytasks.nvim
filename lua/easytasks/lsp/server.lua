@@ -100,6 +100,41 @@ local function update_document(uri, text)
     })
 end
 
+-- ── Change debounce ───────────────────────────────────────────────────────────
+local DEBOUNCE_MS = 200
+
+---@type table<string, string>
+local pending_text  = {}
+---@type table<string, any>
+local pending_timer = {}
+
+---@param uri string
+local function flush_change(uri)
+    local text = pending_text[uri]
+    if not text then return end
+    pending_text[uri] = nil
+    update_document(uri, text)
+end
+
+---@param uri  string
+---@param text string
+local function schedule_change(uri, text)
+    pending_text[uri] = text
+    local t = pending_timer[uri]
+    if t then
+        t:stop()
+    else
+        t = uv.new_timer()
+        pending_timer[uri] = t
+    end
+    t:start(DEBOUNCE_MS, 0, function()
+        t:stop()
+        t:close()
+        pending_timer[uri] = nil
+        flush_change(uri)
+    end)
+end
+
 -- ── Request / notification dispatch ─────────────────────────────────────────
 
 ---@param id     integer|string|nil
@@ -171,8 +206,7 @@ local function dispatch(msg)
     if method == "textDocument/didChange" then
         local changes = params.contentChanges
         if changes and #changes > 0 then
-            -- change = 1 (Full): the last entry is the full text.
-            update_document(params.textDocument.uri, changes[#changes].text)
+            schedule_change(params.textDocument.uri, changes[#changes].text)
         end
         return
     end
