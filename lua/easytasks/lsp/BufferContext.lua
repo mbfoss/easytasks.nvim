@@ -10,8 +10,9 @@
 ---@field last_updated  integer|nil Timestamp or btick when the cache was updated
 ---@field config        table|nil   Optional buffer-local configuration overrides
 ---@field debounce_timer number?
----@field text          string?     Raw document text (set by subprocess server)
----@field lines         string[]?   Document text split on "\n" (set by subprocess server)
+---@field text               string?     Raw document text (set by subprocess server)
+---@field lines              string[]?   Document text split on "\n" (set by subprocess server)
+---@field template_type_names string[]?  Type names that have templates (set by subprocess server from initializationOptions)
 local BufferContext = {}
 BufferContext.__index = BufferContext
 

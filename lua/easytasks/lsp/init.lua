@@ -86,10 +86,16 @@ function M.start(buf, opts)
     opts = opts or {}
     if attached[buf] then M.stop(buf) end
 
+    local task_types     = require("easytasks.types")
+    local template_types = {}
+    for name, def in pairs(task_types.get_all()) do
+        if def.templates then template_types[#template_types + 1] = name end
+    end
+
     local config = {
         name         = M.SERVER_NAME,
         cmd          = { vim.v.progpath, "--headless", "--noplugin", "-n", "-u", "NONE", "-l", SERVER_SCRIPT },
-        init_options = { schema = vim.json.encode(opts.schema or {}) },
+        init_options = { schema = vim.json.encode(opts.schema or {}), template_types = template_types },
         root_dir     = vim.fn.getcwd(),
     }
 

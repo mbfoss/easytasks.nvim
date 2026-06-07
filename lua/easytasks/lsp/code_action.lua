@@ -227,8 +227,17 @@ function M.handler(context, params, callback)
             context.cst, context.decode_tree, row, col)
 
         if ins_kind then
-            local task_types = require("easytasks.types")
-            local type_names = vim.tbl_keys(task_types.get_all())
+            ---@type string[]
+            local type_names
+            if context.template_type_names then
+                type_names = context.template_type_names
+            else
+                local types = require("easytasks.types")
+                type_names = vim.tbl_filter(
+                    function(n) local d = types.get(n); return d ~= nil and d.templates ~= nil end,
+                    vim.tbl_keys(types.get_all())
+                )
+            end
             table.sort(type_names)
 
             -- Resolve buffer lines for indent detection (context.lines on server,
@@ -238,30 +247,27 @@ function M.handler(context, params, callback)
                 or {}
 
             for _, type_name in ipairs(type_names) do
-                local type_def = task_types.get_all()[type_name]
-                if type_def.templates then
-                    local indent = ""
-                    if ins_kind == "array" and node_id then
-                        indent = array_item_indent(buf_lines, context.cst, node_id)
-                    end
-                    table.insert(actions, {
-                        title   = "Add `" .. type_name .. "` task template",
-                        kind    = vim.lsp.protocol.CodeActionKind.RefactorExtract,
-                        command = {
-                            title     = "Add `" .. type_name .. "` task template",
-                            command   = "easytasks/insertTemplate",
-                            -- All data needed for client-side execution passed inline.
-                            arguments = { {
-                                uri       = params.textDocument.uri,
-                                row       = row,
-                                col       = col,
-                                kind      = ins_kind,
-                                type_name = type_name,
-                                indent    = indent,
-                            } },
-                        },
-                    })
+                local indent = ""
+                if ins_kind == "array" and node_id then
+                    indent = array_item_indent(buf_lines, context.cst, node_id)
                 end
+                table.insert(actions, {
+                    title   = "Add `" .. type_name .. "` task template",
+                    kind    = vim.lsp.protocol.CodeActionKind.RefactorExtract,
+                    command = {
+                        title     = "Add `" .. type_name .. "` task template",
+                        command   = "easytasks/insertTemplate",
+                        -- All data needed for client-side execution passed inline.
+                        arguments = { {
+                            uri       = params.textDocument.uri,
+                            row       = row,
+                            col       = col,
+                            kind      = ins_kind,
+                            type_name = type_name,
+                            indent    = indent,
+                        } },
+                    },
+                })
             end
         end
     end

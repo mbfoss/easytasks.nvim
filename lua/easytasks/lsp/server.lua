@@ -45,9 +45,11 @@ end
 
 -- ── Server state ─────────────────────────────────────────────────────────────
 ---@type table<string, easytasks.LspBufferContext>
-local documents         = {} -- uri → context (duck-typed LspBufferContext)
+local documents            = {} -- uri → context (duck-typed LspBufferContext)
 ---@type table?
-local schema            = nil
+local schema               = nil
+---@type string[]
+local template_type_names  = {}
 local _req_id           = 0 -- outgoing request counter (for workspace/applyEdit if needed)
 
 -- ── Capabilities ─────────────────────────────────────────────────────────────
@@ -82,16 +84,17 @@ local function parse_document(uri, text)
     local lines  = vim.split(text, "\n", { plain = true })
     local parsed = parser.parse(text)
     local ctx    = {
-        bufnr = nil,
-        schema = schema,
-        text = text,
-        lines = lines,
-        cst = parsed.cst,
-        parse_errors = parsed.errors,
-        data = nil,
-        decode_errors = {},
-        decode_tree = nil,
-        parse_results = nil,
+        bufnr               = nil,
+        schema              = schema,
+        text                = text,
+        lines               = lines,
+        cst                 = parsed.cst,
+        parse_errors        = parsed.errors,
+        data                = nil,
+        decode_errors       = {},
+        decode_tree         = nil,
+        parse_results       = nil,
+        template_type_names = template_type_names,
     }
     if parsed.cst then
         local decoded     = decoder.decode(parsed.cst)
@@ -219,6 +222,9 @@ local function dispatch(msg)
         else
             log("no initializationOptions.schema")
         end
+        if opts and opts.template_types then
+            template_type_names = opts.template_types
+        end
         respond(id, INITIALIZE_RESULT)
         log("initialize done")
         return
@@ -295,6 +301,8 @@ local function dispatch(msg)
     end
 
     if method == "textDocument/completion" then
+        ensure_parsed(uri)
+        ctx = doc_ctx(uri) or ctx
         local cb_called = false
         local function completion_cb(err, result)
             cb_called = true
