@@ -7,9 +7,13 @@ local M = {}
 ---@param keys string[]
 ---@return table
 function M.ordered(t, keys)
-    return setmetatable(t, {
-        keys_order = keys
-    })
+    if next(t) and next(keys) ~= nil then
+        return setmetatable(t, {
+            keys_order = keys
+        })
+    else
+        return t
+    end
 end
 
 function M.ordered_keys_of(t)
