@@ -53,7 +53,8 @@ local _req_id   = 0    -- outgoing request counter (for workspace/applyEdit if n
 -- ── Capabilities ─────────────────────────────────────────────────────────────
 local INITIALIZE_RESULT = {
     capabilities = {
-        textDocumentSync      = { openClose = true, change = 1 }, -- Full sync
+        textDocumentSync      = { openClose = true, change = 2 }, -- Incremental sync
+        positionEncoding      = "utf-8",
         hoverProvider         = true,
         completionProvider    = { triggerCharacters = { ".", "[", '"', "=", " " } },
         codeActionProvider    = { codeActionKinds = { "quickfix", "refactor.extract" } },
@@ -100,38 +101,55 @@ local function update_document(uri, text)
     })
 end
 
+-- ── Incremental text application ─────────────────────────────────────────────
+
+-- Apply a single LSP incremental TextDocumentContentChangeEvent to a raw string.
+-- Positions are UTF-8 byte offsets (positionEncoding = "utf-8").
+---@param text   string
+---@param change table  { range: {start,end}, text: string }
+---@return string
+local function apply_incremental(text, change)
+    if not change.range then return change.text end  -- full replacement fallback
+    local r     = change.range
+    local lines = vim.split(text, "\n", { plain = true })
+
+    -- Collect lines before the changed range.
+    local before = {}
+    for i = 1, r.start.line do before[#before + 1] = lines[i] end
+    before[#before + 1] = (lines[r.start.line + 1] or ""):sub(1, r.start.character)
+
+    -- Collect lines after the changed range.
+    local after = { (lines[r["end"].line + 1] or ""):sub(r["end"].character + 1) }
+    for i = r["end"].line + 2, #lines do after[#after + 1] = lines[i] end
+
+    return table.concat(before, "\n") .. change.text .. table.concat(after, "\n")
+end
+
 -- ── Change debounce ───────────────────────────────────────────────────────────
 local DEBOUNCE_MS = 200
 
----@type table<string, string>
-local pending_text  = {}
+---@type table<string, string>  uri → always-current raw text (updated on every keystroke)
+local doc_text = {}
 ---@type table<string, any>
-local pending_timer = {}
+local parse_timer = {}
 
+-- Debounce parse/decode for a URI. The timer reads from doc_text so multiple
+-- rapid changes collapse into a single parse of the latest text.
 ---@param uri string
-local function flush_change(uri)
-    local text = pending_text[uri]
-    if not text then return end
-    pending_text[uri] = nil
-    update_document(uri, text)
-end
-
----@param uri  string
----@param text string
-local function schedule_change(uri, text)
-    pending_text[uri] = text
-    local t = pending_timer[uri]
+local function schedule_parse(uri)
+    local t = parse_timer[uri]
     if t then
         t:stop()
     else
         t = uv.new_timer()
-        pending_timer[uri] = t
+        parse_timer[uri] = t
     end
     t:start(DEBOUNCE_MS, 0, function()
         t:stop()
         t:close()
-        pending_timer[uri] = nil
-        flush_change(uri)
+        parse_timer[uri] = nil
+        local text = doc_text[uri]
+        if text then update_document(uri, text) end
     end)
 end
 
@@ -198,21 +216,34 @@ local function dispatch(msg)
 
     -- ── Text synchronisation ─────────────────────────────────────────────────
     if method == "textDocument/didOpen" then
-        log("didOpen " .. tostring(params.textDocument.uri))
-        update_document(params.textDocument.uri, params.textDocument.text)
+        local uri  = params.textDocument.uri
+        local text = params.textDocument.text
+        log("didOpen " .. tostring(uri))
+        doc_text[uri] = text
+        update_document(uri, text)
         return
     end
 
     if method == "textDocument/didChange" then
+        local uri     = params.textDocument.uri
+        local text    = doc_text[uri] or ""
         local changes = params.contentChanges
-        if changes and #changes > 0 then
-            schedule_change(params.textDocument.uri, changes[#changes].text)
+        if changes then
+            for _, change in ipairs(changes) do
+                text = apply_incremental(text, change)
+            end
         end
+        doc_text[uri] = text
+        schedule_parse(uri)
         return
     end
 
     if method == "textDocument/didClose" then
-        documents[params.textDocument.uri] = nil
+        local uri = params.textDocument.uri
+        doc_text[uri] = nil
+        local t = parse_timer[uri]
+        if t then t:stop(); t:close(); parse_timer[uri] = nil end
+        documents[uri] = nil
         return
     end
 
