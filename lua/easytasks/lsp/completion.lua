@@ -187,6 +187,13 @@ function M.handler(context, params, callback)
     local row    = params.position.line
     local col    = params.position.character
 
+    -- Reject out-of-bounds positions (can happen when the buffer is being edited
+    -- and the client sends a stale or ahead-of-parse cursor position).
+    local lines = context.lines
+    if not lines or row >= #lines or col > #(lines[row + 1] or "") then
+        callback(nil, empty_result); return
+    end
+
     local tok_id    = cst:token_at(row, col)
     local tok_d     = cst:data(tok_id) --[[@as easytasks.toml.CstData?]]
     local tok_k     = tok_d and tok_d.kind --[[@as easytasks.toml.CstKind?]]
