@@ -18,7 +18,7 @@ local _active_page      = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
 local _subscribed       = false
 local _jump_mode        = false
-local _JUMP_KEYS        = "asdfjkl;ghwertyuiopzxcvbnm"
+local _JUMP_KEYS        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()"
 
 local _info_buf         = nil ---@type integer?
 local _empty_buf        = nil ---@type integer?
