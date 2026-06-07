@@ -7,7 +7,8 @@
       "Bash(echo \"exit:$?\")",
       "WebFetch(domain:luals.github.io)",
       "WebFetch(domain:github.com)",
-      "Bash(nvim --headless --cmd \"lua print\\(vim.env.VIMRUNTIME\\)\" --cmd \"qa\")"
+      "Bash(nvim --headless --cmd \"lua print\\(vim.env.VIMRUNTIME\\)\" --cmd \"qa\")",
+      "Bash(grep -A3 \"---@alias\")"
     ]
   }
 }

@@ -14,6 +14,7 @@
   "diagnostics": {
     "globals": [
       "vim"
-    ]
+    ],
+    "undefined-field": "error"
   }
 }
