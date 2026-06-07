@@ -29,8 +29,13 @@ stdin:open(0)
 stdout:open(1)
 
 -- ── Logger ───────────────────────────────────────────────────────────────────
-local log = vim.lsp.log
-log.info("easytasks-server", "server starting")
+local _log_fd = io.open("/tmp/easytasks-server.log", "a")
+local function log(msg)
+    if not _log_fd then return end
+    _log_fd:write(os.date("[%H:%M:%S] ") .. tostring(msg) .. "\n")
+    _log_fd:flush()
+end
+log("server starting, pid=" .. tostring(vim.uv.os_getpid()))
 
 ---@param obj table
 local function write_msg(obj)
@@ -123,6 +128,7 @@ local function dispatch(msg)
     local method = msg.method
     local id     = msg.id
     local params = msg.params or {}
+    log("dispatch method=" .. tostring(method) .. " id=" .. tostring(id))
 
     -- ── Lifecycle ────────────────────────────────────────────────────────────
     if method == "initialize" then
@@ -131,15 +137,15 @@ local function dispatch(msg)
             local ok, s = pcall(vim.json.decode, opts.schema)
             if ok then
                 schema = s
-                log.info("easytasks-server", "schema loaded")
+                log("schema loaded")
             else
-                log.warn("easytasks-server", "schema decode failed")
+                log("schema decode failed")
             end
         else
-            log.warn("easytasks-server", "no initializationOptions.schema")
+            log("no initializationOptions.schema")
         end
         respond(id, INITIALIZE_RESULT)
-        log.info("easytasks-server", "initialize done")
+        log("initialize done")
         return
     end
 
@@ -157,6 +163,7 @@ local function dispatch(msg)
 
     -- ── Text synchronisation ─────────────────────────────────────────────────
     if method == "textDocument/didOpen" then
+        log("didOpen " .. tostring(params.textDocument.uri))
         update_document(params.textDocument.uri, params.textDocument.text)
         return
     end
@@ -191,6 +198,7 @@ local function dispatch(msg)
 
     local function cb(err, result)
         if err then
+            log("handler error: " .. tostring(err.message or err))
             respond_err(id, err.code or -32603, err.message or "internal error")
         else
             respond(id, result ~= nil and result or vim.NIL)
@@ -198,7 +206,19 @@ local function dispatch(msg)
     end
 
     if method == "textDocument/completion" then
-        completion.handler(ctx, params, cb)
+        local cb_called = false
+        local function completion_cb(err, result)
+            cb_called = true
+            log("completion cb called err=" .. tostring(err) ..
+                " items=" .. tostring(result and result.items and #result.items or "nil"))
+            cb(err, result)
+        end
+        local ok, err = pcall(completion.handler, ctx, params, completion_cb)
+        if not ok then
+            log("completion pcall error: " .. tostring(err))
+        else
+            log("completion handler returned, cb_called=" .. tostring(cb_called))
+        end
         return
     end
 
@@ -240,10 +260,11 @@ local _buf = ""
 
 stdin:read_start(function(err, data)
     if err or not data then
-        -- Client closed the connection.
+        log("stdin closed, stopping")
         uv.stop()
         return
     end
+    log("stdin chunk len=" .. #data)
     _buf = _buf .. data
     while true do
         -- Find the end of the header block.
@@ -260,13 +281,12 @@ stdin:read_start(function(err, data)
             if #_buf < body_end then break end   -- wait for more data
             local body = _buf:sub(body_start, body_end)
             _buf = _buf:sub(body_end + 1)
-            -- Dispatch on the main Neovim scheduler so vim.* APIs are safe.
-            vim.schedule(function()
-                local ok, msg = pcall(vim.json.decode, body)
-                if ok and type(msg) == "table" then
-                    dispatch(msg)
-                end
-            end)
+            local ok, msg = pcall(vim.json.decode, body)
+            if ok and type(msg) == "table" then
+                dispatch(msg)
+            else
+                log("json decode error: " .. tostring(msg))
+            end
         end
     end
 end)

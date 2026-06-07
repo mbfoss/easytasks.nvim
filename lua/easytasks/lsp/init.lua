@@ -86,12 +86,14 @@ function M.start(buf, opts)
     opts = opts or {}
     if attached[buf] then M.stop(buf) end
 
-    local client_id = vim.lsp.start({
+    local config = {
         name         = M.SERVER_NAME,
         cmd          = { vim.v.progpath, "--headless", "--noplugin", "-n", "-u", "NONE", "-l", SERVER_SCRIPT },
         init_options = { schema = vim.json.encode(opts.schema or {}) },
         root_dir     = vim.fn.getcwd(),
-    }, { bufnr = buf })
+    }
+
+    local client_id = vim.lsp.start(config, { bufnr = buf })
 
     if client_id then
         attached[buf] = { client_id = client_id }

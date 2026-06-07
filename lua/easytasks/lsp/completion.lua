@@ -176,7 +176,6 @@ end
 ---@param params   lsp.CompletionParams
 ---@param callback fun(err?: lsp.ResponseError, result?: lsp.CompletionList)
 function M.handler(context, params, callback)
-    callback = vim.schedule_wrap(callback)
     if not (context.schema and context.cst) then
         callback(nil, empty_result); return
     end
