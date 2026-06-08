@@ -1,9 +1,11 @@
 local Signal = require("easytasks.util.Signal")
+local flock  = require("easytasks.util.flock")
 local M = {}
 
-local _cached_root = nil ---@type string|nil
-local _cache       = {} ---@type table
-local _dirty       = false
+local _cached_root = nil   ---@type string|nil
+local _cache       = {}    ---@type table<string, table>
+local _dirty       = {}    ---@type table<string, boolean>
+local _lock_held   = false ---@type boolean
 
 --- Emitted (with the root path) just before the cwd leaves a project root.
 --- Also fires on VimLeavePre so consumers can persist state on exit.
@@ -59,28 +61,62 @@ end
 
 ---@param root string
 ---@return string
-local function storage_path(root)
+local function storage_dir(root)
     local cfg = require("easytasks.config")
-    return vim.fs.normalize(root .. "/" .. cfg.current.storage_filename)
+    return vim.fs.normalize(root .. "/" .. cfg.current.storage_dir)
+end
+
+---@param root string
+---@param namespace string
+---@return string
+local function namespace_path(root, namespace)
+    return vim.fs.normalize(storage_dir(root) .. "/" .. namespace .. ".json")
+end
+
+---@param root string
+---@return string
+local function lock_path(root)
+    return vim.fs.normalize(storage_dir(root) .. "/.lock")
 end
 
 local function _flush()
-    if not _dirty or not _cached_root then return end
-    write_json(storage_path(_cached_root), _cache)
-    _dirty = false
+    if not _cached_root or not _lock_held then return end
+    local has_dirty = false
+    for _, v in pairs(_dirty) do
+        if v then has_dirty = true; break end
+    end
+    if not has_dirty then return end
+    for ns, dirty in pairs(_dirty) do
+        if dirty then
+            write_json(namespace_path(_cached_root, ns), _cache[ns] or {})
+            _dirty[ns] = false
+        end
+    end
+end
+
+local function _release()
+    if _cached_root and _lock_held then
+        flock.unlock(lock_path(_cached_root))
+        _lock_held = false
+    end
 end
 
 ---@param root string
 local function _warm(root)
+    local dir = storage_dir(root)
+    vim.fn.mkdir(dir, "p")
+    local ok = flock.lock(lock_path(root))
     _cached_root = root
-    _cache = read_json(storage_path(root))
-    _dirty = false
+    _cache = {}
+    _dirty = {}
+    _lock_held = ok
 end
 
 ---@param root string
 local function _ensure(root)
     if root ~= _cached_root then
         _flush()
+        _release()
         _warm(root)
     end
 end
@@ -99,6 +135,7 @@ function M.init()
             local root = M.find_root()
             if root then M.on_project_leave_pre:emit(root) end
             _flush()
+            _release()
         end,
     })
     vim.api.nvim_create_autocmd("DirChangedPre", {
@@ -106,13 +143,15 @@ function M.init()
             local root = M.find_root()
             if root then M.on_project_leave_pre:emit(root) end
             _flush()
+            _release()
         end,
     })
     vim.api.nvim_create_autocmd("DirChanged", {
         callback = function()
             _cached_root = nil
             _cache = {}
-            _dirty = false
+            _dirty = {}
+            _lock_held = false
             local root = M.find_root()
             if root then
                 M.on_project_enter:emit(root)
@@ -133,8 +172,13 @@ function M.store_data(namespace, data)
         return false, err
     end
     _ensure(root)
+    if not _lock_held then
+        local msg = "easytasks: storage folder is in use by another Neovim instance"
+        vim.notify(msg, vim.log.levels.WARN)
+        return false, msg
+    end
     _cache[namespace] = data
-    _dirty = true
+    _dirty[namespace] = true
     return true
 end
 
@@ -147,6 +191,12 @@ function M.load_data(namespace)
         return nil, err
     end
     _ensure(root)
+    if not _lock_held then
+        return nil, "storage folder is in use by another Neovim instance"
+    end
+    if _cache[namespace] == nil then
+        _cache[namespace] = read_json(namespace_path(root, namespace))
+    end
     return _cache[namespace]
 end
 
