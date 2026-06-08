@@ -23,22 +23,26 @@ local fmt         = require("easytasks.lsp.format")
 
 -- ── Transport ─────────────────────────────────────────────────────────────────
 local uv          = vim.uv
-local stdin       = uv.new_pipe(false)
-local stdout      = uv.new_pipe(false)
+local stdin       = assert(uv.new_pipe(false))
+local stdout      = assert(uv.new_pipe(false))
 stdin:open(0)
 stdout:open(1)
-
--- ── Logger ───────────────────────────────────────────────────────────────────
-local function log(msg)
-    io.stderr:write(os.date("[%H:%M:%S] ") .. tostring(msg) .. "\n")
-    io.stderr:flush()
-end
-log("server starting, pid=" .. tostring(vim.uv.os_getpid()))
 
 ---@param obj table
 local function write_msg(obj)
     local json = vim.json.encode(obj)
     stdout:write(("Content-Length: %d\r\n\r\n%s"):format(#json, json))
+end
+
+-- ── Logger ───────────────────────────────────────────────────────────────────
+-- Sends window/logMessage; filtered by vim.lsp.log.set_level() on the client.
+local MSG = { Error = 1, Warning = 2, Info = 3, Log = 4 }
+
+---@param msg  string
+---@param type? integer  MSG.* constant (default: MSG.Log)
+local function log(msg, type)
+    write_msg({ jsonrpc = "2.0", method = "window/logMessage",
+                params = { type = type or MSG.Log, message = msg } })
 end
 
 -- ── Server state ─────────────────────────────────────────────────────────────
@@ -215,10 +219,10 @@ local function dispatch(msg)
                 schema = s
                 log("schema loaded")
             else
-                log("schema decode failed")
+                log("schema decode failed", MSG.Error)
             end
         else
-            log("no initializationOptions.schema")
+            log("no initializationOptions.schema", MSG.Warning)
         end
         if opts and opts.template_types then
             template_type_names = opts.template_types
@@ -291,7 +295,7 @@ local function dispatch(msg)
 
     local function cb(err, result)
         if err then
-            log("handler error: " .. tostring(err.message or err))
+            log("handler error: " .. tostring(err.message or err), MSG.Error)
             respond_err(id, err.code or -32603, err.message or "internal error")
         else
             respond(id, result ~= nil and result or vim.NIL)
@@ -310,7 +314,7 @@ local function dispatch(msg)
         end
         local ok, err = pcall(completion.handler, ctx, params, completion_cb)
         if not ok then
-            log("completion pcall error: " .. tostring(err))
+            log("completion pcall error: " .. tostring(err), MSG.Error)
         else
             log("completion handler returned, cb_called=" .. tostring(cb_called))
         end
@@ -363,7 +367,6 @@ stdin:read_start(function(err, data)
         uv.stop()
         return
     end
-    log("stdin chunk len=" .. #data)
     _buf = _buf .. data
     while true do
         -- Find the end of the header block.
@@ -384,7 +387,7 @@ stdin:read_start(function(err, data)
             if ok and type(msg) == "table" then
                 dispatch(msg)
             else
-                log("json decode error: " .. tostring(msg))
+                log("json decode error: " .. tostring(msg), MSG.Error)
             end
         end
     end

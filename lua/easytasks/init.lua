@@ -203,7 +203,7 @@ function M.enable()
 
 
     require("easytasks.util.usercmd").register_user_cmd("Easytasks",
-        function(cmd, args, cmd_opts)
+        function(_, args, _)
             local action = args[1]
             table.remove(args, 1)
             if action == nil or action == "" or action == "run" then
