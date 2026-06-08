@@ -1,8 +1,8 @@
 local ordered        = require("easytasks.util.table_util").ordered
-local term           = require("easytasks.types.process.term")
-local spawn          = require("easytasks.types.process.spawn").spawn
+local term           = require("easytasks.util.term")
 local _notify        = require("easytasks.ui")
 local qfmatchers     = require("easytasks.types.process.qfmatchers")
+local ui_util        = require("easytasks.util.ui_util")
 
 ---@type table<string, easytasks.QfMatcher>
 local _user_matchers = {}
@@ -65,8 +65,6 @@ local M = {
             or (type(task.command) == "table" and task.command[1])
             or nil
         local label = cmd_exe and vim.fn.fnamemodify(cmd_exe, ":t") or nil
-        local bufnr = term.open()
-        ctx.add_bufnr(bufnr, label)
 
         local on_data
         if qf_parse then
@@ -85,8 +83,18 @@ local M = {
             end
         end
 
-        local handle = spawn(task.command, { cwd = task.cwd, env = task.env, on_stdout = on_data, on_stderr = on_data },
-            bufnr)
+        local handle = term.spawn(task.command,
+            { cwd = task.cwd, env = task.env, on_stdout = on_data, on_stderr = on_data })
+
+        if not handle then
+            vim.schedule(function()
+                ctx.report("job start failed: " .. vim.inspect(task.command))
+                on_done(false)
+            end)
+            return function()
+            end
+        end
+        ctx.add_bufnr(handle.bufnr, label)
         handle.on_exit(function(code) on_done(code == 0) end)
         return function() handle.stop() end
     end,

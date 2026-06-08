@@ -1,4 +1,4 @@
-local utils             = require('easytasks.ui.utils')
+local utils             = require('easytasks.util.ui_util')
 local exec              = require('easytasks.runner.exec')
 
 ---@class easytasks.ui.status_panel

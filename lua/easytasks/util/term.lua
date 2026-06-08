@@ -1,10 +1,9 @@
 local M = {}
 
-local ui = require("easytasks.ui")
-
-local _spawn_win
+local ui = require("easytasks.util.ui_util")
 
 ---@class easytasks.SpawnHandle
+---@field bufnr number
 ---@field stop    fun()                        stop the spawned command
 ---@field on_exit fun(cb: fun(code: integer))  register a callback invoked when the process exits
 
@@ -14,30 +13,31 @@ local _spawn_win
 --- termopen handles all output rendering including ANSI colours.
 ---@param cmd  string|string[]
 ---@param opts {cwd?: string, env?: table<string,string>, on_stdout?: fun(id: integer, data: string[], name: string), on_stderr?: fun(id: integer, data: string[], name: string)}
----@param bufnr integer  terminal buffer (must be visible in a window)
----@return easytasks.SpawnHandle
+---@param bufnr? integer buffer to own the ternimal (auto created if null)
+---@return easytasks.SpawnHandle?
 function M.spawn(cmd, opts, bufnr)
     -- A terminal buffer must be in a window for jobstart {term=true}.
-    if not _spawn_win then
-        _spawn_win = ui.create_window(bufnr, false, {
-            relative  = "editor",
-            row       = 0,
-            col       = 0,
-            width     = vim.o.columns,
-            height    = vim.o.lines,
-            style     = "minimal",
-            hide      = true,
-            focusable = false,
-            zindex    = 1,
-        }, function()
-            _spawn_win = nil
-        end)
-    else
-        vim.api.nvim_win_set_buf(_spawn_win, bufnr)
+    local own_buf
+    if not bufnr then
+        own_buf = true
+        bufnr = vim.api.nvim_create_buf(true, true)
+        vim.bo[bufnr].swapfile = false
     end
 
+    local spawn_win = ui.create_window(bufnr, false, {
+        relative  = "editor",
+        row       = 0,
+        col       = 0,
+        width     = vim.o.columns,
+        height    = vim.o.lines,
+        style     = "minimal",
+        hide      = true,
+        focusable = false,
+        zindex    = 1,
+    }, function() end)
+
     local saved_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_set_current_win(_spawn_win)
+    vim.api.nvim_set_current_win(spawn_win)
 
     local exit_cb
     local job_id
@@ -56,9 +56,13 @@ function M.spawn(cmd, opts, bufnr)
     })
 
     vim.api.nvim_set_current_win(saved_win)
+    vim.api.nvim_win_close(spawn_win, true)
 
     if job_id <= 0 then
-        return { stop = function() end, on_exit = function(cb) cb(-1) end }
+        if own_buf then
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end
+        return nil
     end
 
     vim.api.nvim_create_autocmd("TermClose", {
@@ -71,7 +75,8 @@ function M.spawn(cmd, opts, bufnr)
         end,
     })
 
-    return {
+    return { ---@type easytasks.SpawnHandle
+        bufnr = bufnr,
         stop = function()
             if job_id > 0 then
                 vim.fn.jobstop(job_id)

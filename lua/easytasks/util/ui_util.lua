@@ -1,4 +1,69 @@
 local M = {}
+
+---@param winid number?
+function M.get_window_text_width(winid)
+    if not winid or winid == 0 then winid = vim.api.nvim_get_current_win() end
+    local infos = vim.fn.getwininfo(winid)
+    if not infos or #infos == 0 then
+        return vim.o.columns - 3 -- fallback assumption
+    end
+    local info = infos[1]
+    return info.width - info.textoff
+end
+
+---@param bufnr integer
+---@return boolean
+function M.is_regular_buffer(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        return false
+    end
+    if vim.bo[bufnr].buftype ~= '' then
+        return false
+    end
+    return true
+end
+
+---@param msg string
+---@param default_yes boolean
+---@param callback fun(confirmed: boolean|nil)
+function M.confirm_action(msg, default_yes, callback)
+    local choices = "&Yes\n&No"
+    local default = default_yes and 1 or 2
+
+    local ok, choice = pcall(vim.fn.confirm, msg, choices, default)
+    if not ok then
+        callback(nil)
+        return
+    end
+    if choice == 1 then
+        callback(true)
+    elseif choice == 2 then
+        callback(false)
+    else
+        callback(nil)
+    end
+end
+
+---@param c1 number
+---@param c2 number
+---@param alpha number
+---@return string
+function M.blend_colors(c1, c2, alpha)
+    local r1 = bit.rshift(c1, 16)
+    local g1 = bit.band(bit.rshift(c1, 8), 0xFF)
+    local b1 = bit.band(c1, 0xFF)
+
+    local r2 = bit.rshift(c2, 16)
+    local g2 = bit.band(bit.rshift(c2, 8), 0xFF)
+    local b2 = bit.band(c2, 0xFF)
+
+    local r = math.floor(r1 * (1 - alpha) + r2 * alpha)
+    local g = math.floor(g1 * (1 - alpha) + g2 * alpha)
+    local b = math.floor(b1 * (1 - alpha) + b2 * alpha)
+
+    return string.format("#%02x%02x%02x", r, g, b)
+end
+
 --- @param buffer integer Buffer to display, or 0 for current buffer
 --- @param enter boolean Enter the window (make it the current window)
 --- @param config vim.api.keyset.win_config Map defining the window configuration
