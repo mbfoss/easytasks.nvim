@@ -31,10 +31,9 @@ M.base_properties = {
         type        = { "array", "null" },
         description = "List of task names that must complete successfully before this task runs.\nThis enforces a completion-based dependency order.\n",
         items       = {
-            type                = "string",
-            minLength           = 1,
-            ["x-enumfunc"] = "easytasks.tasks.names",
-            description         = "Name of a task this task depends on",
+            type        = "string",
+            minLength   = 1,
+            description = "Name of a task this task depends on",
         },
     },
     depends_order = {

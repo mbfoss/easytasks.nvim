@@ -3,7 +3,6 @@ local M = {}
 local s_util     = require("easytasks.toml.schema_util")
 local schema_nav = require("easytasks.toml.schema_nav")
 local Cst        = require("easytasks.toml.Cst")
-local enumfuncs  = require("easytasks.lsp.enumfuncs")
 
 local CK = vim.lsp.protocol.CompletionItemKind
 local K  = Cst.Kind
@@ -11,12 +10,6 @@ local IF = vim.lsp.protocol.InsertTextFormat
 
 local empty_result = { isIncomplete = false, items = {} }
 local function result(items) return { isIncomplete = false, items = items } end
-
----@param key string
----@param fn  fun(data: any, ctx: easytasks.EnumFuncContext): (string|{label:string,description:string?})[]
-function M.register_enumfunc(key, fn)
-    enumfuncs.register(key, fn)
-end
 
 -- ── Item builders ─────────────────────────────────────────────────────────────
 
@@ -71,28 +64,6 @@ local function value_items(schema, open_quote, ctx)
             }
         end
         return items
-    end
-    local enumfunc_key = schema["x-enumfunc"]
-    if enumfunc_key then
-        local fn = enumfuncs.resolve(enumfunc_key)
-        if fn then
-            local ok, raw = pcall(fn, ctx.data, ctx)
-            if ok and type(raw) == "table" then
-                local q     = open_quote or '"'
-                local items = {}
-                for _, v in ipairs(raw) do
-                    local label  = type(v) == "table" and tostring(v.label) or tostring(v)
-                    local insert = open_quote and (label .. q) or (q .. label .. q)
-                    items[#items + 1] = {
-                        label         = label,
-                        kind          = CK.Value,
-                        documentation = type(v) == "table" and v.description or nil,
-                        insertText    = insert,
-                    }
-                end
-                return items
-            end
-        end
     end
     local t    = schema.type
     local desc = schema.description

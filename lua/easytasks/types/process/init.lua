@@ -2,19 +2,10 @@ local ordered        = require("easytasks.util.table_util").ordered
 local term           = require("easytasks.types.process.term")
 local spawn          = require("easytasks.types.process.spawn").spawn
 local _notify        = require("easytasks.ui")
-local enumfuncs      = require("easytasks.lsp.enumfuncs")
 local qfmatchers     = require("easytasks.types.process.qfmatchers")
 
 ---@type table<string, easytasks.QfMatcher>
 local _user_matchers = {}
-
-enumfuncs.register("easytasks.process.qfmatchers", function()
-    local names = {}
-    for k in pairs(qfmatchers) do names[#names + 1] = k end
-    for k in pairs(_user_matchers) do names[#names + 1] = k end
-    table.sort(names)
-    return names
-end)
 
 ---@param s string
 ---@return string
@@ -128,9 +119,15 @@ local M = {
                 },
             },
             quickfix_matcher = {
-                type           = { "string", "null" },
-                description    = "Name of a quickfix matcher used to parse command output into quickfix entries",
-                ["x-enumfunc"] = "easytasks.process.qfmatchers",
+                type        = { "string", "null" },
+                description = "Name of a quickfix matcher used to parse command output into quickfix entries",
+                enum        = function()
+                    local names = {}
+                    for k in pairs(qfmatchers) do names[#names + 1] = k end
+                    for k in pairs(_user_matchers) do names[#names + 1] = k end
+                    table.sort(names)
+                    return names
+                end,
             },
         },
     },

@@ -74,6 +74,44 @@ vim.lsp.commands["easytasks/insertTemplate"] = function(command)
     end
 end
 
+-- ── Schema pre-processing ─────────────────────────────────────────────────────
+
+-- Walk a schema node and evaluate any Lua functions stored in `enum` or
+-- `x-enumDescriptions`, replacing them with their concrete values before JSON
+-- encoding. Functions that return empty or error are set to nil so they don't
+-- survive into the server's schema.
+---@param node table
+local function resolve_schema_functions(node)
+    if type(node) ~= "table" then return end
+
+    if type(node.enum) == "function" then
+        local ok, raw = pcall(node.enum --[[@as function]])
+        if ok and type(raw) == "table" and #raw > 0 then
+            local labels, descs, has_desc = {}, {}, false
+            for _, v in ipairs(raw) do
+                if type(v) == "table" then
+                    labels[#labels + 1] = tostring(v.label)
+                    descs[#descs + 1]   = v.description
+                    if v.description then has_desc = true end
+                else
+                    labels[#labels + 1] = tostring(v)
+                end
+            end
+            node.enum = labels
+            if has_desc then node["x-enumDescriptions"] = descs end
+        else
+            node.enum = nil
+        end
+    end
+
+    if type(node["x-enumDescriptions"]) == "function" then
+        local ok, raw = pcall(node["x-enumDescriptions"] --[[@as function]])
+        node["x-enumDescriptions"] = (ok and type(raw) == "table") and raw or nil
+    end
+
+    for _, v in pairs(node) do resolve_schema_functions(v) end
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 ---@class easytasks.LspStartOpts
@@ -92,10 +130,13 @@ function M.start(buf, opts)
         if def.templates then template_types[#template_types + 1] = name end
     end
 
+    local schema = vim.deepcopy(opts.schema or {})
+    resolve_schema_functions(schema)
+
     local config = {
         name         = M.SERVER_NAME,
         cmd          = { vim.v.progpath, "--headless", "--noplugin", "-n", "-u", "NONE", "-l", SERVER_SCRIPT },
-        init_options = { schema = vim.json.encode(opts.schema or {}), template_types = template_types },
+        init_options = { schema = vim.json.encode(schema), template_types = template_types },
         root_dir     = vim.fn.getcwd(),
     }
 

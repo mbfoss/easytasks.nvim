@@ -37,11 +37,7 @@ buffer text
 
 ### LSP layer (`lsp/`)
 
-`lsp/init.lua` owns per-buffer state (`attached[bufnr] = { client_id, context, autocmd_ids }`). It passes a loopback dispatcher table implementing `{ request, notify, is_closing, terminate }` to `vim.lsp.start()` — no subprocess. On every edit it re-parses and re-decodes synchronously, then debounces diagnostics by `M.debounce_ms`.
-
-Each LSP feature handler (`lsp/*.lua`) receives `(context, params, callback)` where `context` is a `BufferContext` (`lsp/BufferContext.lua`) holding `{ bufnr, cst, data, decode_tree, schema, parse_errors, decode_errors }`.
-
-`lsp/code_action.lua` exposes debug code actions that insert CST / DecodeTree / decoded-data / error dumps as comments into the buffer — useful when debugging the parser or decoder.
+TODO
 
 ### Completion handler logic (`lsp/completion.lua`)
 
