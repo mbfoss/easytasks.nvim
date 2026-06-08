@@ -18,8 +18,9 @@ local function to_lsp_range(range)
   }
 end
 
+---@param bufnr integer
 ---@return lsp.Range
-local function fallback_range(range)
+local function fallback_range(range, bufnr)
   if range then
     return to_lsp_range(range)
   end
@@ -29,16 +30,17 @@ local function fallback_range(range)
   }
 end
 
+---@param bufnr integer
 ---@param context easytasks.LspBufferContext
 ---@return lsp.Diagnostic[]
-function M.build(context)
+function M.build(bufnr, context)
   local diagnostics = {}
   local accumulated_errors = {}
 
   for _, err in ipairs(context.parse_errors or {}) do
     table.insert(accumulated_errors, err)
     diagnostics[#diagnostics + 1] = {
-      range = fallback_range(err.range),
+      range = fallback_range(err.range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
       source = SERVER_NAME,
       message = err.message,
@@ -53,7 +55,7 @@ function M.build(context)
   for _, err in ipairs(context.decode_errors or {}) do
     table.insert(accumulated_errors, err)
     diagnostics[#diagnostics + 1] = {
-      range = fallback_range(err.range),
+      range = fallback_range(err.range, bufnr),
       severity = vim.lsp.protocol.DiagnosticSeverity.Error,
       source = SERVER_NAME,
       message = err.message,
@@ -76,7 +78,7 @@ function M.build(context)
         local range = (context.decode_tree and err.node_id)
             and context.decode_tree:range_of_id(err.node_id) or nil
         diagnostics[#diagnostics + 1] = {
-          range = fallback_range(range),
+          range = fallback_range(range, bufnr),
           severity = vim.lsp.protocol.DiagnosticSeverity.Error,
           source = SERVER_NAME,
           message = err.err_msg,
@@ -132,7 +134,7 @@ function M.update(bufnr, context, client_id)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  local diagnostics = M.build(context)
+  local diagnostics = M.build(bufnr, context)
   M.publish(bufnr, diagnostics, client_id)
 end
 
