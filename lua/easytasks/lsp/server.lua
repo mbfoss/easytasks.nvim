@@ -104,13 +104,13 @@ local function parse_document(uri, text)
         ctx.decode_errors = decoded.errors
         ctx.decode_tree   = decoded.decode_tree
     end
-    documents[uri] = ctx
+    _documents[uri] = ctx
     return ctx
 end
 
 ---@param uri string
 local function publish_diagnostics(uri)
-    local ctx = documents[uri]
+    local ctx = _documents[uri]
     if not ctx then return end
     local diags = diagnostics.build(nil, ctx)
     write_msg({
@@ -122,16 +122,16 @@ end
 
 ---@param uri string
 local function schedule_diagnostics(uri)
-    local t = diag_timer[uri]
+    local t = _diag_timer[uri]
     if t then
         t:stop()
     else
         t = assert(_uv.new_timer())
-        diag_timer[uri] = t
+        _diag_timer[uri] = t
     end
-    t:start(DIAG_DEBOUNCE_MS, 0, function()
-        t:stop(); t:close(); diag_timer[uri] = nil
-        local text = doc_text[uri]
+    t:start(_DIAG_DEBOUNCE_MS, 0, function()
+        t:stop(); t:close(); _diag_timer[uri] = nil
+        local text = _doc_text[uri]
         if text then
             parse_document(uri, text)
             publish_diagnostics(uri)
@@ -141,10 +141,10 @@ end
 
 ---@param uri string
 local function ensure_parsed(uri)
-    local t = diag_timer[uri]
+    local t = _diag_timer[uri]
     if not t then return end
-    t:stop(); t:close(); diag_timer[uri] = nil
-    local text = doc_text[uri]
+    t:stop(); t:close(); _diag_timer[uri] = nil
+    local text = _doc_text[uri]
     if text then
         parse_document(uri, text)
         publish_diagnostics(uri)
@@ -191,7 +191,7 @@ end
 ---@param uri string
 ---@return tomltools.LspBufferContext?
 local function doc_ctx(uri)
-    return documents[uri]
+    return _documents[uri]
 end
 
 ---@param msg table
@@ -215,7 +215,7 @@ local function dispatch(msg)
         else
             _log("no initializationOptions.schema", _MSG.Warning)
         end
-        respond(id, INITIALIZE_RESULT)
+        respond(id, _INITIALIZE_RESULT)
         _log("initialize done")
         return
     end
@@ -237,7 +237,7 @@ local function dispatch(msg)
         local uri  = params.textDocument.uri
         local text = params.textDocument.text
         _log("didOpen " .. tostring(uri))
-        doc_text[uri] = text
+        _doc_text[uri] = text
         parse_document(uri, text)
         publish_diagnostics(uri)
         return
@@ -245,24 +245,24 @@ local function dispatch(msg)
 
     if method == "textDocument/didChange" then
         local uri     = params.textDocument.uri
-        local text    = doc_text[uri] or ""
+        local text    = _doc_text[uri] or ""
         local changes = params.contentChanges
         if changes then
             for _, change in ipairs(changes) do
                 text = apply_incremental(text, change)
             end
         end
-        doc_text[uri] = text
+        _doc_text[uri] = text
         schedule_diagnostics(uri)
         return
     end
 
     if method == "textDocument/didClose" then
         local uri = params.textDocument.uri
-        local t   = diag_timer[uri]
-        if t then t:stop(); t:close(); diag_timer[uri] = nil end
-        doc_text[uri]  = nil
-        documents[uri] = nil
+        local t   = _diag_timer[uri]
+        if t then t:stop(); t:close(); _diag_timer[uri] = nil end
+        _doc_text[uri]  = nil
+        _documents[uri] = nil
         return
     end
 
