@@ -1,2 +1,2 @@
 
-Quality of life plugin for neovim.
+WORK IN PROGRESS
