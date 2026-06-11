@@ -10,9 +10,33 @@ local ui = require("easytasks.util.ui_util")
 ---@class easytasks.SpawnOpts
 ---@field cwd?       string
 ---@field env?       table<string,string>
----@field on_stdout? fun(id: integer, data: string[], name: string)
----@field on_stderr? fun(id: integer, data: string[], name: string)
----@field on_exit?   fun(code: integer)
+---@field on_stdout?      fun(id: integer, data: string[], name: string)
+---@field on_stderr?      fun(id: integer, data: string[], name: string)
+---@field on_exit?        fun(code: integer)
+---@field line_buffered?  boolean  only emit complete lines to on_stdout/on_stderr
+
+---Neovim splits on newlines but the last element of each on_stdout/on_stderr
+---call is always a partial fragment joined to the first element of the next call.
+---This wraps the callback so it only fires with complete lines.
+---@param cb fun(id: integer, data: string[], name: string)
+---@return fun(id: integer, data: string[], name: string)
+local function _wrap_line_buffered(cb)
+    local partial = ""
+    return function(id, data, name)
+        if #data == 0 then return end
+        local first = partial .. data[1]
+        if #data == 1 then
+            partial = first
+            return
+        end
+        local lines = { first }
+        for i = 2, #data - 1 do
+            lines[#lines + 1] = data[i]
+        end
+        partial = data[#data]
+        cb(id, lines, name)
+    end
+end
 
 --- Spawn a command in a terminal buffer.
 --- Returns immediately with a handle, or nil if jobstart failed.
@@ -50,8 +74,8 @@ function M.spawn(cmd, opts, bufnr)
         term      = true,
         cwd       = opts.cwd,
         env       = opts.env,
-        on_stdout = opts.on_stdout,
-        on_stderr = opts.on_stderr,
+        on_stdout = opts.on_stdout and (opts.line_buffered and _wrap_line_buffered(opts.on_stdout) or opts.on_stdout),
+        on_stderr = opts.on_stderr and (opts.line_buffered and _wrap_line_buffered(opts.on_stderr) or opts.on_stderr),
         on_exit   = function(_, code)
             job_id = -1
             vim.schedule(function()
