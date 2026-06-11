@@ -71,6 +71,21 @@ local function _tasks_insertion_ctx(cst, dt, row, col)
         end
     end
 
+    -- Cursor inside a [tasks.*] sub-table section (e.g. [tasks.request_args])
+    -- that belongs to a preceding [[tasks]] entry — treat as between AoT entries.
+    if not cst:ancestor_of_kind(tok_id, _K.KeyValuePair) then
+        local tbl_id = cst:ancestor_of_kind(tok_id, _K.TableSection)
+        if tbl_id then
+            local hdr_id = cst:first_child_of_kind(tbl_id, _K.TableHeader)
+            if hdr_id then
+                local keys = cst:get_keys(hdr_id)
+                if #keys >= 2 and keys[1].value == "tasks" then
+                    return "aot", nil
+                end
+            end
+        end
+    end
+
     local trivial = {
         [_K.Whitespace] = true, [_K.Newline] = true,
         [_K.Comment]    = true, [_K.Document] = true,
