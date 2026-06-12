@@ -38,37 +38,14 @@ local function _wrap_line_buffered(cb)
     end
 end
 
+
 --- Spawn a command in a terminal buffer.
 --- Returns immediately with a handle, or nil if jobstart failed.
 --- termopen handles all output rendering including ANSI colours.
 ---@param cmd   string|string[]
 ---@param opts  easytasks.SpawnOpts
----@param bufnr? integer buffer to own the terminal (auto created if nil)
----@return easytasks.SpawnHandle?,string?
-function M.spawn(cmd, opts, bufnr)
-    -- A terminal buffer must be in a window for jobstart {term=true}.
-    local own_buf
-    if not bufnr then
-        own_buf = true
-        bufnr = vim.api.nvim_create_buf(true, true)
-        vim.bo[bufnr].swapfile = false
-    end
-
-    local spawn_win = ui.create_window(bufnr, false, {
-        relative  = "editor",
-        row       = 0,
-        col       = 0,
-        width     = vim.o.columns,
-        height    = vim.o.lines,
-        style     = "minimal",
-        hide      = true,
-        focusable = false,
-        zindex    = 1,
-    }, function() end)
-
-    local saved_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_set_current_win(spawn_win)
-
+---@return number?,string?
+local function _start_job(cmd, opts)
     local job_id
     local start_ok, job_id_or_err = pcall(function()
         return vim.fn.jobstart(cmd, {
@@ -86,16 +63,68 @@ function M.spawn(cmd, opts, bufnr)
         })
     end)
 
+    if not start_ok then
+        return nil, tostring(job_id_or_err)
+    end
+
+    job_id = job_id_or_err
+    if job_id < 0 then
+        local program = type(cmd) == "table" and tostring(cmd[0]) or tostring(cmd)
+        return nil, (start_ok and "Invalid command:" .. program)
+    end
+
+    if job_id == 0 then
+        return nil, (start_ok and "Invalid arguments")
+    end
+end
+
+--- Spawn a command in a terminal buffer.
+--- Returns immediately with a handle, or nil if jobstart failed.
+--- termopen handles all output rendering including ANSI colours.
+---@param cmd   string|string[]
+---@param opts  easytasks.SpawnOpts
+---@param bufnr? integer buffer to own the terminal (auto created if nil)
+---@return easytasks.SpawnHandle?,string?
+function M.spawn(cmd, opts, bufnr)
+    -- A terminal buffer must be in a window for jobstart {term=true}.
+    local own_buf
+    if not bufnr then
+        own_buf = true
+        bufnr = vim.api.nvim_create_buf(false, true)
+    end
+
+    local spawn_win = ui.create_window(bufnr, false, {
+        relative  = "editor",
+        row       = 0,
+        col       = 0,
+        width     = vim.o.columns,
+        height    = vim.o.lines,
+        style     = "minimal",
+        hide      = true,
+        focusable = false,
+        zindex    = 1,
+    }, function() end)
+
+    local saved_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(spawn_win)
+
+    local job_id, job_err = _start_job(cmd, opts)
+
     vim.api.nvim_set_current_win(saved_win)
     vim.api.nvim_win_close(spawn_win, true)
 
-    if not start_ok or type(job_id) ~= "number" then
+    if not job_id then
         if own_buf then
             vim.api.nvim_buf_delete(bufnr, { force = true })
+            own_buf = nil
         end
-        return nil, (start_ok and "Invalid command or arguments" or tostring(job_id_or_err))
+        return nil, job_err
     end
-    job_id = job_id_or_err
+
+    if own_buf then
+        vim.bo[bufnr].buflisted = true
+    end
+
     vim.api.nvim_create_autocmd("TermClose", {
         buffer   = bufnr,
         once     = true,
@@ -110,9 +139,7 @@ function M.spawn(cmd, opts, bufnr)
         bufnr = bufnr,
         pid   = vim.fn.jobpid(job_id),
         stop  = function()
-            if job_id > 0 then
-                vim.fn.jobstop(job_id)
-            end
+            vim.fn.jobstop(job_id)
         end,
     }
 end
