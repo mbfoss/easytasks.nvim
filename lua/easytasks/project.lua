@@ -1,21 +1,21 @@
-local Signal = require("easytasks.util.Signal")
-local flock  = require("easytasks.util.flock")
-local M = {}
+local Signal           = require("easytasks.util.Signal")
+local flock            = require("easytasks.util.flock")
+local M                = {}
 
-local _cached_root = nil    ---@type string|nil
-local _cache       = {}     ---@type table<string, table>
-local _dirty       = {}     ---@type table<string, boolean>
-local _lock_held   = false  ---@type boolean
+local _cached_root     = nil ---@type string|nil
+local _cache           = {} ---@type table<string, table>
+local _dirty           = {} ---@type table<string, boolean>
+local _lock_held       = false ---@type boolean
 
 --- Emitted (with the root path) just before the cwd leaves a project root.
 --- Also fires on VimLeavePre so consumers can persist state on exit.
 M.on_project_leave_pre = Signal.new() ---@type easytasks.util.Signal<fun(root: string)>
 
 --- Emitted (with the root path) after the cwd enters a project root.
-M.on_project_enter = Signal.new() ---@type easytasks.util.Signal<fun(root: string)>
+M.on_project_enter     = Signal.new() ---@type easytasks.util.Signal<fun(root: string)>
 
 --- Emitted after a cwd change lands outside any project root.
-M.on_project_leave  = Signal.new() ---@type easytasks.util.Signal<fun()>
+M.on_project_leave     = Signal.new() ---@type easytasks.util.Signal<fun()>
 
 ---@return boolean
 function M.in_project()
@@ -29,7 +29,7 @@ end
 function M.find_root()
     local cfg = require("easytasks.config")
     local cwd = vim.fn.getcwd() --[[@as string]]
-    local tasks_path = vim.fs.normalize(cwd .. "/" .. cfg.current.tasks_filename)
+    local tasks_path = vim.fs.normalize(vim.fs.joinpath(cwd, cfg.current.tasks_filename))
     ---@diagnostic disable-next-line: undefined-field
     if not vim.uv.fs_stat(tasks_path) then
         return nil, ("tasks file (%s) not found — not in a project root"):format(cfg.current.tasks_filename)
@@ -63,27 +63,29 @@ end
 ---@return string
 local function _storage_dir(root)
     local cfg = require("easytasks.config")
-    return vim.fs.normalize(root .. "/" .. cfg.current.storage_dir)
+    return vim.fs.normalize(vim.fs.joinpath(root, cfg.current.storage_dir))
 end
 
 ---@param root string
 ---@param namespace string
 ---@return string
 local function _namespace_path(root, namespace)
-    return vim.fs.normalize(_storage_dir(root) .. "/" .. namespace .. ".json")
+    return vim.fs.normalize(vim.fs.joinpath(_storage_dir(root), namespace .. ".json"))
 end
 
 ---@param root string
 ---@return string
 local function _lock_path(root)
-    return vim.fs.normalize(_storage_dir(root) .. "/.lock")
+    return vim.fs.normalize(vim.fs.joinpath(_storage_dir(root), "lock"))
 end
 
 local function _flush()
     if not _cached_root or not _lock_held then return end
     local has_dirty = false
     for _, v in pairs(_dirty) do
-        if v then has_dirty = true; break end
+        if v then
+            has_dirty = true; break
+        end
     end
     if not has_dirty then return end
     for ns, dirty in pairs(_dirty) do
