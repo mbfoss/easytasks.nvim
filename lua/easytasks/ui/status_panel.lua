@@ -22,11 +22,17 @@ local _autoscroll_bufs  = {} ---@type table<integer, true>  bufnrs with on_lines
 local _jump_targets     = {} ---@type {run_id:string, page:integer}[]
 local _JUMP_KEYS        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()"
 
-local _info_buf         = nil ---@type integer?
+local _log_buf         = nil ---@type integer?
 local _empty_buf        = nil ---@type integer?
 
+---@class easytasks.LogSub
+---@field cancel_report fun()
+---@field run_id        string
+---@field report_count   integer
+
+local _log_sub         = nil ---@type easytasks.LogSub?
+
 local _augroup          = vim.api.nvim_create_augroup("EasyTasksStatusPanel", { clear = true })
-local _info_hl_ns       = vim.api.nvim_create_namespace("EasyTasksInfoBuf")
 
 -- ── Highlights ────────────────────────────────────────────────────────────────
 
@@ -70,62 +76,71 @@ end
 
 -- ── Info buffer ───────────────────────────────────────────────────────────────
 
----@param entry easytasks.RunEntry
+local function _cancel_log_sub()
+    if _log_sub then
+        _log_sub.cancel_report()
+        _log_sub = nil
+    end
+end
+
+---@param entry  easytasks.RunEntry
+---@param run_id string
 ---@return integer bufnr
-local function _refresh_info_buf(entry)
-    if not _info_buf then
-        _info_buf = utils.create_sratch_buffer(false, { bufhidden = "hide" }, function()
-            _info_buf = nil
+local function _refresh_log_buf(entry, run_id)
+    if not _log_buf then
+        _log_buf = utils.create_sratch_buffer(false, { bufhidden = "hide" }, function()
+            _log_buf = nil
         end)
+        vim.api.nvim_buf_set_var(_log_buf, "easytasks_autoscroll", true)
     end
 
-    local p    = entry.progress
-    local fmt  = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
-    local b    = _badge[entry.state] or _badge.idle
+    if _log_sub and _log_sub.run_id ~= run_id then _cancel_log_sub() end
+    if _log_sub and _log_sub.run_id == run_id then return _log_buf end
 
-    ---@type {text:string, hl:string?, col:integer?}[]
-    local rows = {
-        { text = entry.task_name },
-        { text = "" },
-        { text = "status   " .. entry.state,      hl = b.hl, col = #"status   " },
-        { text = "started  " .. fmt(p.start_time) },
+    local fmt = function(t) return os.date("%H:%M:%S", t) --[[@as string]] end
+
+    -- snapshot all events accumulated so far
+    local lines = {}
+    for _, ev in ipairs(entry.progress.events) do
+        local prefix   = "[" .. fmt(ev.time) .. "] "
+        local ev_lines = vim.split(ev.message, "\n", { plain = true })
+        lines[#lines + 1] = prefix .. ev_lines[1]
+        for j = 2, #ev_lines do
+            lines[#lines + 1] = string.rep(" ", #prefix) .. ev_lines[j]
+        end
+    end
+    if #lines == 0 then lines = { "" } end
+
+    vim.bo[_log_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(_log_buf, 0, -1, false, lines)
+    vim.bo[_log_buf].modifiable = false
+
+    -- subscribe: append each new event as it arrives
+    local cancel_report = exec.on_report(function(changed_id, ev)
+        if changed_id ~= run_id then return end
+        if not _log_sub or _log_sub.run_id ~= run_id then return end
+        if not _log_buf or not vim.api.nvim_buf_is_valid(_log_buf) then return end
+        if _active_run_id ~= run_id or _active_page ~= 0 then return end
+
+        local prefix   = "[" .. fmt(ev.time) .. "] "
+        local ev_lines = vim.split(ev.message, "\n", { plain = true })
+        local new_lines = { prefix .. ev_lines[1] }
+        for j = 2, #ev_lines do
+            new_lines[#new_lines + 1] = string.rep(" ", #prefix) .. ev_lines[j]
+        end
+        vim.bo[_log_buf].modifiable = true
+        vim.api.nvim_buf_set_lines(_log_buf, -1, -1, false, new_lines)
+        vim.bo[_log_buf].modifiable = false
+        _log_sub.report_count = _log_sub.report_count + 1
+    end)
+
+    _log_sub = {
+        cancel_report = cancel_report,
+        run_id        = run_id,
+        report_count   = #entry.progress.events,
     }
-    if p.stop_time then
-        table.insert(rows, { text = "stopped  " .. fmt(p.stop_time) })
-    end
-    if entry.waiting_for and #entry.waiting_for > 0 then
-        table.insert(rows, { text = "" })
-        table.insert(rows, { text = "waiting for", hl = "Label" })
-        for _, dep in ipairs(entry.waiting_for) do
-            table.insert(rows, { text = "  - " .. dep })
-        end
-    end
-    if #p.events > 0 then
-        table.insert(rows, { text = "" })
-        table.insert(rows, { text = "events", hl = "Label" })
-        for _, ev in ipairs(p.events) do
-            local prefix = "  [" .. fmt(ev.time) .. "] "
-            local lines  = vim.split(ev.message, "\n", { plain = true })
-            table.insert(rows, { text = prefix .. lines[1] })
-            for i = 2, #lines do
-                table.insert(rows, { text = string.rep(" ", #prefix) .. lines[i] })
-            end
-        end
-    end
 
-    local texts = vim.tbl_map(function(r) return r.text end, rows)
-    vim.bo[_info_buf].modifiable = true
-    vim.api.nvim_buf_set_lines(_info_buf, 0, -1, false, texts)
-    vim.bo[_info_buf].modifiable = false
-    vim.api.nvim_buf_clear_namespace(_info_buf, _info_hl_ns, 0, -1)
-    for i, r in ipairs(rows) do
-        if r.hl then
-            vim.api.nvim_buf_set_extmark(_info_buf, _info_hl_ns, i - 1, r.col or 0, {
-                hl_group = r.hl, end_col = #r.text,
-            })
-        end
-    end
-    return _info_buf
+    return _log_buf
 end
 
 ---@return integer
@@ -184,6 +199,7 @@ end
 
 local function _show_active()
     if not _active_run_id then
+        _cancel_log_sub()
         _set_win_buf(_get_empty_buf())
         return
     end
@@ -191,14 +207,15 @@ local function _show_active()
     if not entry then return end
 
     if _active_page == 0 then
-        _set_win_buf(_refresh_info_buf(entry))
+        _set_win_buf(_refresh_log_buf(entry, _active_run_id))
     else
+        _cancel_log_sub()
         local be = entry.bufnrs[_active_page]
         if be and vim.api.nvim_buf_is_valid(be.bufnr) then
             _set_win_buf(be.bufnr)
         else
             _active_page = 0
-            _set_win_buf(_refresh_info_buf(entry))
+            _set_win_buf(_refresh_log_buf(entry, _active_run_id))
         end
     end
 end
@@ -392,6 +409,7 @@ local function _on_state_change(run_id, entry)
     end
 
     local is_new              = _run_map[run_id] == nil
+    local prev_task_name      = _active_run_id and (_run_map[_active_run_id] or {}).task_name
     local prev_count          = _known_buf_counts[run_id] or 0
     _run_map[run_id]          = entry
     _known_buf_counts[run_id] = #entry.bufnrs
@@ -407,10 +425,12 @@ local function _on_state_change(run_id, entry)
         end
     end
 
+    local is_restart = is_new and prev_task_name == entry.task_name
+
     if _active_run_id == run_id then
         vim.schedule(function()
             if not _win or not vim.api.nvim_win_is_valid(_win) then return end
-            if vim.api.nvim_get_current_win() == _win then return end
+            if not is_restart and vim.api.nvim_get_current_win() == _win then return end
             if #entry.bufnrs > prev_count then
                 -- New buffer(s) added: advance to the highest-priority page if it
                 -- beats the one currently shown (-1 for the info page, otherwise
@@ -454,6 +474,7 @@ local function _on_dispose(run_id)
 end
 
 local function _on_close()
+    _cancel_log_sub()
     vim.api.nvim_clear_autocmds({ group = _augroup })
     _win              = nil
     _active_run_id    = nil
@@ -461,9 +482,9 @@ local function _on_close()
     _runs             = {}
     _run_map          = {}
     _known_buf_counts = {}
-    if _info_buf and vim.api.nvim_buf_is_valid(_info_buf) then
-        pcall(vim.api.nvim_buf_delete, _info_buf, { force = true })
-        _info_buf = nil
+    if _log_buf and vim.api.nvim_buf_is_valid(_log_buf) then
+        pcall(vim.api.nvim_buf_delete, _log_buf, { force = true })
+        _log_buf = nil
     end
 end
 

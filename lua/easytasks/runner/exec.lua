@@ -64,6 +64,9 @@ local _run_counter = 0
 ---@type easytasks.util.Signal<fun(run_id: string, entry: easytasks.RunEntry)>
 local _on_state_change = Signal.new()
 
+---@type easytasks.util.Signal<fun(run_id: string, event: easytasks.ProgressEvent)>
+local _on_report = Signal.new()
+
 ---@type easytasks.util.Signal<fun(run_id: string)>
 local _on_dispose = Signal.new()
 
@@ -77,13 +80,23 @@ end
 ---@return fun() cancel
 function M.on_state_change(fn) return _on_state_change:subscribe(fn) end
 
+---@param fn fun(run_id: string, event: easytasks.ProgressEvent)
+---@return fun() cancel
+function M.on_report(fn) return _on_report:subscribe(fn) end
+
 ---@param fn fun(run_id: string)
 ---@return fun() cancel
 function M.on_dispose(fn) return _on_dispose:subscribe(fn) end
 
-local function _notify_change(run_id)
+local function _notify_state(run_id)
     local entry = _running[run_id]
     if entry then _on_state_change:emit(run_id, entry) end
+end
+
+---@param run_id string
+---@param event  easytasks.ProgressEvent
+local function _notify_report(run_id, event)
+    _on_report:emit(run_id, event)
 end
 
 ---@return table<string, easytasks.RunEntry>
@@ -213,20 +226,27 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         }
         _running[run_id] = entry
     end
-    _notify_change(run_id)
+    local started_ev = { time = os.time(), message = "started" }
+    table.insert(entry.progress.events, started_ev)
+    _notify_state(run_id)
+    _notify_report(run_id, started_ev)
 
-    local function event(msg)
+    local function report(msg)
         log.info("event [%s]: %s", run_id, msg)
-        table.insert(entry.progress.events, { time = os.time(), message = msg })
-        _notify_change(run_id)
+        local ev = { time = os.time(), message = msg }
+        table.insert(entry.progress.events, ev)
+        _notify_report(run_id, ev)
     end
 
     local function finish(state)
         log.info("run_task_coro: finish run_id=%s state=%s", run_id, state)
         entry.state              = state
         entry.progress.stop_time = os.time()
+        local fin_ev = { time = os.time(), message = state }
+        table.insert(entry.progress.events, fin_ev)
         entry.done:emit()
-        _notify_change(run_id)
+        _notify_state(run_id)
+        _notify_report(run_id, fin_ev)
         return state == "ok"
     end
 
@@ -237,7 +257,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             run_id, table.concat(deps, ","), tostring(task.depends_order))
         entry.state       = "waiting"
         entry.waiting_for = deps
-        _notify_change(run_id)
+        local wait_ev = { time = os.time(), message = "waiting for: " .. table.concat(deps, ", ") }
+        table.insert(entry.progress.events, wait_ev)
+        _notify_state(run_id)
+        _notify_report(run_id, wait_ev)
 
         local deps_ok
         if task.depends_order == "parallel" then
@@ -251,7 +274,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             for i, r in ipairs(results) do
                 if not r.ok or not r.result then
                     deps_ok = false
-                    event("dependency '" .. deps[i] .. "' failed")
+                    report("dependency '" .. deps[i] .. "' failed")
                 end
             end
         else
@@ -263,7 +286,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
                     run_id, dep_name, tostring(r.ok), tostring(r.result))
                 if not r.ok or not r.result then
                     deps_ok = false
-                    event("dependency '" .. dep_name .. "' failed")
+                    report("dependency '" .. dep_name .. "' failed")
                     break
                 end
             end
@@ -277,7 +300,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         log.debug("run_task_coro: [%s] all deps ok, resuming", run_id)
         entry.state       = "running"
         entry.waiting_for = nil
-        _notify_change(run_id)
+        local ready_ev = { time = os.time(), message = "dependencies resolved" }
+        table.insert(entry.progress.events, ready_ev)
+        _notify_state(run_id)
+        _notify_report(run_id, ready_ev)
     end
 
     -- ── stop check (may have been requested while waiting for deps) ──────────
@@ -295,17 +321,17 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     end)
     if not macro_ok then
         log.warn("run_task_coro: [%s] macro error: %s", run_id, tostring(resolved))
-        event("macro error: " .. tostring(resolved))
+        report("macro error: " .. tostring(resolved))
         return finish("failed")
     end
     task = resolved
-    event("resolved task:\n" .. require("tomltools.toml.encoder").encode(task))
+    report("resolved task:\n" .. require("tomltools.toml.encoder").encode(task))
 
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get(task.type)
     if not type_def then
         log.error("run_task_coro: [%s] unknown task type %s", run_id, tostring(task.type))
-        event("unknown task type: " .. tostring(task.type))
+        report("unknown task type: " .. tostring(task.type))
         return finish("failed")
     end
 
@@ -313,7 +339,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     ---@type easytasks.RunCtx
     local ctx = {
         tasks     = tasks,
-        report    = function(message) event(message) end,
+        report    = report,
         add_bufnr = function(bufnr, label, priority)
             if not label then
                 label = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
@@ -321,7 +347,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             log.debug("run_task_coro: [%s] add_bufnr bufnr=%d label=%s priority=%s",
                 run_id, bufnr, tostring(label), tostring(priority))
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label, priority = priority or 0 })
-            _notify_change(run_id)
+            _notify_state(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
                 buffer   = bufnr,
                 once     = true,
@@ -332,7 +358,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
                             break
                         end
                     end
-                    _notify_change(run_id)
+                    _notify_state(run_id)
                 end,
             })
         end,
@@ -379,7 +405,7 @@ local function _fail_immediately(task_name, message)
         },
     }
     _running[run_id].done:emit()
-    _notify_change(run_id)
+    _notify_state(run_id)
 end
 
 --- `run_task_coro` creates its entry synchronously before its first yield,
@@ -409,7 +435,7 @@ local function _launch(task_name, tasks, run_id, ephemeral)
                 entry.progress.stop_time = os.time()
                 table.insert(entry.progress.events, { time = os.time(), message = msg })
                 entry.done:emit()
-                _notify_change(rid)
+                _notify_state(rid)
             end
         end
         if not orphan then _fail_immediately(task_name, msg) end
@@ -483,7 +509,7 @@ function M.run(task_name, toml_path)
             done      = Signal.new(),
             progress  = { start_time = os.time(), events = {} },
         }
-        _notify_change(run_id)
+        _notify_state(run_id)
 
         local fns = vim.tbl_map(function(sig)
             return function() async.wait_signal(sig) end
