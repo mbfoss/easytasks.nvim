@@ -29,11 +29,6 @@ local log          = require("easytasks.util.log")
 ---@field time    integer  unix timestamp
 ---@field message string
 
----@class easytasks.RunProgress
----@field start_time integer              unix timestamp set when the run begins
----@field stop_time  integer?             unix timestamp set when the run reaches a terminal state
----@field events     easytasks.ProgressEvent[]
-
 ---@class easytasks.RunCtx
 ---@field tasks      table<string,table>
 ---@field add_bufnr  fun(bufnr: integer, label?: string, priority?: integer)
@@ -46,7 +41,7 @@ local log          = require("easytasks.util.log")
 ---@field task_type      string?
 ---@field state          easytasks.TaskState
 ---@field waiting_for    string[]?
----@field progress       easytasks.RunProgress
+---@field reports        easytasks.ProgressEvent[]
 ---@field bufnrs         easytasks.BufEntry[]
 ---@field cancel         fun()?
 ---@field stop_requested boolean?
@@ -198,10 +193,9 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     local entry
     if run_id then
         log.debug("run_task_coro: reusing entry for run_id=%s", run_id)
-        entry                     = _running[run_id]
-        entry.state               = "running"
-        entry.waiting_for         = nil
-        entry.progress.start_time = os.time()
+        entry             = _running[run_id]
+        entry.state       = "running"
+        entry.waiting_for = nil
     else
         local to_dispose = {}
         for rid, e in pairs(_running) do
@@ -222,28 +216,27 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             bufnrs    = {},
             done      = Signal.new(),
             ephemeral = ephemeral or nil,
-            progress  = { start_time = os.time(), events = {} },
+            reports   = {},
         }
         _running[run_id] = entry
     end
     local started_ev = { time = os.time(), message = "started" }
-    table.insert(entry.progress.events, started_ev)
+    table.insert(entry.reports, started_ev)
     _notify_state(run_id)
     _notify_report(run_id, started_ev)
 
     local function report(msg)
-        log.info("event [%s]: %s", run_id, msg)
+        log.info("report [%s]: %s", run_id, msg)
         local ev = { time = os.time(), message = msg }
-        table.insert(entry.progress.events, ev)
+        table.insert(entry.reports, ev)
         _notify_report(run_id, ev)
     end
 
     local function finish(state)
         log.info("run_task_coro: finish run_id=%s state=%s", run_id, state)
-        entry.state              = state
-        entry.progress.stop_time = os.time()
+        entry.state  = state
         local fin_ev = { time = os.time(), message = state }
-        table.insert(entry.progress.events, fin_ev)
+        table.insert(entry.reports, fin_ev)
         entry.done:emit()
         _notify_state(run_id)
         _notify_report(run_id, fin_ev)
@@ -258,7 +251,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         entry.state       = "waiting"
         entry.waiting_for = deps
         local wait_ev = { time = os.time(), message = "waiting for: " .. table.concat(deps, ", ") }
-        table.insert(entry.progress.events, wait_ev)
+        table.insert(entry.reports, wait_ev)
         _notify_state(run_id)
         _notify_report(run_id, wait_ev)
 
@@ -301,7 +294,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         entry.state       = "running"
         entry.waiting_for = nil
         local ready_ev = { time = os.time(), message = "dependencies resolved" }
-        table.insert(entry.progress.events, ready_ev)
+        table.insert(entry.reports, ready_ev)
         _notify_state(run_id)
         _notify_report(run_id, ready_ev)
     end
@@ -398,11 +391,7 @@ local function _fail_immediately(task_name, message)
         state     = "failed",
         bufnrs    = {},
         done      = Signal.new(),
-        progress  = {
-            start_time = now,
-            stop_time  = now,
-            events     = { { time = now, message = message } },
-        },
+        reports   = { { time = now, message = message } },
     }
     _running[run_id].done:emit()
     _notify_state(run_id)
@@ -431,9 +420,8 @@ local function _launch(task_name, tasks, run_id, ephemeral)
                 and (entry.state == "running" or entry.state == "waiting") then
                 log.warn("launch: orphan entry rid=%s marked failed", rid)
                 orphan                   = true
-                entry.state              = "failed"
-                entry.progress.stop_time = os.time()
-                table.insert(entry.progress.events, { time = os.time(), message = msg })
+                entry.state = "failed"
+                table.insert(entry.reports, { time = os.time(), message = msg })
                 entry.done:emit()
                 _notify_state(rid)
             end
@@ -507,7 +495,7 @@ function M.run(task_name, toml_path)
             state     = "waiting",
             bufnrs    = {},
             done      = Signal.new(),
-            progress  = { start_time = os.time(), events = {} },
+            reports   = {},
         }
         _notify_state(run_id)
 

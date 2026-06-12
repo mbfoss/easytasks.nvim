@@ -101,7 +101,7 @@ local function _refresh_log_buf(entry, run_id)
 
     -- snapshot all events accumulated so far
     local lines = {}
-    for _, ev in ipairs(entry.progress.events) do
+    for _, ev in ipairs(entry.reports) do
         local prefix   = "[" .. fmt(ev.time) .. "] "
         local ev_lines = vim.split(ev.message, "\n", { plain = true })
         lines[#lines + 1] = prefix .. ev_lines[1]
@@ -137,7 +137,7 @@ local function _refresh_log_buf(entry, run_id)
     _log_sub = {
         cancel_report = cancel_report,
         run_id        = run_id,
-        report_count   = #entry.progress.events,
+        report_count   = #entry.reports,
     }
 
     return _log_buf

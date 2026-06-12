@@ -173,21 +173,22 @@ end
 
 local function add_template_command()
     local bufnr = vim.api.nvim_get_current_buf()
-    local fname  = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
+    local fname = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
     if fname ~= cfg.current.tasks_filename then
         ui.notify_warning("not in the tasks file (" .. cfg.current.tasks_filename .. ")")
         return
     end
 
-    local pos = vim.api.nvim_win_get_cursor(0)
-    local row  = pos[1] - 1
-    local col  = pos[2]
+    local pos     = vim.api.nvim_win_get_cursor(0)
+    local row     = pos[1] - 1
+    local col     = pos[2]
 
     local parser  = require("tomltools.toml.parser")
     local decoder = require("tomltools.toml.decoder")
     local lines   = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local text    = table.concat(lines, "\n")
-    local parsed  = parser.parse(text)
+    table.insert(lines, "\n") -- neovim may not include the last empty lines
+    local text   = table.concat(lines, "\n")
+    local parsed = parser.parse(text)
     if not parsed.cst then
         ui.notify_warning("failed to parse tasks file")
         return
