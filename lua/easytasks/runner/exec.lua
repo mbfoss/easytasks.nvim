@@ -105,9 +105,20 @@ end
 local function _load_tasks(toml_path)
     local lines = vim.fn.readfile(toml_path)
     if not lines then return nil, nil, "cannot read " .. toml_path end
-    local text    = table.concat(lines, "\n") .. "\n"
-    local parsed  = parser.parse(text)
+    local text   = table.concat(lines, "\n") .. "\n"
+    local parsed = parser.parse(text)
+    local short = vim.fn.fnamemodify(toml_path, ":~:.")
+    if not parsed.ok then
+        local e   = parsed.errors[1]
+        local msg = e and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message) or (short .. ": parse error")
+        return nil, nil, msg
+    end
     local decoded = decoder.decode(parsed.cst)
+    if not decoded.ok then
+        local e   = decoded.errors[1]
+        local msg = e and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message) or (short .. ": decode error")
+        return nil, nil, msg
+    end
     if not decoded.data or not decoded.data.tasks then
         return nil, nil, "no tasks table in " .. toml_path
     end
