@@ -1,6 +1,6 @@
 local ordered        = require("easytasks.util.table_util").ordered
 local term           = require("easytasks.util.term")
-local _notify        = require("easytasks.ui")
+local notify        = require("easytasks.ui")
 local qfmatchers     = require("easytasks.types.run.qfmatchers")
 local ui_util        = require("easytasks.util.ui_util")
 local str_util       = require("easytasks.util.str_util")
@@ -46,14 +46,14 @@ local M = {
     ---@return fun()
     start = function(task, ctx, on_done)
         if not task.command then
-            _notify.notify_error("run task '" .. task.name .. "' has no command")
+            notify.notify_error("run task '" .. task.name .. "' has no command")
             on_done(false)
             return function() end
         end
 
         local qf_parse, qf_err = _make_qf_parser(task.quickfix_matcher)
         if qf_err then
-            _notify.notify_error(qf_err)
+            notify.notify_error(qf_err)
             on_done(false)
             return function() end
         end
@@ -66,7 +66,7 @@ local M = {
         local cmd
         if task.shell then
             if type(task.command) ~= "string" then
-                _notify.notify_error("run task '" .. task.name .. "': shell mode requires a string command")
+                notify.notify_error("run task '" .. task.name .. "': shell mode requires a string command")
                 on_done(false)
                 return function() end
             end
@@ -75,7 +75,7 @@ local M = {
             if type(task.command) == "string" then
                 cmd = str_util.split_shell_args(task.command)
                 if #cmd == 0 then
-                    _notify.notify_error("run task '" .. task.name .. "': command string is empty")
+                    notify.notify_error("run task '" .. task.name .. "': command string is empty")
                     on_done(false)
                     return function() end
                 end

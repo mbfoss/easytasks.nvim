@@ -4,8 +4,8 @@ local runner       = require("easytasks.runner")
 local task_types   = require("easytasks.types")
 local status_panel = require("easytasks.ui.status_panel")
 local ui           = require("easytasks.ui")
-local _select      = require("easytasks.util.select").select
-local _encoder     = require("tomltools.toml.encoder")
+local select      = require("easytasks.util.select").select
+local encoder     = require("tomltools.toml.encoder")
 
 local M = {}
 
@@ -28,11 +28,11 @@ local function _run_command()
 
     local items = vim.tbl_map(function(name)
         local task    = by_name and by_name[name]
-        local content = task and _encoder.encode(task) or nil
+        local content = task and encoder.encode(task) or nil
         return { name = name, preview = content and { content = content, filetype = "toml" } or nil }
     end, names)
 
-    _select(items, {
+    select(items, {
         prompt      = "Run task:",
         format_item = function(item) return item.name end,
     }, function(choice)
@@ -172,8 +172,8 @@ local function _add_template_command()
     table.insert(lines, "\n")
     local text = table.concat(lines, "\n")
 
-    local _tomltools = require("tomltools")
-    local path = _tomltools.find_path(text, row, col)
+    local tomltools = require("tomltools")
+    local path = tomltools.find_path(text, row, col)
     if not path or (path[1] and path[1].name ~= "tasks") then
         ui.notify_warning("cursor is not in a valid template insertion position")
         return
@@ -195,7 +195,7 @@ local function _add_template_command()
     local async = require("easytasks.util.async")
 
     local function apply(tmpl)
-        local insert_lines = _tomltools.encode(tmpl.task, {
+        local insert_lines = tomltools.encode(tmpl.task, {
             style  = (_node and _node.type == "array") and "inline" or "aot",
             key    = "tasks",
             indent = _node and _node.indent,
@@ -204,9 +204,9 @@ local function _add_template_command()
         vim.api.nvim_put(insert_lines, "c", false, true)
     end
 
-    local function show_template_select(type_name)
+    local function show_templateselect(type_name)
         local type_def = all_types[type_name]
-        local function do_select(templates)
+        local function doselect(templates)
             if not templates or #templates == 0 then
                 ui.notify_warning("no templates for type: " .. type_name)
                 return
@@ -221,26 +221,26 @@ local function _add_template_command()
         if type(type_def.templates) == "function" then
             local fn = type_def.templates ---@cast fn function
             async.go(fn, function(ok, result)
-                if ok then do_select(result --[[@as easytasks.TaskTemplate[] ]]) end
+                if ok then doselect(result --[[@as easytasks.TaskTemplate[] ]]) end
             end)
         else
-            do_select(type_def.templates --[[@as easytasks.TaskTemplate[] ]])
+            doselect(type_def.templates --[[@as easytasks.TaskTemplate[] ]])
         end
     end
 
     if #type_names == 1 then
-        show_template_select(type_names[1])
+        show_templateselect(type_names[1])
     else
         vim.ui.select(type_names, { prompt = "Task type:" }, function(choice)
-            if choice then show_template_select(choice) end
+            if choice then show_templateselect(choice) end
         end)
     end
 end
 
 ---@param cmd_name string
 function M.register(cmd_name)
-    local _usercmd = require("easytasks.util.usercmd")
-    _usercmd.register_user_cmd(cmd_name,
+    local usercmd = require("easytasks.util.usercmd")
+    usercmd.register_user_cmd(cmd_name,
         function(_, args, _)
             local action = args[1]
             table.remove(args, 1)
@@ -266,7 +266,7 @@ function M.register(cmd_name)
                     status_panel.toggle()
                 end
             else
-                local _sub = _usercmd.get_subcommand(action)
+                local _sub = usercmd.get_subcommand(action)
                 if _sub then
                     _sub.run(action, args, _)
                 else
@@ -279,14 +279,14 @@ function M.register(cmd_name)
             subcommand_fn = function(_, rest, arg_lead)
                 if #rest == 0 then
                     local built_in = { "run", "rerun", "stop", "cancel", "template", "panel" }
-                    vim.list_extend(built_in, _usercmd.subcommand_names())
+                    vim.list_extend(built_in, usercmd.subcommand_names())
                     return built_in
                 end
                 if rest[1] == "panel" and #rest == 1 then
                     return { "pick", "remove", "clear" }
                 end
                 if #rest >= 1 then
-                    local _sub = _usercmd.get_subcommand(rest[1])
+                    local _sub = usercmd.get_subcommand(rest[1])
                     if _sub then return _sub.complete({ unpack(rest, 2) }, arg_lead) end
                 end
                 return {}

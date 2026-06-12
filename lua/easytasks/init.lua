@@ -2,7 +2,7 @@ local M            = {}
 
 local cfg            = require("easytasks.config")
 local project        = require("easytasks.project")
-local _tomltools_lsp = require("tomltools.lsp")
+local tomltools_lsp  = require("tomltools.lsp")
 local task_types     = require("easytasks.types")
 
 M.runner           = require("easytasks.runner")
@@ -47,7 +47,7 @@ function M.enable()
         group    = augroup,
         callback = function(ev)
             if vim.fn.fnamemodify(ev.file, ":t") == cfg.current.tasks_filename then
-                _tomltools_lsp.start(ev.buf, { schema = function() return task_types.build_resolved_schema() end })
+                tomltools_lsp.start(ev.buf, { schema = function() return task_types.build_resolved_schema() end })
             end
         end,
     })
@@ -61,7 +61,7 @@ function M.disable()
     vim.api.nvim_del_augroup_by_name("easytasks_tasks_lsp")
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         if vim.bo[buf].filetype == "toml" then
-            _tomltools_lsp.stop(buf)
+            tomltools_lsp.stop(buf)
         end
     end
 end
