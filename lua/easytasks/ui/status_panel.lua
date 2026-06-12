@@ -77,7 +77,6 @@ local function _refresh_info_buf(entry)
         _info_buf = utils.create_sratch_buffer(false, { bufhidden = "hide" }, function()
             _info_buf = nil
         end)
-        vim.api.nvim_buf_set_var(_info_buf, "easytasks_autoscroll", true)
     end
 
     local p    = entry.progress

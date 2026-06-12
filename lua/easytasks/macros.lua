@@ -60,6 +60,15 @@ function M.cwd(ctx)
     return (ctx.task and ctx.task.cwd) or vim.fn.getcwd()
 end
 
+function M.projectdir(_)
+    local cwd = vim.fn.getcwd()
+    local tasks_file = vim.fs.joinpath(cwd, require("easytasks.config").current.tasks_filename)
+    if vim.fn.filereadable(tasks_file) == 0 then
+        return nil, "tasks file not found in cwd: " .. cwd
+    end
+    return cwd
+end
+
 ---@param varname string
 function M.env(_, varname)
     if not varname then return nil, "env macro requires a variable name" end
