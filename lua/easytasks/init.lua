@@ -293,10 +293,6 @@ function M.enable()
     if _enabled then return end
     _enabled = true
 
-    if cfg.current.log.enabled then
-        require("easytasks.util.log").enable(cfg.current.log.path, cfg.current.log.level)
-    end
-
     local augroup = vim.api.nvim_create_augroup("easytasks_tasks_lsp", { clear = true })
     vim.api.nvim_create_autocmd("FileType", {
         pattern  = { "toml" },

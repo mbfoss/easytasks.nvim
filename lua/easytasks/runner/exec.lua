@@ -8,7 +8,6 @@ local decoder      = require("tomltools.toml.decoder")
 local task_types   = require("easytasks.types")
 local resolver     = require("easytasks.runner.resolver")
 local notify       = require("easytasks.ui")
-local log          = require("easytasks.util.log")
 
 ---@class easytasks.TaskTemplate
 ---@field label string  shown in vim.ui.select
@@ -104,14 +103,12 @@ end
 ---@param toml_path string
 ---@return table<string,table>?, string[]?, string?
 local function _load_tasks(toml_path)
-    log.debug("load_tasks: %s", toml_path)
     local lines = vim.fn.readfile(toml_path)
     if not lines then return nil, nil, "cannot read " .. toml_path end
     local text    = table.concat(lines, "\n") .. "\n"
     local parsed  = parser.parse(text)
     local decoded = decoder.decode(parsed.cst)
     if not decoded.data or not decoded.data.tasks then
-        log.warn("load_tasks: no tasks table in %s", toml_path)
         return nil, nil, "no tasks table in " .. toml_path
     end
     local by_name = {}
@@ -122,7 +119,6 @@ local function _load_tasks(toml_path)
             table.insert(ordered, task.name)
         end
     end
-    log.debug("load_tasks: loaded %d tasks", #ordered)
     return by_name, ordered, nil
 end
 
@@ -181,10 +177,8 @@ end
 ---@param ephemeral boolean?
 ---@return boolean ok
 local function _run_task_coro(name, tasks, run_id, ephemeral)
-    log.debug("run_task_coro: enter name=%s run_id=%s", name, tostring(run_id))
     local task = tasks[name]
     if not task then
-        log.error("run_task_coro: unknown task %s", name)
         notify.notify_error("unknown task: " .. name)
         return false
     end
@@ -192,7 +186,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     ---@type easytasks.RunEntry
     local entry
     if run_id then
-        log.debug("run_task_coro: reusing entry for run_id=%s", run_id)
         entry             = _running[run_id]
         entry.state       = "running"
         entry.waiting_for = nil
@@ -208,7 +201,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         for _, rid in ipairs(to_dispose) do M.dispose(rid) end
 
         run_id = _gen_run_id(name)
-        log.debug("run_task_coro: new run_id=%s", run_id)
         entry = {
             task_name = name,
             task_type = task.type,
@@ -226,14 +218,12 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     _notify_report(run_id, started_ev)
 
     local function report(msg)
-        log.info("report [%s]: %s", run_id, msg)
         local ev = { time = os.time(), message = msg }
         table.insert(entry.reports, ev)
         _notify_report(run_id, ev)
     end
 
     local function finish(state)
-        log.info("run_task_coro: finish run_id=%s state=%s", run_id, state)
         entry.state  = state
         local fin_ev = { time = os.time(), message = state }
         table.insert(entry.reports, fin_ev)
@@ -246,8 +236,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     -- ── depends_on ──────────────────────────────────────────────────────────
     local deps = type(task.depends_on) == "table" and task.depends_on or {}
     if #deps > 0 then
-        log.debug("run_task_coro: [%s] waiting for deps=%s order=%s",
-            run_id, table.concat(deps, ","), tostring(task.depends_order))
         entry.state       = "waiting"
         entry.waiting_for = deps
         local wait_ev = { time = os.time(), message = "waiting for: " .. table.concat(deps, ", ") }
@@ -257,12 +245,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
 
         local deps_ok
         if task.depends_order == "parallel" then
-            log.debug("run_task_coro: [%s] launching %d deps in parallel", run_id, #deps)
             local fns = vim.tbl_map(function(dep_name)
                 return function() return _run_task_coro(dep_name, tasks) end
             end, deps)
             local results = async.wait_all(fns)
-            log.debug("run_task_coro: [%s] parallel deps returned", run_id)
             deps_ok = true
             for i, r in ipairs(results) do
                 if not r.ok or not r.result then
@@ -273,10 +259,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         else
             deps_ok = true
             for _, dep_name in ipairs(deps) do
-                log.debug("run_task_coro: [%s] serial dep %s start", run_id, dep_name)
                 local r = async.wait_one(function() return _run_task_coro(dep_name, tasks) end)
-                log.debug("run_task_coro: [%s] serial dep %s done ok=%s result=%s",
-                    run_id, dep_name, tostring(r.ok), tostring(r.result))
                 if not r.ok or not r.result then
                     deps_ok = false
                     report("dependency '" .. dep_name .. "' failed")
@@ -286,11 +269,9 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         end
 
         if not deps_ok then
-            log.warn("run_task_coro: [%s] deps failed", run_id)
             return finish("failed")
         end
 
-        log.debug("run_task_coro: [%s] all deps ok, resuming", run_id)
         entry.state       = "running"
         entry.waiting_for = nil
         local ready_ev = { time = os.time(), message = "dependencies resolved" }
@@ -301,19 +282,16 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
 
     -- ── stop check (may have been requested while waiting for deps) ──────────
     if entry.stop_requested then
-        log.info("run_task_coro: [%s] stop_requested after deps", run_id)
         return finish("stopped")
     end
 
     -- ── macro resolution ─────────────────────────────────────────────────────
-    log.debug("run_task_coro: [%s] resolving macros", run_id)
     local macro_ok, resolved = coroutine.yield(function(waker)
         resolver.resolve_macros(task, { task = task, tasks = tasks }, function(ok, result, err)
             waker(ok, ok and result or err)
         end)
     end)
     if not macro_ok then
-        log.warn("run_task_coro: [%s] macro error: %s", run_id, tostring(resolved))
         report("macro error: " .. tostring(resolved))
         return finish("failed")
     end
@@ -323,12 +301,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get(task.type)
     if not type_def then
-        log.error("run_task_coro: [%s] unknown task type %s", run_id, tostring(task.type))
         report("unknown task type: " .. tostring(task.type))
         return finish("failed")
     end
 
-    log.debug("run_task_coro: [%s] calling type_def.start type=%s", run_id, tostring(task.type))
     ---@type easytasks.RunCtx
     local ctx = {
         tasks     = tasks,
@@ -337,8 +313,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             if not label then
                 label = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
             end
-            log.debug("run_task_coro: [%s] add_bufnr bufnr=%d label=%s priority=%s",
-                run_id, bufnr, tostring(label), tostring(priority))
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label, priority = priority or 0 })
             _notify_state(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
@@ -366,13 +340,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         end)
         assert(type(cancel) == "function",
             "task type '" .. tostring(task.type) .. "' start() must return a cancel function")
-        log.debug("run_task_coro: [%s] cancel fn registered", run_id)
         entry.cancel = cancel
     end)
-    log.debug("run_task_coro: [%s] type_def.start returned ok=%s", run_id, tostring(ok))
 
     if entry.stop_requested then
-        log.info("run_task_coro: [%s] stop_requested after run", run_id)
         return finish("stopped")
     end
     return finish(ok and "ok" or "failed")
@@ -404,21 +375,16 @@ end
 ---@param run_id?   string   pre-existing run_id to reuse (e.g. a waiting entry)
 ---@param ephemeral boolean?
 local function _launch(task_name, tasks, run_id, ephemeral)
-    log.info("launch: task=%s run_id=%s ephemeral=%s", task_name, tostring(run_id), tostring(ephemeral))
     async.go(function()
         return _run_task_coro(task_name, tasks, run_id, ephemeral)
     end, function(co_ok, result)
-        log.debug("launch: on_done task=%s co_ok=%s result=%s",
-            task_name, tostring(co_ok), tostring(result))
         if co_ok then return end
-        log.error("launch: coroutine error task=%s: %s", task_name, tostring(result))
         local msg    = "coroutine error: " .. tostring(result)
         local orphan = false
         -- coroutine itself threw — mark any orphaned running entry as failed
         for rid, entry in pairs(_running) do
             if entry.task_name == task_name
                 and (entry.state == "running" or entry.state == "waiting") then
-                log.warn("launch: orphan entry rid=%s marked failed", rid)
                 orphan                   = true
                 entry.state = "failed"
                 table.insert(entry.reports, { time = os.time(), message = msg })
@@ -435,31 +401,26 @@ end
 ---@param task_name string
 ---@param toml_path string
 function M.run(task_name, toml_path)
-    log.info("M.run: task=%s path=%s", task_name, toml_path)
     local tasks, _, err = _load_tasks(toml_path)
     if not tasks then
-        log.error("M.run: load failed: %s", tostring(err))
         _fail_immediately(task_name, err or "load error")
         return
     end
 
     local task = tasks[task_name]
     if not task then
-        log.error("M.run: task not found: %s", task_name)
         _fail_immediately(task_name, "task not found: " .. task_name)
         return
     end
 
     local missing = _find_missing_dep(task_name, tasks, {})
     if missing then
-        log.error("M.run: missing dependency: %s", missing)
         _fail_immediately(task_name, "unknown dependency: " .. missing)
         return
     end
 
     local cycle = _find_cycle(task_name, tasks, {}, {})
     if cycle then
-        log.error("M.run: dependency cycle: %s", cycle)
         _fail_immediately(task_name, "dependency cycle: " .. cycle)
         return
     end
@@ -473,7 +434,6 @@ function M.run(task_name, toml_path)
         end
     end
     local is_running = #active_signals > 0
-    log.debug("M.run: task=%s is_running=%s active=%d", task_name, tostring(is_running), #active_signals)
 
     if not is_running then
         _launch(task_name, tasks)
@@ -481,7 +441,6 @@ function M.run(task_name, toml_path)
     end
 
     local policy = task.if_running or "refuse"
-    log.info("M.run: task=%s already running, policy=%s", task_name, policy)
 
     if policy == "refuse" then
         notify.notify_warning("task already running: " .. task_name)
@@ -489,7 +448,6 @@ function M.run(task_name, toml_path)
         _launch(task_name, tasks)
     elseif policy == "wait" then
         local run_id = _gen_run_id(task_name)
-        log.debug("M.run: wait policy run_id=%s waiting on %d signals", run_id, #active_signals)
         _running[run_id] = {
             task_name = task_name,
             state     = "waiting",
@@ -504,11 +462,9 @@ function M.run(task_name, toml_path)
         end, active_signals)
 
         async.go(function() async.wait_all(fns) end, function()
-            log.debug("M.run: wait policy predecessor done, launching run_id=%s", run_id)
             _launch(task_name, tasks, run_id)
         end)
     elseif policy == "restart" then
-        log.info("M.run: restart policy, stopping task=%s", task_name)
         M.stop(task_name)
 
         local fns = vim.tbl_map(function(sig)
@@ -518,7 +474,6 @@ function M.run(task_name, toml_path)
         async.go(function()
             if #fns > 0 then async.wait_all(fns) end
         end, function()
-            log.debug("M.run: restart policy predecessor done, launching task=%s", task_name)
             _launch(task_name, tasks)
         end)
     end
@@ -528,7 +483,6 @@ end
 ---@param task_name string
 ---@param task_def  table  task data (same shape as a decoded TOML task entry)
 function M.run_ephemeral(task_name, task_def)
-    log.info("M.run_ephemeral: task=%s", task_name)
     task_def.name = task_name
     _launch(task_name, { [task_name] = task_def }, nil, true)
 end
@@ -545,20 +499,17 @@ end
 --- Stop all active instances of a task.
 ---@param task_name string
 function M.stop(task_name)
-    log.info("M.stop: task=%s", task_name)
     local count = 0
     for _, entry in pairs(_running) do
         if entry.task_name == task_name and not entry.ephemeral
             and (entry.state == "running" or entry.state == "waiting") then
             entry.stop_requested = true
             if entry.cancel then
-                log.debug("M.stop: invoking cancel for task=%s", task_name)
                 entry.cancel()
             end
             count = count + 1
         end
     end
-    log.debug("M.stop: stop_requested on %d entries for task=%s", count, task_name)
 end
 
 --- Dispose a finished run: invoke the type's dispose hook (if any), delete all
@@ -577,12 +528,10 @@ function M.dispose(run_id)
     -- Remove from state and notify subscribers first so the status panel can
     -- switch away from the buffer synchronously before we delete it.
     _running[run_id] = nil
-    log.info("M.dispose: disposed run_id=%s task=%s", run_id, entry.task_name)
     _on_dispose:emit(run_id)
 
     local type_def = entry.task_type and task_types.get(entry.task_type)
     if type_def and type_def.dispose then
-        log.debug("M.dispose: calling type dispose for run_id=%s type=%s", run_id, entry.task_type)
         pcall(type_def.dispose, entry.bufnrs)
     else
         for _, be in ipairs(entry.bufnrs) do

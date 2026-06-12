@@ -1,14 +1,6 @@
 ---@class easytasks.async
 local M = {}
 
-local log = require("easytasks.util.log")
-
-local _co_counter = 0
-local function _co_id()
-    _co_counter = _co_counter + 1
-    return "co#" .. _co_counter
-end
-
 --- Drive `fn` as a coroutine. Calls `on_done(ok, result)` when it finishes or errors.
 --- When the coroutine yields it must yield a function `setup(waker)`. The step
 --- function calls `setup(step)` immediately, handing the coroutine's own resume
@@ -18,27 +10,19 @@ end
 ---@param ...    any  arguments forwarded to fn
 function M.go(fn, on_done, ...)
     local args = { ... }
-    local id = _co_id()
     local co = coroutine.create(function()
         return fn(unpack(args))
     end)
-    log.debug("async.go: %s created", id)
     local function step(...)
-        log.debug("async.go: %s step resume", id)
         local ok, val = coroutine.resume(co, ...)
         local status = coroutine.status(co)
-        log.debug("async.go: %s resume ok=%s status=%s val_type=%s",
-            id, tostring(ok), status, type(val))
         if not ok then
-            log.error("async.go: %s error: %s", id, tostring(val))
             on_done(false, val)
         elseif status == "dead" then
-            log.debug("async.go: %s dead result=%s", id, tostring(val))
             on_done(true, val)
         elseif type(val) == "function" then
             val(step)
         else
-            log.error("async.go: %s unexpected yield type=%s", id, type(val))
             on_done(false, "unexpected yield value: " .. type(val))
         end
     end
@@ -64,10 +48,8 @@ end
 ---@param fn fun(): any
 ---@return { ok: boolean, result: any }
 function M.wait_one(fn)
-    log.debug("async.wait_one: yield")
     return coroutine.yield(function(waker)
         M.go(fn, function(ok, result)
-            log.debug("async.wait_one: waking ok=%s result=%s", tostring(ok), tostring(result))
             waker({ ok = ok, result = result })
         end)
     end)
@@ -80,7 +62,6 @@ end
 ---@return { ok: boolean, result: any }[]
 function M.wait_all(fns)
     if #fns == 0 then return {} end
-    log.debug("async.wait_all: yield count=%d", #fns)
     return coroutine.yield(function(waker)
         local results = {}
         local pending = #fns
@@ -88,9 +69,7 @@ function M.wait_all(fns)
             M.go(fn, function(ok, result)
                 results[i] = { ok = ok, result = result }
                 pending = pending - 1
-                log.debug("async.wait_all: slot %d done ok=%s pending=%d", i, tostring(ok), pending)
                 if pending == 0 then
-                    log.debug("async.wait_all: all done, waking")
                     waker(results)
                 end
             end)
