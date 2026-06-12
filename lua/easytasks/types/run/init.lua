@@ -104,7 +104,7 @@ local M = {
             end
         end
 
-        local handle = term.spawn(cmd, {
+        local handle, spawn_err = term.spawn(cmd, {
             cwd       = task.cwd,
             env       = task.env,
             on_stdout = on_data,
@@ -114,7 +114,7 @@ local M = {
 
         if not handle then
             vim.schedule(function()
-                ctx.report("job start failed: " .. vim.inspect(task.command))
+                ctx.report("job start failed: " .. tostring(spawn_err))
                 on_done(false)
             end)
             return function() end

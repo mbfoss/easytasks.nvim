@@ -60,7 +60,7 @@ local _badge = {
     waiting = { icon = "⧗", hl = "EasyTasksBadgeWarn" },
     ok      = { icon = "✓", hl = "EasyTasksBadgeOk" },
     failed  = { icon = "✗", hl = "EasyTasksBadgeErr" },
-    stopped = { icon = "■", hl = "EasyTasksBadgeHint" },
+    stopped = { icon = "✗", hl = "EasyTasksBadgeHint" },
     idle    = { icon = "●", hl = "Comment" },
 }
 

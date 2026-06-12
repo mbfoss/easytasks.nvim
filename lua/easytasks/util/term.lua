@@ -44,7 +44,7 @@ end
 ---@param cmd   string|string[]
 ---@param opts  easytasks.SpawnOpts
 ---@param bufnr? integer buffer to own the terminal (auto created if nil)
----@return easytasks.SpawnHandle?
+---@return easytasks.SpawnHandle?,string?
 function M.spawn(cmd, opts, bufnr)
     -- A terminal buffer must be in a window for jobstart {term=true}.
     local own_buf
@@ -70,30 +70,32 @@ function M.spawn(cmd, opts, bufnr)
     vim.api.nvim_set_current_win(spawn_win)
 
     local job_id
-    job_id = vim.fn.jobstart(cmd, {
-        term      = true,
-        cwd       = opts.cwd,
-        env       = opts.env,
-        on_stdout = opts.on_stdout and (opts.line_buffered and _wrap_line_buffered(opts.on_stdout) or opts.on_stdout),
-        on_stderr = opts.on_stderr and (opts.line_buffered and _wrap_line_buffered(opts.on_stderr) or opts.on_stderr),
-        on_exit   = function(_, code)
-            job_id = -1
-            vim.schedule(function()
-                if opts.on_exit then opts.on_exit(code) end
-            end)
-        end,
-    })
+    local start_ok, job_id_or_err = pcall(function()
+        return vim.fn.jobstart(cmd, {
+            term      = true,
+            cwd       = opts.cwd,
+            env       = opts.env,
+            on_stdout = opts.on_stdout and (opts.line_buffered and _wrap_line_buffered(opts.on_stdout) or opts.on_stdout),
+            on_stderr = opts.on_stderr and (opts.line_buffered and _wrap_line_buffered(opts.on_stderr) or opts.on_stderr),
+            on_exit   = function(_, code)
+                job_id = -1
+                vim.schedule(function()
+                    if opts.on_exit then opts.on_exit(code) end
+                end)
+            end,
+        })
+    end)
 
     vim.api.nvim_set_current_win(saved_win)
     vim.api.nvim_win_close(spawn_win, true)
 
-    if job_id <= 0 then
+    if not start_ok or job_id <= 0 then
         if own_buf then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end
-        return nil
+        return nil, (start_ok and "Invalid command or arguments" or tostring(job_id_or_err))
     end
-
+    job_id = job_id_or_err
     vim.api.nvim_create_autocmd("TermClose", {
         buffer   = bufnr,
         once     = true,
