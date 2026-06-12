@@ -1,9 +1,9 @@
 local M            = {}
 
-local cfg          = require("easytasks.config")
-local project      = require("easytasks.project")
-local tasks_lsp    = require("easytasks.lsp")
-local task_types   = require("easytasks.types")
+local cfg            = require("easytasks.config")
+local project        = require("easytasks.project")
+local _tomltools_lsp = require("tomltools.lsp")
+local task_types     = require("easytasks.types")
 local status_panel = require("easytasks.ui.status_panel")
 local ui           = require("easytasks.ui")
 local _select      = require("easytasks.util.select").select
@@ -179,33 +179,20 @@ local function add_template_command()
         return
     end
 
-    local pos     = vim.api.nvim_win_get_cursor(0)
-    local row     = pos[1] - 1
-    local col     = pos[2]
+    local pos  = vim.api.nvim_win_get_cursor(0)
+    local row  = pos[1] - 1
+    local col  = pos[2]
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    table.insert(lines, "\n")
+    local text = table.concat(lines, "\n")
 
-    local parser  = require("tomltools.toml.parser")
-    local decoder = require("tomltools.toml.decoder")
-    local lines   = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    table.insert(lines, "\n") -- neovim may not include the last empty lines
-    local text   = table.concat(lines, "\n")
-    local parsed = parser.parse(text)
-    if not parsed.cst then
-        ui.notify_warning("failed to parse tasks file")
-        return
-    end
-    local decoded = decoder.decode(parsed.cst)
-
-    local tmpl_actions = require("easytasks.template_ctx")
-    local ins_kind, node_id = tmpl_actions.tasks_insertion_ctx(parsed.cst, decoded.decode_tree, row, col)
-    if not ins_kind then
+    local _tomltools = require("tomltools")
+    local path = _tomltools.find_path(text, row, col)
+    if not path or (path[1] and path[1].name ~= "tasks") then
         ui.notify_warning("cursor is not in a valid template insertion position")
         return
     end
-
-    local indent = ""
-    if ins_kind == "array" and node_id then
-        indent = tmpl_actions.array_item_indent(lines, parsed.cst, node_id)
-    end
+    local _node = path[1]
 
     local all_types  = task_types.get_all()
     local type_names = {}
@@ -219,20 +206,15 @@ local function add_template_command()
         return
     end
 
-    local encoder = require("tomltools.toml.encoder")
-    local async   = require("easytasks.util.async")
-    local entry   = { row = row, col = col, kind = ins_kind, indent = indent }
+    local async = require("easytasks.util.async")
 
     local function apply(tmpl)
-        local insert_lines
-        if entry.kind == "array" then
-            local encoded = encoder.encode_inline(tmpl.task, { multiline = true, indent = entry.indent })
-            insert_lines  = vim.split(encoded, "\n", { plain = true })
-        else
-            local block  = encoder.encode_aot_entry("tasks", tmpl.task)
-            insert_lines = vim.split(block, "\n", { plain = true })
-        end
-        vim.api.nvim_win_set_cursor(0, { entry.row + 1, entry.col })
+        local insert_lines = _tomltools.encode(tmpl.task, {
+            style  = (_node and _node.type == "array") and "inline" or "aot",
+            key    = "tasks",
+            indent = _node and _node.indent,
+        })
+        vim.api.nvim_win_set_cursor(0, { row + 1, col })
         vim.api.nvim_put(insert_lines, "c", false, true)
     end
 
@@ -299,7 +281,7 @@ function M.enable()
         group    = augroup,
         callback = function(ev)
             if vim.fn.fnamemodify(ev.file, ":t") == cfg.current.tasks_filename then
-                tasks_lsp.start(ev.buf, { schema = task_types.build_schema() })
+                _tomltools_lsp.start(ev.buf, { schema = function() return task_types.build_resolved_schema() end })
             end
         end,
     })
@@ -370,7 +352,7 @@ function M.disable()
     vim.api.nvim_del_augroup_by_name("easytasks_tasks_lsp")
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         if vim.bo[buf].filetype == "toml" then
-            tasks_lsp.stop(buf)
+            _tomltools_lsp.stop(buf)
         end
     end
 end

@@ -67,6 +67,44 @@ function M.build_schema()
     return schema_mod.build(M.get_all())
 end
 
+---@param node table
+local function _resolve_schema_fns(node)
+    if type(node) ~= "table" then return end
+    if type(node.enum) == "function" then
+        local ok, raw = pcall(node.enum --[[@as function]])
+        if ok and type(raw) == "table" and #raw > 0 then
+            local labels, descs, has_desc = {}, {}, false
+            for _, v in ipairs(raw) do
+                if type(v) == "table" then
+                    labels[#labels + 1] = tostring(v.label)
+                    descs[#descs + 1]   = v.description
+                    if v.description then has_desc = true end
+                else
+                    labels[#labels + 1] = tostring(v)
+                end
+            end
+            node.enum = labels
+            if has_desc then node["x-enumDescriptions"] = descs end
+        else
+            node.enum = nil
+        end
+    end
+    if type(node["x-enumDescriptions"]) == "function" then
+        local ok, raw = pcall(node["x-enumDescriptions"] --[[@as function]])
+        node["x-enumDescriptions"] = (ok and type(raw) == "table") and raw or nil
+    end
+    for _, v in pairs(node) do _resolve_schema_fns(v) end
+end
+
+--- Like build_schema() but with all function-valued enum fields evaluated to
+--- concrete arrays — safe to JSON-encode or pass to the validator.
+---@return table
+function M.build_resolved_schema()
+    local s = vim.deepcopy(M.build_schema())
+    _resolve_schema_fns(s)
+    return s
+end
+
 -- Built-in task types (loaded lazily on first use)
 M.register("run",         "easytasks.types.run")
 M.register("composite",   "easytasks.types.composite")

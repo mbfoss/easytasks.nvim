@@ -89,7 +89,7 @@ function M.spawn(cmd, opts, bufnr)
     vim.api.nvim_set_current_win(saved_win)
     vim.api.nvim_win_close(spawn_win, true)
 
-    if not start_ok or job_id <= 0 then
+    if not start_ok or type(job_id) ~= "number" then
         if own_buf then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end

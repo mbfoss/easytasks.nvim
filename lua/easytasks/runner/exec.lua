@@ -3,8 +3,7 @@
 --- and task state tracking.
 local async        = require("easytasks.util.async")
 local Signal       = require("easytasks.util.Signal")
-local parser       = require("tomltools.toml.parser")
-local decoder      = require("tomltools.toml.decoder")
+local tomltools    = require("tomltools")
 local task_types   = require("easytasks.types")
 local resolver     = require("easytasks.runner.resolver")
 local notify       = require("easytasks.ui")
@@ -105,26 +104,20 @@ end
 local function _load_tasks(toml_path)
     local lines = vim.fn.readfile(toml_path)
     if not lines then return nil, nil, "cannot read " .. toml_path end
-    local text   = table.concat(lines, "\n") .. "\n"
-    local parsed = parser.parse(text)
-    local short = vim.fn.fnamemodify(toml_path, ":~:.")
-    if not parsed.ok then
-        local e   = parsed.errors[1]
-        local msg = e and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message) or (short .. ": parse error")
+    local short  = vim.fn.fnamemodify(toml_path, ":~:.")
+    local result = tomltools.parse(table.concat(lines, "\n") .. "\n", task_types.build_resolved_schema())
+    if not result.ok then
+        local e   = result.errors[1]
+        local msg = e.range and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message)
+                             or (short .. ": " .. e.message)
         return nil, nil, msg
     end
-    local decoded = decoder.decode(parsed.cst)
-    if not decoded.ok then
-        local e   = decoded.errors[1]
-        local msg = e and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message) or (short .. ": decode error")
-        return nil, nil, msg
-    end
-    if not decoded.data or not decoded.data.tasks then
+    if not result.data.tasks then
         return nil, nil, "no tasks table in " .. toml_path
     end
     local by_name = {}
     local ordered = {} ---@type string[]
-    for _, task in ipairs(decoded.data.tasks) do
+    for _, task in ipairs(result.data.tasks) do
         if task.name and not by_name[task.name] then
             by_name[task.name] = task
             table.insert(ordered, task.name)
