@@ -365,18 +365,6 @@ local function _refresh_winbar()
     vim.wo[_win].winbar = _build_winbar(vim.api.nvim_win_get_width(_win))
 end
 
--- ── Winbar click handler (global — required by %N@v:lua.fn@ syntax) ───────────
-
----@param id integer  run_idx*10 for tab clicks, run_idx*10+page_idx for page labels
-_G._EasyTasksWbc = function(id)
-    local run_idx  = math.floor(id / 10)
-    local page_idx = id % 10
-    local run_id   = _runs[run_idx]
-    if not run_id then return end
-    _set_active_run(run_id, page_idx)
-    _show_active()
-    _refresh_winbar()
-end
 
 -- ── State change subscription ─────────────────────────────────────────────────
 
@@ -452,6 +440,19 @@ local function _on_state_change(run_id, entry)
     end
 
     vim.schedule(_refresh_winbar)
+end
+
+-- ── Winbar click handler (global — required by %N@v:lua.fn@ syntax) ───────────
+
+---@param id integer  run_idx*10 for tab clicks, run_idx*10+page_idx for page labels
+_G._EasyTasksWbc = function(id)
+    local run_idx  = math.floor(id / 10)
+    local page_idx = id % 10
+    local run_id   = _runs[run_idx]
+    if not run_id then return end
+    _set_active_run(run_id, page_idx)
+    _show_active()
+    _refresh_winbar()
 end
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
