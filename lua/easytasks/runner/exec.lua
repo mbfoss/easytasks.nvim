@@ -92,6 +92,14 @@ local function _notify_report(run_id, event)
     _on_report:emit(run_id, event)
 end
 
+---@param run_id  string
+---@param message string
+local function _append_report(run_id, message)
+    local ev = { time = os.time(), message = message }
+    table.insert(_running[run_id].reports, ev)
+    _notify_report(run_id, ev)
+end
+
 ---@return table<string, easytasks.RunEntry>
 function M.get_all()
     return vim.tbl_extend("force", {}, _running)
@@ -109,7 +117,7 @@ local function _load_tasks(toml_path)
     if not result.ok then
         local e   = result.errors[1]
         local msg = e.range and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message)
-                             or (short .. ": " .. e.message)
+            or (short .. ": " .. e.message)
         return nil, nil, msg
     end
     if not result.data.tasks then
@@ -216,24 +224,14 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         }
         _running[run_id] = entry
     end
-    local started_ev = { time = os.time(), message = "started" }
-    table.insert(entry.reports, started_ev)
     _notify_state(run_id)
-    _notify_report(run_id, started_ev)
-
-    local function report(msg)
-        local ev = { time = os.time(), message = msg }
-        table.insert(entry.reports, ev)
-        _notify_report(run_id, ev)
-    end
+    _append_report(run_id, "started")
 
     local function finish(state)
-        entry.state  = state
-        local fin_ev = { time = os.time(), message = state }
-        table.insert(entry.reports, fin_ev)
+        entry.state = state
         entry.done:emit()
         _notify_state(run_id)
-        _notify_report(run_id, fin_ev)
+        _append_report(run_id, state)
         return state == "ok"
     end
 
@@ -242,10 +240,8 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
     if #deps > 0 then
         entry.state       = "waiting"
         entry.waiting_for = deps
-        local wait_ev = { time = os.time(), message = "waiting for: " .. table.concat(deps, ", ") }
-        table.insert(entry.reports, wait_ev)
         _notify_state(run_id)
-        _notify_report(run_id, wait_ev)
+        _append_report(run_id, "waiting for: " .. table.concat(deps, ", "))
 
         local deps_ok
         if task.depends_order == "parallel" then
@@ -257,7 +253,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
             for i, r in ipairs(results) do
                 if not r.ok or not r.result then
                     deps_ok = false
-                    report("dependency '" .. deps[i] .. "' failed")
+                    _append_report(run_id, "dependency '" .. deps[i] .. "' failed")
                 end
             end
         else
@@ -266,7 +262,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
                 local r = async.wait_one(function() return _run_task_coro(dep_name, tasks) end)
                 if not r.ok or not r.result then
                     deps_ok = false
-                    report("dependency '" .. dep_name .. "' failed")
+                    _append_report(run_id, "dependency '" .. dep_name .. "' failed")
                     break
                 end
             end
@@ -278,10 +274,8 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
 
         entry.state       = "running"
         entry.waiting_for = nil
-        local ready_ev = { time = os.time(), message = "dependencies resolved" }
-        table.insert(entry.reports, ready_ev)
         _notify_state(run_id)
-        _notify_report(run_id, ready_ev)
+        _append_report(run_id, "dependencies resolved")
     end
 
     -- ── stop check (may have been requested while waiting for deps) ──────────
@@ -296,23 +290,23 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         end)
     end)
     if not macro_ok then
-        report("macro error: " .. tostring(resolved))
+        _append_report(run_id, "macro error: " .. tostring(resolved))
         return finish("failed")
     end
     task = resolved
-    report("resolved task:\n" .. tomltools.encode(task))
+    _append_report(run_id, "resolved task:\n" .. table.concat(tomltools.encode(task), "\n"))
 
     -- ── type-specific run ────────────────────────────────────────────────────
     local type_def = task_types.get(task.type)
     if not type_def then
-        report("unknown task type: " .. tostring(task.type))
+        _append_report(run_id, "unknown task type: " .. tostring(task.type))
         return finish("failed")
     end
 
     ---@type easytasks.RunCtx
     local ctx = {
         tasks     = tasks,
-        report    = report,
+        report    = function(msg) _append_report(run_id, msg) end,
         add_bufnr = function(bufnr, label, priority)
             if not label then
                 label = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
@@ -360,16 +354,16 @@ end
 ---@param message   string
 local function _fail_immediately(task_name, message)
     local run_id     = _gen_run_id(task_name)
-    local now        = os.time()
     _running[run_id] = {
         task_name = task_name,
         state     = "failed",
         bufnrs    = {},
         done      = Signal.new(),
-        reports   = { { time = now, message = message } },
+        reports   = {},
     }
     _running[run_id].done:emit()
     _notify_state(run_id)
+    _append_report(run_id, message)
 end
 
 --- `run_task_coro` creates its entry synchronously before its first yield,
@@ -389,11 +383,11 @@ local function _launch(task_name, tasks, run_id, ephemeral)
         for rid, entry in pairs(_running) do
             if entry.task_name == task_name
                 and (entry.state == "running" or entry.state == "waiting") then
-                orphan                   = true
+                orphan      = true
                 entry.state = "failed"
-                table.insert(entry.reports, { time = os.time(), message = msg })
                 entry.done:emit()
                 _notify_state(rid)
+                _append_report(rid, msg)
             end
         end
         if not orphan then _fail_immediately(task_name, msg) end
