@@ -14,6 +14,7 @@ local _run_map          = {} ---@type table<string, easytasks.RunEntry>
 local _known_buf_counts = {} ---@type table<string, integer>  bufnr count as of last notification
 
 local _active_run_id    = nil ---@type string?
+local _active_task_name = nil ---@type string?
 local _active_page      = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
 local _subscribed       = false
@@ -372,14 +373,7 @@ _G._EasyTasksWbc = function(id)
     local page_idx = id % 10
     local run_id   = _runs[run_idx]
     if not run_id then return end
-    _active_run_id = run_id
-    if page_idx == 0 then
-        -- task name click: always go to info page
-        _active_page = 0
-    else
-        -- buffer tab click: pi=1→bufnr[1] (page 1), pi=2→bufnr[2] (page 2), etc.
-        _active_page = page_idx
-    end
+    _set_active_run(run_id, page_idx)
     _show_active()
     _refresh_winbar()
 end
@@ -401,6 +395,15 @@ local function _best_page(entry)
     return best_idx
 end
 
+---@param run_id string?
+---@param page   integer?  explicit page index; defaults to best page of the entry or 0
+local function _set_active_run(run_id, page)
+    _active_run_id    = run_id
+    local e           = run_id and _run_map[run_id]
+    _active_task_name = e and e.task_name or nil
+    _active_page      = page ~= nil and page or (e and _best_page(e) or 0)
+end
+
 ---@param run_id string
 ---@param entry  easytasks.RunEntry
 local function _on_state_change(run_id, entry)
@@ -410,7 +413,7 @@ local function _on_state_change(run_id, entry)
     end
 
     local is_new              = _run_map[run_id] == nil
-    local prev_task_name      = _active_run_id and (_run_map[_active_run_id] or {}).task_name
+    local prev_task_name      = _active_task_name
     local prev_count          = _known_buf_counts[run_id] or 0
     _run_map[run_id]          = entry
     _known_buf_counts[run_id] = #entry.bufnrs
@@ -421,17 +424,16 @@ local function _on_state_change(run_id, entry)
         local cur_done = not cur
             or cur.state == "ok" or cur.state == "failed" or cur.state == "stopped"
         if cur_done then
-            _active_run_id = run_id
-            _active_page   = _best_page(entry)
+            _set_active_run(run_id)
         end
     end
 
-    local is_restart = is_new and prev_task_name == entry.task_name
+    local replace = is_new and (not prev_task_name or prev_task_name == entry.task_name)
 
     if _active_run_id == run_id then
         vim.schedule(function()
             if not _win or not vim.api.nvim_win_is_valid(_win) then return end
-            if not is_restart and vim.api.nvim_get_current_win() == _win then return end
+            if not replace and vim.api.nvim_get_current_win() == _win then return end
             if #entry.bufnrs > prev_count then
                 -- New buffer(s) added: advance to the highest-priority page if it
                 -- beats the one currently shown (-1 for the info page, otherwise
@@ -463,9 +465,7 @@ local function _on_dispose(run_id)
     _known_buf_counts[run_id] = nil
 
     if _active_run_id == run_id then
-        _active_run_id = _runs[#_runs]
-        local e = _active_run_id and _run_map[_active_run_id]
-        _active_page = e and _best_page(e) or 0
+        _set_active_run(_runs[#_runs])
         -- Switch synchronously so the window leaves the buffer before it is deleted.
         _show_active()
         _refresh_winbar()
@@ -477,9 +477,8 @@ end
 local function _on_close()
     _cancel_log_sub()
     vim.api.nvim_clear_autocmds({ group = _augroup })
-    _win              = nil
-    _active_run_id    = nil
-    _active_page      = 0
+    _win = nil
+    _set_active_run(nil)
     _runs             = {}
     _run_map          = {}
     _known_buf_counts = {}
@@ -533,9 +532,7 @@ function M.open()
                 pick = id; break
             end
         end
-        _active_run_id = pick
-        local e = _run_map[_active_run_id]
-        _active_page = e and _best_page(e) or 0
+        _set_active_run(pick)
     end
 
     _show_active()
@@ -619,8 +616,7 @@ function M.jump()
     if char ~= "\27" then
         for i, target in ipairs(_jump_targets) do
             if _JUMP_KEYS:sub(i, i) == char then
-                _active_run_id = target.run_id
-                _active_page   = target.page
+                _set_active_run(target.run_id, target.page)
                 _show_active()
                 break
             end

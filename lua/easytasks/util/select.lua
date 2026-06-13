@@ -2,6 +2,8 @@ local M = {}
 
 local fsutil = require("easytasks.util.fsutil")
 
+local _preview_ns = vim.api.nvim_create_namespace("easytasks_preview")
+
 local function _file_preview(data, callback)
     local _max_size = 10124 * 10124
     local _filepath = data.filepath
@@ -87,9 +89,19 @@ local function _make_preview_item(buf)
             vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
             local ft = vim.filetype.match({ filename = p.filepath }) or ""
             if ft ~= "" then vim.bo[buf].filetype = ft end
+
+            if p.lnum then
+                vim.api.nvim_buf_clear_namespace(buf, _preview_ns, 0, -1)
+                vim.api.nvim_buf_set_extmark(buf, _preview_ns, p.lnum - 1, 0, { line_hl_group = "CursorLine" })
+                local win = vim.fn.bufwinid(buf)
+                if win ~= -1 then
+                    vim.api.nvim_win_set_cursor(win, { p.lnum, 0 })
+                    vim.api.nvim_win_call(win, function() vim.cmd.normal({ args = { "zz" }, bang = true }) end)
+                end
+            end
         end)
 
-        return { buf = buf, pos = p.lnum and { p.lnum, p.col or -1 } or nil }
+        return { buf = buf }
     end
 end
 
