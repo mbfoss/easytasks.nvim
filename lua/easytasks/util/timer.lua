@@ -10,12 +10,14 @@ function M.stop_and_close_timer(timer)
 end
 
 ---@param interval number Delay and repeat interval in milliseconds.
+---@param once boolean? When true (default), fire once; otherwise repeat every `interval` ms.
 ---@param fn function Callback to execute.
 ---@return function stop A function that stops and closes the timer.
-function M.start_timer(interval, fn)
+function M.start_timer(interval, once, fn)
     local timer = vim.uv.new_timer()
     assert(timer, "Timer creation failed")
-    timer:start(interval, interval, vim.schedule_wrap(fn))
+    local repeat_ms = once ~= false and 0 or interval
+    timer:start(interval, repeat_ms, vim.schedule_wrap(fn))
     return function()
         M.stop_and_close_timer(timer)
         timer = nil
