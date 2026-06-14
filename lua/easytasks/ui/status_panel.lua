@@ -1,5 +1,6 @@
 local utils             = require('easytasks.util.ui_util')
 local exec              = require('easytasks.runner.exec')
+local throttle          = require('easytasks.util.throttle')
 
 ---@class easytasks.ui.status_panel
 local M                 = {}
@@ -19,7 +20,8 @@ local _active_page      = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
 local _subscribed       = false
 local _jump_mode        = false
-local _autoscroll_bufs  = {} ---@type table<integer, true>  bufnrs with on_lines attached
+local _attached_bufs    = {} ---@type table<integer, true>  bufnrs where nvim_buf_attach has been called
+local _unread_bufnrs    = {} ---@type table<integer, true>  bufnrs with new lines added while not visible
 local _jump_targets     = {} ---@type {run_id:string, page:integer}[]
 local _JUMP_KEYS        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()"
 
@@ -34,6 +36,11 @@ local _empty_buf        = nil ---@type integer?
 local _log_sub          = nil ---@type easytasks.LogSub?
 
 local _augroup          = vim.api.nvim_create_augroup("EasyTasksStatusPanel", { clear = true })
+
+local _refresh_winbar   ---@type fun()  forward declaration (defined after _build_winbar)
+local _throttled_refresh_winbar = throttle.throttle_wrap(100, function()
+    vim.schedule(_refresh_winbar)
+end)
 
 -- ── Highlights ────────────────────────────────────────────────────────────────
 
@@ -53,11 +60,12 @@ local function _setup_hl()
     vim.api.nvim_set_hl(0, "EasyTasksBadgeHint", { link = "DiagnosticHint", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksJumpKey",
         { fg = 0xffffff, bg = 0xcc2222, bold = true, default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksUnread", { link = "DiagnosticHint", default = true })
 end
 
 ---@type table<easytasks.TaskState, {icon:string, hl:string}>
 local _badge = {
-    running = { icon = "▶", hl = "EasyTasksBadgeWarn" },
+    running = { icon = "▶", hl = "EasyTasksBadgeOk" },
     waiting = { icon = "⧗", hl = "EasyTasksBadgeWarn" },
     ok      = { icon = "✓", hl = "EasyTasksBadgeOk" },
     failed  = { icon = "✗", hl = "EasyTasksBadgeErr" },
@@ -163,24 +171,32 @@ end
 -- ── Buffer display ────────────────────────────────────────────────────────────
 
 ---@param bufnr integer
-local function _maybe_attach_autoscroll(bufnr)
-    if _autoscroll_bufs[bufnr] then return end
+local function _attach_buf(bufnr)
+    if _attached_bufs[bufnr] then return end
+    _attached_bufs[bufnr] = true
     local ok, autoscroll = pcall(vim.api.nvim_buf_get_var, bufnr, "easytasks_autoscroll")
-    if not (ok and autoscroll) then return end
-    _autoscroll_bufs[bufnr] = true
+    local do_autoscroll = ok and autoscroll
     vim.api.nvim_buf_attach(bufnr, false, {
         on_lines = function()
             if not _win or not vim.api.nvim_win_is_valid(_win) then return true end
-            if vim.api.nvim_win_get_buf(_win) ~= bufnr then return true end
-            vim.schedule(function()
-                if not _win or not vim.api.nvim_win_is_valid(_win) then return end
-                if vim.api.nvim_win_get_buf(_win) ~= bufnr then return end
-                local last = vim.api.nvim_buf_line_count(bufnr)
-                pcall(vim.api.nvim_win_set_cursor, _win, { last, 0 })
-            end)
+            local is_visible = vim.api.nvim_win_get_buf(_win) == bufnr
+            if is_visible then
+                if do_autoscroll then
+                    vim.schedule(function()
+                        if not _win or not vim.api.nvim_win_is_valid(_win) then return end
+                        if vim.api.nvim_win_get_buf(_win) ~= bufnr then return end
+                        local last = vim.api.nvim_buf_line_count(bufnr)
+                        pcall(vim.api.nvim_win_set_cursor, _win, { last, 0 })
+                    end)
+                end
+            else
+                _unread_bufnrs[bufnr] = true
+                _throttled_refresh_winbar()
+            end
         end,
         on_detach = function()
-            _autoscroll_bufs[bufnr] = nil
+            _attached_bufs[bufnr] = nil
+            _unread_bufnrs[bufnr] = nil
         end,
     })
 end
@@ -191,12 +207,12 @@ local function _set_win_buf(bufnr)
     vim.wo[_win].winfixbuf = false
     vim.api.nvim_win_set_buf(_win, bufnr)
     vim.wo[_win].winfixbuf = true
+    _unread_bufnrs[bufnr] = nil
     if vim.bo[bufnr].buftype == "terminal" then
         local last = vim.api.nvim_buf_line_count(bufnr)
         vim.api.nvim_win_set_cursor(_win, { last, 0 })
-    else
-        _maybe_attach_autoscroll(bufnr)
     end
+    _attach_buf(bufnr)
 end
 
 local function _show_active()
@@ -262,8 +278,9 @@ local function _build_winbar(width)
         if #entry.bufnrs > 0 then
             local parts = {}
             for pi, be in ipairs(entry.bufnrs) do
-                local page_id = run_idx * 10 + pi
-                local is_cur  = is_active and pi == _active_page
+                local page_id   = run_idx * 10 + pi
+                local is_cur    = is_active and pi == _active_page
+                local has_unread = _unread_bufnrs[be.bufnr]
                 local part
                 if _jump_mode then
                     jump_idx = jump_idx + 1
@@ -272,7 +289,11 @@ local function _build_winbar(width)
                         -- replace first label char with jump key; width unchanged
                         local rest     = vim.fn.strcharpart(be.label, 1)
                         local after_hl = is_cur and tab_hl or "%#Comment#"
-                        if is_cur then
+                        if has_unread then
+                            part = string.format(
+                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%%#EasyTasksUnread#•%s%%X",
+                                page_id, k, after_hl, rest, tab_hl)
+                        elseif is_cur then
                             part = string.format(
                                 "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%%X",
                                 page_id, k, after_hl, rest)
@@ -284,7 +305,17 @@ local function _build_winbar(width)
                     end
                 end
                 if not part then
-                    if is_cur then
+                    if has_unread then
+                        if is_cur then
+                            part = string.format(
+                                "%%%d@v:lua._EasyTasksWbc@%s%%#EasyTasksUnread#•%s%%X",
+                                page_id, be.label, tab_hl)
+                        else
+                            part = string.format(
+                                "%%%d@v:lua._EasyTasksWbc@%%#Comment#%s%%#EasyTasksUnread#•%s%%X",
+                                page_id, be.label, tab_hl)
+                        end
+                    elseif is_cur then
                         part = string.format(
                             "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, be.label)
                     else
@@ -360,7 +391,7 @@ local function _build_winbar(width)
     return table.concat(out)
 end
 
-local function _refresh_winbar()
+_refresh_winbar = function()
     if not _win or not vim.api.nvim_win_is_valid(_win) then return end
     vim.wo[_win].winbar = _build_winbar(vim.api.nvim_win_get_width(_win))
 end
@@ -405,6 +436,13 @@ local function _on_state_change(run_id, entry)
     local prev_count          = _known_buf_counts[run_id] or 0
     _run_map[run_id]          = entry
     _known_buf_counts[run_id] = #entry.bufnrs
+
+    for i = prev_count + 1, #entry.bufnrs do
+        local be = entry.bufnrs[i]
+        if be and vim.api.nvim_buf_is_valid(be.bufnr) then
+            _attach_buf(be.bufnr)
+        end
+    end
 
     if is_new then
         table.insert(_runs, run_id)
@@ -483,6 +521,7 @@ local function _on_close()
     _runs             = {}
     _run_map          = {}
     _known_buf_counts = {}
+    _unread_bufnrs    = {}
     if _log_buf and vim.api.nvim_buf_is_valid(_log_buf) then
         pcall(vim.api.nvim_buf_delete, _log_buf, { force = true })
         _log_buf = nil
@@ -524,6 +563,11 @@ function M.open()
     for _, id in ipairs(ids) do
         table.insert(_runs, id)
         _run_map[id] = all[id]
+        for _, be in ipairs(all[id].bufnrs or {}) do
+            if vim.api.nvim_buf_is_valid(be.bufnr) then
+                _attach_buf(be.bufnr)
+            end
+        end
     end
     if #_runs > 0 then
         -- prefer the outermost waiting task (root waiting for deps); else newest
