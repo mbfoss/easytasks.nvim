@@ -24,7 +24,7 @@ end
 ---@param listed boolean
 ---@param buffer_options vim.bo?
 ---@param on_delete function?
-function M.create_sratch_buffer(listed, buffer_options, on_delete)
+function M.create_scratch_buffer(listed, buffer_options, on_delete)
     local buf = vim.api.nvim_create_buf(listed, true)
     local bo = { ---@type vim.bo
         buftype = "nofile",
