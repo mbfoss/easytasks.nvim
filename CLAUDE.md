@@ -14,42 +14,55 @@ Tests live in `tests/` and are discovered automatically by Plenary/Busted. `test
 
 ## Architecture
 
-**easytasks.nvim** is a Neovim plugin with two independent subsystems: an **LSP server** (headless subprocess) for TOML task-config files, and a **task runner** that executes those tasks. `lua/easytasks/init.lua` is the public API — `setup()` wires both together and registers the `:EasyTasksRun` command.
+**easytasks.nvim** is a Neovim plugin for running TOML-defined tasks. It has three concerns: schema/LSP (delegated to `tomltools.nvim`), a task runner, and per-project persistent storage.
 
-### Schema and type registry (`types/`)
+`lua/easytasks/init.lua` is the public API — `setup()` initialises the project tracker and registers a FileType autocmd that attaches the tomltools LSP to any buffer whose filename matches `tasks_filename`. The schema passed to the LSP is built lazily from the type registry. Public extension points: `register_task_type`, `register_macro`, `register_qfmatcher`.
 
-`types/init.lua` holds a registry of task types (`process`, `composite`, `build`, `debug`). Each type module exports `{ run, schema }`. `types/schema.lua` builds the full JSON Schema from the registry: it uses `if/then` conditionals so each `type` value produces a different set of required/optional fields without duplication. `validator_util.lua` and `schema_util.lua` handle schema merging and property enumeration.
+### Type registry and schema (`types/`)
 
-Schema fields that require dynamic completion values (e.g. a list of registered adapter names) use `enum = function() ... end` directly in the schema table. `lsp/init.lua` evaluates these functions and replaces them with concrete arrays before encoding the schema for the server. Functions that need no document data work this way; completions requiring live document content are not supported (the `depends_on` task-names completion was removed for this reason).
+`types/init.lua` is a lazy registry: loaders (module path string, factory function, or bare table) are stored in `_loaders`; `_cache` holds resolved `TaskTypeDef` tables. `types/schema.lua` builds the full JSON Schema from all registered types using `if/then` conditionals keyed on `type`, so each type value produces a different set of allowed fields without duplication.
 
-New task types are registered with `easytasks.register_task_type(name, type_def)` before or after `setup()`.
+`schema.base_properties` holds fields shared by every task (`name`, `if_running`, `depends_on`, `depends_order`). Type-specific properties are merged in during `build()`. Schema fields whose value is a function (`enum = function() ... end`) are evaluated by `build_resolved_schema()` before the schema is JSON-encoded for the LSP — this is the mechanism for dynamic enum lists (e.g. quickfix matcher names).
 
-### Runner subsystem (`runner/`)
+Built-in types:
+- **`run`** (`types/run/init.lua`) — executes a command in a terminal buffer. Supports `shell` (bool), `command` (string or array), `cwd`, `env`, `quickfix_matcher`, and `save_buffers`. When `save_buffers = true`, calls `types/run/save_buffers.lua:save()` before launching the command and reports the saved file list via `ctx.report`. Quickfix matchers live in `types/run/qfmatchers.lua` and can be extended with `register_qfmatcher`.
+- **`composite`** (`types/composite.lua`) — no command; exists purely so `depends_on` can group other tasks.
 
-`runner/exec.lua` is the execution engine. `exec.run(task_name, toml_path)`:
-1. Parses/decodes the TOML file to get task configs indexed by name
-2. Detects dependency cycles (`find_cycle`)
-3. Launches the task (and its dependencies, serially or in parallel via `depends_order`) as a coroutine via `runner/async.lua`
+### Runner (`runner/`)
 
-`runner/async.lua` implements a minimal coroutine scheduler on top of `vim.fn.jobstart`. `async.go` drives a coroutine; `async.spawn` starts a process in a terminal buffer and `coroutine.yield()`s until it exits (resumed by the `on_exit` callback). `async.wait_all` fans out parallel dependencies and yields until all complete.
+`runner/exec.lua` is the execution engine. It manages `_running`, a table of `RunEntry` objects keyed by `run_id` (auto-incrementing string). Each `run()` call launches an `async.go` coroutine that:
+1. Checks `if_running` policy against any existing run for the same task name.
+2. Resolves dependency tasks (serially or in parallel via `depends_order`), waiting on their `done` Signal.
+3. Calls `resolver.resolve_macros` to expand `${...}` placeholders in the decoded task table.
+4. Looks up the `TaskTypeDef` and calls `td.start(task, ctx, on_done)`.
 
-`runner/term.lua` manages named terminal buffers (one per task name); `term.open` creates or reuses a buffer, `term.show` opens it in a split.
+State transitions and progress messages are broadcast via two `Signal`s: `_on_state_change` and `_on_report`. The status panel subscribes to both. `ctx.report(msg)` appends a timestamped `ProgressEvent` and fires `_on_report`.
 
-### Newline token range quirk
+`runner/resolver.lua` walks string/table values recursively, expanding `${name}` and `${name:arg1,arg2,...}`. Expansion runs inside the coroutine; yielding macros (like `prompt`) are called via `_async_call` which suspends the coroutine and resumes it from `vim.schedule`.
 
-`emit_nl` in `parser.lua` records the Newline token with the **pre-skip position** as both start and end (`[sr, sc, sr, sc]`), making it zero-width. `token_at` still matches it because `contains` uses `<` (strict) for the lower bound check.
+### Macro system (`macros.lua`)
 
-### Styling
+A plain table of `fun(ctx: easytasks.MacroCtx, ...): any, string?` functions. Built-ins: `file`, `filename`, `fileroot`, `filedir`, `fileext`, `cwd`, `projectdir`, `env`, `prompt`, `select-pid`. `ctx` carries `task` (decoded task data) and `tasks` (all tasks). Register custom macros with `easytasks.register_macro(name, fn)`. Macro syntax in TOML values: `${name}` or `${name:arg1,arg2}`.
+
+### Project detection and storage (`project.lua`, `datastore.lua`)
+
+`project.find_root()` checks whether `cfg.current.tasks_filename` exists in the current working directory — no upward search. Storage is initialised in `project.init()` via three autocmds: `DirChangedPre` flushes pending writes and emits `on_project_leave_pre`; `DirChanged` re-detects the root and emits `on_project_enter` or `on_project_leave`; `VimLeavePre` flushes and emits `on_project_leave_pre`.
+
+`datastore.lua` is the merge-write layer. Data lives in `<storage_dir>/<namespace>.json`. `add`/`remove` stage individual key mutations; `set` stages a full replacement. `save()` flushes all pending namespaces atomically (write to `.tmp`, then `os.rename`). `load()` merges in-memory pending changes with the on-disk snapshot without flushing.
+
+### UI (`ui/`)
+
+`ui/status_panel.lua` opens a floating/split window showing all active and recent runs, driven by subscriptions to exec's `_on_state_change` and `_on_report` signals. `ui/StatusTree.lua` is the renderer that builds the buffer lines from the run entries.
+
+## Styling
 
 Add Lua annotations (`---@param`, `---@return`, `---@class`, etc.) whenever possible.
 
-Class-based modules are named in PascalCase and functional modules are named in snake_case.
+Class-based modules are named in PascalCase; functional modules are named in snake_case.
 
-### Naming conventions
+Module-scope `local` variables are prefixed with `_`, except:
+- a local name bound directly from `require()`
+- the conventional `M` module table
+- class type names like `MyType`
 
-module-scope `local` variables should be prefixed with `_` with exception: 
-- a local module name from `require()`
-- the typical `M` module table.
--  class types like `MyType`
-
-Inside a class, private members are prefixed with `_`
+Inside a class, private members are prefixed with `_`.

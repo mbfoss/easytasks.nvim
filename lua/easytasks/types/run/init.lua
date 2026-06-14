@@ -150,24 +150,24 @@ local M = {
             shell            = {
                 type        = "boolean",
                 default     = false,
-                description = "When true, the command string is passed to the shell for interpretation. When false (default), the command is executed directly — strings are split into argv via POSIX shell-word rules, arrays are used as-is.",
+                description =
+                "When true, the command string is passed to the shell for interpretation. When false (default), the command is executed directly — strings are split into argv via POSIX shell-word rules, arrays are used as-is.",
             },
             command          = {
                 description = "Command to execute.",
                 oneOf = {
-                    { type = "string",  minLength = 1, description = "Command string. Shell mode: evaluated by the shell. Direct mode: split into argv via POSIX shell-word rules." },
+                    { type = "string", minLength = 1,                       description = "Command string. Shell mode: evaluated by the shell. Direct mode: split into argv via POSIX shell-word rules." },
                     {
                         type        = "array",
                         minItems    = 1,
                         description = "Program and arguments, used as-is in direct mode (shell = false).",
                         items       = { type = "string", minLength = 1, description = "Command or argument token" },
                     },
-                    { type = "null", description = "No command execution" },
+                    { type = "null",   description = "No command execution" },
                 },
             },
             cwd              = { type = { "string", "null" }, description = "Working directory used when executing the command" },
             env              = {
-                description = "Environment variables applied to the command execution",
                 {
                     type                 = { "object", "null" },
                     description          = "Environment variables as a key-value map",
