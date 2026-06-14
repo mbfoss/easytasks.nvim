@@ -13,7 +13,7 @@ local config = {
     command        = "Tasks",
     tasks_filename = "tasks.toml",
     storage_dir    = ".easytasks",
-    debug_backend  = "nvim-dap"
+    debug_backend  = "easydap"
 }
 
 return config

@@ -43,3 +43,5 @@ luac.out
 /.vscode
 /.loop
 easytasks.nvim.code-workspace
+/.claude
+/.claude

@@ -1,8 +1,9 @@
 local M = {}
 
 ---@class easytasks.SaveBuffersConfig
----@field include_globs string[]
----@field exclude_globs string[]
+---@field include_globs  string[]
+---@field exclude_globs  string[]
+---@field include_hidden boolean?
 
 ---@param root string
 ---@param path string
@@ -14,15 +15,39 @@ local function _is_inside_folder(root, path)
     return false
 end
 
+-- BSD st_flags bit for "hidden". libuv normalizes the Windows
+-- FILE_ATTRIBUTE_HIDDEN and the macOS UF_HIDDEN flag onto this same bit, so a
+-- single check covers both platforms.
+local _UF_HIDDEN = 0x8000
+
+--- True if the filesystem entry at `path` carries the OS hidden attribute
+--- (Windows hidden, macOS UF_HIDDEN). Pure dot-prefix hiding is handled
+--- separately, so a missing/unreadable entry is treated as not hidden.
+---@param path string
+---@return boolean
+local function _has_hidden_attr(path)
+    local st = vim.uv.fs_stat(path)
+    return st ~= nil and type(st.flags) == "number" and bit.band(st.flags, _UF_HIDDEN) ~= 0
+end
+
+--- True if `path` is hidden: either it or any directory between it and `root`
+--- is dot-prefixed (all platforms) or carries the OS hidden attribute (Windows
+--- hidden, macOS UF_HIDDEN). Assumes `path` is inside `root` (see
+--- `_is_inside_folder`) and both are normalized to forward slashes.
 ---@param root string
 ---@param path string
-local function _is_hidden_in_project(root, path)
-    if vim.fs.basename(path):sub(1, 1) == "." then return true end
-    for parent in vim.fs.parents(path) do
-        if parent == root then return false end
-        if vim.fs.basename(parent):sub(1, 1) == "." then return true end
+---@return boolean
+local function _is_hidden(root, path)
+    if vim.fs.basename(path):sub(1, 1) == "." or _has_hidden_attr(path) then
+        return true
     end
-    return true
+    for parent in vim.fs.parents(path) do
+        if parent == root then break end
+        if vim.fs.basename(parent):sub(1, 1) == "." or _has_hidden_attr(parent) then
+            return true
+        end
+    end
+    return false
 end
 
 ---@param path string
@@ -46,7 +71,8 @@ local function _compile_globs(globs)
 end
 
 --- Save all modified buffers that belong to project_root, filtered by config globs.
---- Hidden files (dotfiles or files under hidden directories) are always skipped.
+--- Hidden files (dot-prefixed, or carrying the OS hidden attribute on Windows /
+--- macOS, or under such a directory) are skipped unless config.include_hidden is true.
 --- Empty include_globs means include all; empty exclude_globs means exclude nothing.
 ---@param project_root string
 ---@param config easytasks.SaveBuffersConfig
@@ -56,6 +82,7 @@ function M.save(project_root, config)
     ---@diagnostic disable-next-line: undefined-field
     local real_root = vim.uv.fs_realpath(root)
     if not real_root then return 0, {} end
+    real_root = vim.fs.normalize(real_root) -- fs_realpath returns native separators
 
     local inc_re = _compile_globs(config.include_globs)
     local exc_re = _compile_globs(config.exclude_globs)
@@ -77,9 +104,10 @@ function M.save(project_root, config)
         ---@diagnostic disable-next-line: undefined-field
         local real_path = vim.uv.fs_realpath(norm_path)
         if not real_path then goto continue end
+        real_path = vim.fs.normalize(real_path) -- fs_realpath returns native separators
 
         if not _is_inside_folder(real_root, real_path) then goto continue end
-        if _is_hidden_in_project(real_root, real_path) then goto continue end
+        if not config.include_hidden and _is_hidden(real_root, real_path) then goto continue end
 
         if #inc_re > 0 and not _matches_any(norm_path, inc_re) then goto continue end
         if #exc_re > 0 and _matches_any(norm_path, exc_re) then goto continue end

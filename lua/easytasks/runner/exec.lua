@@ -7,6 +7,8 @@ local tomltools    = require("tomltools")
 local task_types   = require("easytasks.types")
 local resolver     = require("easytasks.runner.resolver")
 local notify       = require("easytasks.ui")
+local save_buffers = require("easytasks.util.save_buffers")
+local project      = require("easytasks.project")
 
 ---@class easytasks.TaskTemplate
 ---@field label string  shown in vim.ui.select
@@ -180,6 +182,42 @@ local function _find_cycle(name, tasks, visited, stack)
     return nil
 end
 
+-- ─── save_buffers ──────────────────────────────────────────────────────────────
+
+--- Normalize a task's `save_buffers` field into a SaveBuffersConfig, or nil if
+--- saving is disabled. Accepts `true` (save all) or `{ include, exclude }`.
+---@param value any
+---@return easytasks.SaveBuffersConfig?
+local function _save_buffers_config(value)
+    if value == true then
+        return { include_globs = {}, exclude_globs = {} }
+    elseif type(value) == "table" then
+        return {
+            include_globs  = value.include or {},
+            exclude_globs  = value.exclude or {},
+            include_hidden = value.include_hidden or false,
+        }
+    end
+    return nil
+end
+
+--- Save modified project buffers for a task if it opted in, reporting which
+--- files were saved. No-op when not in a project or nothing matched.
+---@param task   table
+---@param report fun(message: string)
+local function _save_buffers_for(task, report)
+    local sb_config = _save_buffers_config(task.save_buffers)
+    if not sb_config then return end
+    local root = project.find_root()
+    if not root then return end
+    local n, paths = save_buffers.save(root, sb_config)
+    if n == 0 then return end
+    local lines = { ("saved %d file%s:"):format(n, n == 1 and "" or "s") }
+    for i = 1, math.min(n, 5) do lines[#lines + 1] = "  " .. paths[i] end
+    if n > 5 then lines[#lines + 1] = ("  … and %d more"):format(n - 5) end
+    report(table.concat(lines, "\n"))
+end
+
 -- ─── Core execution ──────────────────────────────────────────────────────────
 
 --- Run a single task (and its dependencies) as a coroutine.
@@ -305,6 +343,11 @@ local function _run_task_coro(name, tasks, run_id, ephemeral)
         _append_report(run_id, "unknown task type: " .. tostring(task.type))
         return finish("failed")
     end
+
+    -- Save buffers immediately before this task's own effective run (after its
+    -- dependencies have completed). A dependency that needs saving sets its own
+    -- save_buffers flag.
+    _save_buffers_for(task, function(msg) _append_report(run_id, msg) end)
 
     ---@type easytasks.RunCtx
     local ctx = {
