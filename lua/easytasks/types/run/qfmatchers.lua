@@ -19,10 +19,29 @@ end
 
 --- GCC / Clang: file:line:col: severity: message
 ---@type easytasks.QfMatcher
-local function _gcc(line, _)
+local function _gcc(line, context)
+    -- Template/instantiation diagnostics: GCC reports the error at the
+    -- location it physically occurs (often a deeply included header, which is
+    -- useless to jump to) and prints the user-code location that triggered the
+    -- instantiation on a trailing "required from here" line. Remember that
+    -- location so the following diagnostic points at the real source instead.
+    local rf_file, rf_lnum, rf_col = line:match("^(.+):(%d+):(%d+):%s+required from here%s*$")
+    if rf_file then
+        context.required_from = { file = rf_file, lnum = rf_lnum, col = rf_col }
+        return nil
+    end
+
     local file, lnum, col, sev, msg = line:match("^(.+):(%d+):(%d+):%s+([%a%s]+):%s+(.+)$")
     if file then
         local t = sev == "warning" and "W" or sev == "note" and "I" or "E"
+        local rf = context.required_from
+        if rf and sev ~= "note" then
+            -- Consume the captured context for this diagnostic only, keeping the
+            -- header location visible in the message text.
+            context.required_from = nil
+            return _item(rf.file, rf.lnum, rf.col,
+                msg .. " [in " .. file .. ":" .. lnum .. ":" .. col .. "]", t)
+        end
         return _item(file, lnum, col, msg, t)
     end
     local obj, msg2 = line:match("^(.+):%(%.[^%)]+%)%+?[^:]*:%s+(.+)$")

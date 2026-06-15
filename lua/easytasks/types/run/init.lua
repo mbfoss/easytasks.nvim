@@ -170,24 +170,14 @@ local M = {
 
     templates = {
         {
-            label = "Direct process",
-            task  = ordered({ name = "my-proc", type = "run", command = { "npm", "run", "build" } },
+            label = "Process",
+            task  = ordered({ name = "run", type = "run", command = "" },
                 { "name", "type", "command" }),
         },
         {
             label = "Shell command",
-            task  = ordered({ name = "my-cmd", type = "run", shell = true, command = "echo hello" },
+            task  = ordered({ name = "command", type = "run", shell = true, command = "" },
                 { "name", "type", "shell", "command" }),
-        },
-        {
-            label = "Watch mode",
-            task  = ordered({ name = "watch", type = "run", shell = true, command = "npm run watch" },
-                { "name", "type", "shell", "command" }),
-        },
-        {
-            label = "Shell command with quickfix",
-            task  = ordered({ name = "build", type = "run", shell = true, command = "make", quickfix_matcher = "gcc" },
-                { "name", "type", "shell", "command", "quickfix_matcher" }),
         },
     },
 }
