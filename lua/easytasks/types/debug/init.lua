@@ -49,11 +49,16 @@ local function _resolve(name)
 end
 
 --- Resolve the backend named by `config.debug_backend`. Returns nil if none is
---- configured or the configured backend is unavailable.
+--- configured or the configured backend is unavailable. Errors if the name is
+--- set but not a registered backend.
 ---@return easytasks.debug.Backend?
 local function _current()
     local name = config.debug_backend
-    return name and _resolve(name) or nil
+    if not name then return nil end
+    if _backends[name] == nil then
+        error(("easytasks: invalid debug_backend %q (not a registered backend)"):format(name))
+    end
+    return _resolve(name)
 end
 
 ---Debug-relevant fields extracted from a task before dispatch to a backend.

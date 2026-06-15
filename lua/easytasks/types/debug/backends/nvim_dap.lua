@@ -43,21 +43,6 @@ local function _schema(adapters)
 end
 
 ---@param params easytasks.debug.Params
----@return string  program
----@return string[] args
-local function _split_command(params)
-    local parts ---@type string[]
-    if type(params.command) == "table" then
-        parts = params.command --[=[@as string[]]=]
-    else
-        parts = str_util.split_shell_args(params.command --[[@as string]])
-    end
-    local args = {}
-    for i = 2, #parts do args[#args + 1] = parts[i] end
-    return parts[1], args
-end
-
----@param params easytasks.debug.Params
 ---@return table
 local function _params_to_dap_config(params)
     local config = {

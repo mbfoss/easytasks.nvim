@@ -76,7 +76,6 @@ function M.setup(opts)
     for k, v in pairs(tmp) do
         config[k] = v
     end
-
     if config.enabled then
         M.enable()
     else
