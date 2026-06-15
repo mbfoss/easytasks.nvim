@@ -50,6 +50,7 @@ local project      = require("easytasks.project")
 ---@field stop_requested boolean?
 ---@field done           easytasks.util.Signal<fun()>
 ---@field ephemeral      boolean?
+---@field is_shell       boolean?  panel-only standalone shell tab, not a real task run
 
 ---@class easytasks.exec
 local M            = {}

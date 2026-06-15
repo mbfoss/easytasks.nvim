@@ -44,13 +44,7 @@ local function _run_command()
 end
 
 local function _shell_command()
-    local cwd = project.find_root()
-    status_panel.open()
-    require("easytasks.runner.exec").run_ephemeral("shell", {
-        type    = "run",
-        command = { vim.o.shell, "-i" },
-        cwd     = cwd or nil,
-    })
+    status_panel.open_shell({ cwd = project.find_root() or nil })
 end
 
 local function _restart_command()
