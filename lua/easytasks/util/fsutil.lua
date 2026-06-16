@@ -1,7 +1,5 @@
 local M = {}
 
-local timer = require("easytasks.util.timer")
-
 ---@param path string
 function M.file_exists(path)
     local stat = vim.loop.fs_stat(path)
@@ -187,7 +185,9 @@ function M.async_load_text_file(path, opts, callback)
     return function()
         if finished or aborted then return end
         aborted = true
-        timer.stop_and_close_timer(timeout_timer)
+        if timeout_timer and not timeout_timer:is_closing() then
+            timeout_timer:close()
+        end
         finish("Aborted")
     end
 end
