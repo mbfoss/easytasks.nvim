@@ -5,6 +5,7 @@
     "/Users/Dev/.config/nvim/pack/plugins/opt/easytasks.nvim/lua",
     "/Users/Dev/homebrew/Cellar/neovim/0.12.2/share/nvim/runtime/lua"
   ],
+  "Lua.workspace.ignoreDir": ["meta"],
   "Lua.globals": ["vim"],
   "Lua.diagnostics.globals": ["vim"]
 }

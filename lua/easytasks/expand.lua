@@ -5,10 +5,11 @@
 --- lazily at run time by the resolver.
 ---
 --- Example:
----     local e = require("easytasks").expand
+---     local types = require("easytasks.types")
+---     local e     = require("easytasks").expand
 ---     return {
----       open = require("easytasks").run { command = { "nvim", e.file() } },
----       deploy = require("easytasks").run { command = e.prompt("Deploy target") },
+---       open   = types.run { command = { "nvim", e.file() } },
+---       deploy = types.run { command = e.prompt("Deploy target") },
 ---     }
 ---
 ---@class easytasks.expand

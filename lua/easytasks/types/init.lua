@@ -1,5 +1,3 @@
----@alias easytasks.TypeLoader string|fun(): easytasks.TaskTypeDef|easytasks.TaskTypeDef
-
 --- A template offered by `:Tasks template`: a label and a task `spec` table
 --- that is rendered to a Lua snippet and inserted at the cursor.
 ---@class easytasks.TaskTemplate
@@ -88,5 +86,59 @@ end
 M.register("run",       "easytasks.types.run")
 M.register("composite", "easytasks.types.composite")
 M.register("debug",     "easytasks.types.debug")
+
+-- ─── Task constructors ─────────────────────────────────────────────────────────
+-- Authoring API used in `tasks.lua` (`local types = require("easytasks.types")`).
+-- Each constructor tags the spec with its `type` and returns it. Built-ins are
+-- real (annotated) functions so lua-language-server offers per-type completion;
+-- the metatable below produces a constructor for any other *registered* task
+-- type on demand (`types.mytype { … }`).
+
+---@param spec easytasks.RunSpec
+---@return easytasks.RunSpec
+function M.run(spec)
+    spec.type = "run"
+    return spec
+end
+
+---@param spec easytasks.CompositeSpec
+---@return easytasks.CompositeSpec
+function M.composite(spec)
+    spec.type = "composite"
+    return spec
+end
+
+---@param spec easytasks.DebugSpec
+---@return easytasks.DebugSpec
+function M.debug(spec)
+    spec.type = "debug"
+    return spec
+end
+
+--- Generic constructor for a task of any registered `type` (escape hatch for
+--- custom types that don't have a dedicated builder).
+---@param type string
+---@param spec table?
+---@return table
+function M.task(type, spec)
+    spec      = spec or {}
+    spec.type = type
+    return spec
+end
+
+setmetatable(M, {
+    __index = function(_, key)
+        -- __index only fires for missing keys, so the registry/constructor
+        -- methods above are never shadowed. A registered custom type name gets
+        -- an auto-generated constructor; a typo (`types.runn{…}`) stays nil and
+        -- raises a clear error at load time.
+        if type(key) ~= "string" or _loaders[key] == nil then return nil end
+        return function(spec)
+            spec      = spec or {}
+            spec.type = key
+            return spec
+        end
+    end,
+})
 
 return M

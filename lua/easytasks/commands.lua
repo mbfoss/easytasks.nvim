@@ -131,7 +131,7 @@ local function _dispose_command()
 end
 
 --- Render a template `spec` table into a Lua task snippet, e.g.
----     run = require("easytasks").run {
+---     run = require("easytasks.types").run {
 ---       command = "",
 ---     },
 --- The `name`/`type` keys become the map entry name and the constructor call;
@@ -146,7 +146,11 @@ local function _lua_snippet(spec)
         if k ~= "name" and k ~= "type" then fields[k] = v end
     end
     local body = vim.inspect(fields)
-    return ('%s = require("easytasks").%s %s,'):format(name, typ, body)
+    return ('%s = require("easytasks.types").%s %s,'):format(name, typ, body)
+end
+
+local function _bootstrap_command()
+    require("easytasks.bootstrap").run()
 end
 
 local function _add_template_command()
@@ -230,6 +234,8 @@ function M.register(cmd_name)
                 _stop_all_command()
             elseif action == "template" then
                 _add_template_command()
+            elseif action == "bootstrap" then
+                _bootstrap_command()
             elseif action == "panel" then
                 local sub = args[1]
                 if sub == "pick" then
@@ -254,7 +260,7 @@ function M.register(cmd_name)
             desc = cmd_name,
             subcommand_fn = function(_, rest, arg_lead)
                 if #rest == 0 then
-                    local built_in = { "run", "rerun", "shell", "stop", "cancel", "template", "panel" }
+                    local built_in = { "run", "rerun", "shell", "stop", "cancel", "template", "bootstrap", "panel" }
                     vim.list_extend(built_in, usercmd.subcommand_names())
                     return built_in
                 end

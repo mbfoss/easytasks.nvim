@@ -3,71 +3,16 @@ local M      = {}
 
 local config = require("easytasks.config")
 
--- ─── Task constructors ────────────────────────────────────────────────────────
+-- ─── Authoring API ────────────────────────────────────────────────────────────
 -- A `tasks.lua` file returns a map of name → task. Each task is built with a
--- typed constructor, which simply tags the spec with its `type` and returns it.
--- Built-ins are real (annotated) functions so lua-language-server can offer
--- per-type completion; the metatable below produces constructors for any other
--- registered task type on demand (`require("easytasks").mytype { … }`).
+-- typed constructor from the `easytasks.types` submodule, re-exported here for
+-- convenience: `require("easytasks.types").run { … }` or `et.types.run { … }`.
+M.types = require("easytasks.types")
 
----@param spec easytasks.RunSpec
----@return easytasks.RunSpec
-function M.run(spec)
-    spec.type = "run"
-    return spec
-end
-
----@param spec easytasks.CompositeSpec
----@return easytasks.CompositeSpec
-function M.composite(spec)
-    spec.type = "composite"
-    return spec
-end
-
----@param spec easytasks.DebugSpec
----@return easytasks.DebugSpec
-function M.debug(spec)
-    spec.type = "debug"
-    return spec
-end
-
---- Generic constructor for a task of any registered `type` (escape hatch for
---- custom types that don't have a dedicated builder).
----@param type string
----@param spec table?
----@return table
-function M.task(type, spec)
-    spec      = spec or {}
-    spec.type = type
-    return spec
-end
-
---- Macro-equivalent helpers (file paths, env, prompt, …) for use as task field
---- values. See `easytasks.expand` for the available helpers.
+--- Helpers (file paths, env, prompt, …) for dynamic task field values; each
+--- returns a `fun(ctx)` evaluated lazily at run time (replaces the old `${…}`
+--- macros). See `easytasks.expand`.
 M.expand = require("easytasks.expand")
-
--- Module method names that must never be shadowed by a type constructor.
-local _reserved = {
-    setup = true, enable = true, disable = true, in_project = true,
-    run = true, composite = true, debug = true, task = true, expand = true,
-    register_task_type = true, register_qfmatcher = true, register_debug_backend = true,
-}
-
-setmetatable(M, {
-    __index = function(_, key)
-        if _reserved[key] or type(key) ~= "string" then return nil end
-        -- Only registered task types get an auto-generated constructor, so a
-        -- typo (`t.runn{…}`) raises a clear "nil value" error at load time.
-        if not vim.tbl_contains(require("easytasks.types").get_names(), key) then
-            return nil
-        end
-        return function(spec)
-            spec      = spec or {}
-            spec.type = key
-            return spec
-        end
-    end,
-})
 
 -- ─── Registration / extension points ──────────────────────────────────────────
 
