@@ -1,18 +1,18 @@
---- Convenience helpers for dynamic task field values, ported from the old
---- `${…}` macro set. Each helper is a *builder*: it takes its (optional)
+--- Convenience providers for dynamic task field values, ported from the old
+--- `${…}` macro set. Each provider is a *builder*: it takes its (optional)
 --- arguments and returns a `fun(ctx: easytasks.ValueCtx): any, string?` suitable
 --- for use directly as a task field value. The returned function is evaluated
 --- lazily at run time by the resolver.
 ---
 --- Example:
 ---     local types = require("easytasks.types")
----     local v     = require("easytasks").values
+---     local v     = require("easytasks").providers
 ---     return {
 ---       open   = types.run { command = { "nvim", v.file() } },
 ---       deploy = types.run { command = v.prompt("Deploy target") },
 ---     }
 ---
----@class easytasks.values
+---@class easytasks.providers
 local M            = {}
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────

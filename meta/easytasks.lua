@@ -19,13 +19,9 @@
 ---
 --- Every task field below may also be a function
 --- `fun(ctx: easytasks.ValueCtx): any` evaluated lazily at run time (this
---- replaces the old `${…}` macros); see the `easytasks.values` helpers.
+--- replaces the old `${…}` macros); see the `easytasks.providers` helpers.
 
 -- ─── Task specs ────────────────────────────────────────────────────────────────
-
----@alias easytasks.SaveBuffers
----  | boolean
----  | { include?: string[], exclude?: string[], include_hidden?: boolean }
 
 --- Context passed to any function-valued task field when it is resolved.
 ---@class easytasks.ValueCtx
@@ -34,20 +30,20 @@
 
 --- Fields shared by every task type.
 ---@class easytasks.BaseSpec
----@field name?          string  Defaults to the map key used in `tasks.lua`
----@field type?          string  Set by the constructor; not normally written by hand
----@field if_running?    "wait"|"restart"|"refuse"|"parallel"  What to do when an instance is already running
----@field depends_on?    string[]  Tasks that must complete successfully first
----@field depends_order? "sequence"|"parallel"  How `depends_on` tasks are run
----@field save_buffers?  easytasks.SaveBuffers  Save modified project buffers before running
+---@field name?               string  Defaults to the map key used in `tasks.lua`
+---@field type?                string  Set by the constructor; not normally written by hand
+---@field if_running?          "wait"|"restart"|"refuse"|"parallel"  What to do when an instance is already running
+---@field depends_on?          string[]  Tasks that must complete successfully first
+---@field depends_order?       "sequence"|"parallel"  How `depends_on` tasks are run
+---@field pre_launch_actions?  table[]  Actions run, in order, after dependencies resolve and before the task starts; any failure aborts the task
 
 --- A `run` (process) task.
 ---@class easytasks.RunSpec : easytasks.BaseSpec
----@field command          string|string[]|fun(ctx: easytasks.ValueCtx): string|string[]  Command to execute
----@field shell?           boolean  Pass the command string to the shell instead of executing it directly
----@field cwd?             string|fun(ctx: easytasks.ValueCtx): string  Working directory
----@field env?             table<string, string>  Environment variables
----@field quickfix_matcher? string  Name of a quickfix matcher used to parse output
+---@field command           string|string[]|fun(ctx: easytasks.ValueCtx): string|string[]  Command to execute
+---@field shell?            boolean  Pass the command string to the shell instead of executing it directly
+---@field cwd?              string|fun(ctx: easytasks.ValueCtx): string  Working directory
+---@field env?              table<string, string>  Environment variables
+---@field quickfix_matchers? easytasks.QfMatcher[]  Matchers used to parse output into the quickfix list, tried in order; see `easytasks.quickfix_matchers`
 
 --- A `composite` task: behaviour is entirely its `depends_on` resolution.
 ---@class easytasks.CompositeSpec : easytasks.BaseSpec
@@ -71,66 +67,107 @@
 ---@field request_args?    table  Arguments sent verbatim in the DAP request
 ---@field raw_messages?    boolean
 
--- ─── values: dynamic value helpers ───────────────────────────────────────────
+-- ─── providers: dynamic value providers ──────────────────────────────────────
 
---- Convenience builders for dynamic task field values (`require("easytasks").values`).
+--- Convenience builders for dynamic task field values (`require("easytasks").providers`).
 --- Each returns a `fun(ctx): any, string?` to use directly as a field value.
----@class easytasks.values
-local values = {}
+---@class easytasks.providers
+local providers = {}
 
 --- Absolute path of the current buffer (`%:p`).
 ---@param filetype string?  if given, error unless the current file has this filetype
 ---@return fun(): string?, string?
-function values.file(filetype) end
+function providers.file(filetype) end
 
 --- Tail of the current buffer's name (`%:t`).
 ---@param filetype string?
 ---@return fun(): string?, string?
-function values.filename(filetype) end
+function providers.filename(filetype) end
 
 --- Current buffer path without extension (`%:p:r`).
 ---@param filetype string?
 ---@return fun(): string?, string?
-function values.fileroot(filetype) end
+function providers.fileroot(filetype) end
 
 --- Directory of the current buffer (`%:p:h`).
 ---@return fun(): string?, string?
-function values.filedir() end
+function providers.filedir() end
 
 --- Extension of the current buffer (`%:e`), or nil if none.
 ---@return fun(): string?, string?
-function values.fileext() end
+function providers.fileext() end
 
 --- The task's own `cwd` if it set one, else the resolved current working dir.
 ---@return fun(ctx: easytasks.ValueCtx): string
-function values.cwd() end
+function providers.cwd() end
 
 --- The project root (the cwd, asserting the tasks file lives there).
 ---@return fun(): string?, string?
-function values.projectdir() end
+function providers.projectdir() end
 
 --- Value of environment variable `varname`, or nil if unset.
 ---@param varname string
 ---@return fun(): string?, string?
-function values.env(varname) end
+function providers.env(varname) end
 
 --- Prompt the user for a value via `vim.ui.input`.
 ---@param prompt_text string
 ---@param default string?
 ---@param completion string?  e.g. "file" or "dir" (resolves relative paths)
 ---@return fun(): string?, string?
-function values.prompt(prompt_text, default, completion) end
+function providers.prompt(prompt_text, default, completion) end
 
 --- Let the user pick a running process; resolves to its PID.
 ---@return fun(): string?, string?
-function values.select_pid() end
+function providers.select_pid() end
+
+-- ─── actions: pre-launch action constructors ─────────────────────────────────
+
+--- Constructors for `pre_launch_actions` entries (`require("easytasks").actions`).
+--- Each constructor tags the spec with its `type` and returns it. A custom
+--- action registered via `require("easytasks").register_action(name, …)` is
+--- also callable as `actions.<name> { … }`.
+---@class easytasks.actions
+local actions = {}
+
+--- Save modified project buffers before the task starts.
+---@param spec { include?: string[], exclude?: string[], include_hidden?: boolean }?
+---@return table
+function actions.save_buffers(spec) end
+
+-- ─── quickfix matchers ────────────────────────────────────────────────────────
+
+---@class easytasks.QfItem
+---@field filename string
+---@field lnum     integer
+---@field col      integer
+---@field text     string?
+---@field type     string?
+
+---@alias easytasks.QfMatcher fun(line: string, context: table): easytasks.QfItem?
+
+--- Built-in matchers plus any registered via `register_qfmatcher`
+--- (`require("easytasks").quickfix_matchers` inside a `tasks.lua`, or
+--- `easytasks.quickfix_matchers` as the injected global). Reference entries
+--- directly in `RunSpec.quickfix_matchers`, e.g. `easytasks.quickfix_matchers.gcc`.
+---@class easytasks.QfMatchers
+---@field gcc     easytasks.QfMatcher  GCC / Clang
+---@field tsc     easytasks.QfMatcher  TypeScript compiler
+---@field python  easytasks.QfMatcher  Python tracebacks
+---@field go      easytasks.QfMatcher  Go compiler
+---@field pytest  easytasks.QfMatcher  pytest
+---@field cargo   easytasks.QfMatcher  Rust / Cargo
+---@field gotest  easytasks.QfMatcher  go test
+---@field msvc    easytasks.QfMatcher  MSVC
+---@field linter  easytasks.QfMatcher  generic `file:line:col: message` linters
+---@field unix    easytasks.QfMatcher  generic `file:line: message`
 
 -- ─── Extension-point aliases ─────────────────────────────────────────────────────
 -- Loosely typed on purpose: the precise internal classes are intentionally not
 -- exposed through this public library.
 
 ---@alias easytasks.TypeLoader string|table|fun(): table
----@alias easytasks.QfMatcher fun(line: string,context:table): table?
+---@alias easytasks.ActionLoader string|fun(action: table, ctx: table): boolean, string?
 ---@alias easytasks.debug.BackendDef table|fun(): table?
 
 ---@class easytasks.Config
@@ -154,8 +191,10 @@ function values.select_pid() end
 -- belong in your init.lua via `require("easytasks")`, not in a task file.
 
 ---@class easytasks.TasksFileGlobal
----@field types  easytasks.types   Task constructors (`easytasks.types.run { … }`)
----@field values easytasks.values  Dynamic value helpers for task field values
+---@field types             easytasks.types      Task constructors (`easytasks.types.run { … }`)
+---@field providers         easytasks.providers  Dynamic value providers for task field values
+---@field actions           easytasks.actions    Pre-launch action constructors (`easytasks.actions.save_buffers { … }`)
+---@field quickfix_matchers easytasks.QfMatchers Built-in + registered quickfix matchers (`easytasks.quickfix_matchers.gcc`)
 ---@type easytasks.TasksFileGlobal
 easytasks = nil
 

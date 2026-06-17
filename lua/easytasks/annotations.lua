@@ -6,10 +6,6 @@
 --- Every field below may also be a function `fun(ctx: easytasks.ValueCtx): any`,
 --- evaluated lazily at run time (this replaces the old `${…}` macros).
 
----@alias easytasks.SaveBuffers
----  | boolean
----  | { include?: string[], exclude?: string[], include_hidden?: boolean }
-
 --- Context passed to any function-valued task field when it is resolved.
 ---@class easytasks.ValueCtx
 ---@field task  table                 the task being resolved (pre-resolution)
@@ -17,20 +13,20 @@
 
 --- Fields shared by every task type.
 ---@class easytasks.BaseSpec
----@field name?          string  Defaults to the map key used in `tasks.lua`
----@field type?          string  Set by the constructor; not normally written by hand
----@field if_running?    "wait"|"restart"|"refuse"|"parallel"  What to do when an instance is already running
----@field depends_on?    string[]  Tasks that must complete successfully first
----@field depends_order? "sequence"|"parallel"  How `depends_on` tasks are run
----@field save_buffers?  easytasks.SaveBuffers  Save modified project buffers before running
+---@field name?               string  Defaults to the map key used in `tasks.lua`
+---@field type?                string  Set by the constructor; not normally written by hand
+---@field if_running?          "wait"|"restart"|"refuse"|"parallel"  What to do when an instance is already running
+---@field depends_on?          string[]  Tasks that must complete successfully first
+---@field depends_order?       "sequence"|"parallel"  How `depends_on` tasks are run
+---@field pre_launch_actions?  table[]  Actions run, in order, after dependencies resolve and before the task starts; any failure aborts the task
 
 --- A `run` (process) task.
 ---@class easytasks.RunSpec : easytasks.BaseSpec
----@field command          string|string[]|fun(ctx: easytasks.ValueCtx): string|string[]  Command to execute
----@field shell?           boolean  Pass the command string to the shell instead of executing it directly
----@field cwd?             string|fun(ctx: easytasks.ValueCtx): string  Working directory
----@field env?             table<string, string>  Environment variables
----@field quickfix_matcher? string  Name of a quickfix matcher used to parse output
+---@field command           string|string[]|fun(ctx: easytasks.ValueCtx): string|string[]  Command to execute
+---@field shell?            boolean  Pass the command string to the shell instead of executing it directly
+---@field cwd?              string|fun(ctx: easytasks.ValueCtx): string  Working directory
+---@field env?              table<string, string>  Environment variables
+---@field quickfix_matchers? easytasks.QfMatcher[]  Matchers used to parse output into the quickfix list, tried in order; see `easytasks.quickfix_matchers`
 
 --- A `composite` task: behaviour is entirely its `depends_on` resolution.
 ---@class easytasks.CompositeSpec : easytasks.BaseSpec
@@ -59,7 +55,9 @@
 -- lifecycle/extension methods (`setup`, `enable`, `register_task_type`, …)
 -- belong in the user's init.lua via `require("easytasks")`, not in a task file.
 ---@class easytasks.TasksFileGlobal
----@field types  easytasks.Types   Task constructors (`easytasks.types.run { … }`)
----@field values easytasks.values  Dynamic value helpers for task field values
+---@field types             easytasks.Types     Task constructors (`easytasks.types.run { … }`)
+---@field providers         easytasks.providers  Dynamic value providers for task field values
+---@field actions           easytasks.Actions    Pre-launch action constructors (`easytasks.actions.save_buffers { … }`)
+---@field quickfix_matchers table<string, easytasks.QfMatcher>  Built-in + registered quickfix matchers (`easytasks.quickfix_matchers.gcc`)
 ---@type easytasks.TasksFileGlobal
 easytasks = nil

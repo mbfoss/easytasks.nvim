@@ -9,10 +9,15 @@ local config = require("easytasks.config")
 -- convenience: `require("easytasks.types").run { … }` or `et.types.run { … }`.
 M.types = require("easytasks.types")
 
---- Helpers (file paths, env, prompt, …) for dynamic task field values; each
+--- Providers (file paths, env, prompt, …) for dynamic task field values; each
 --- returns a `fun(ctx)` evaluated lazily at run time (replaces the old `${…}`
---- macros). See `easytasks.values`.
-M.values = require("easytasks.values")
+--- macros). See `easytasks.providers`.
+M.providers = require("easytasks.providers")
+
+--- Actions (e.g. `save_buffers`) run via `pre_launch_actions` on a task, built
+--- with a typed constructor from `easytasks.actions`, re-exported here for
+--- convenience: `require("easytasks.actions").save_buffers { … }`.
+M.actions = require("easytasks.actions")
 
 -- ─── Registration / extension points ──────────────────────────────────────────
 
@@ -24,6 +29,15 @@ M.values = require("easytasks.values")
 ---@param loader easytasks.TypeLoader
 function M.register_task_type(name, loader)
     require("easytasks.types").register(name, loader)
+end
+
+--- Register a pre-launch action. Can be called at any time before setup() to
+--- have the action included, or after setup() for runtime-only use.
+--- `loader` may be a module path string or the action function itself.
+---@param name   string
+---@param loader easytasks.ActionLoader
+function M.register_action(name, loader)
+    require("easytasks.actions").register(name, loader)
 end
 
 --- Register a custom quickfix matcher for use in run tasks.

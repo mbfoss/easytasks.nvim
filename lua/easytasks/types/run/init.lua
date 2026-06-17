@@ -1,10 +1,14 @@
-local term           = require("easytasks.util.term")
-local notify         = require("easytasks.ui")
-local qfmatchers     = require("easytasks.types.run.qfmatchers")
-local str_util       = require("easytasks.util.str_util")
+local term       = require("easytasks.util.term")
+local notify     = require("easytasks.ui")
+local qfmatchers = require("easytasks.types.run.qfmatchers")
+local str_util   = require("easytasks.util.str_util")
 
+--- Built-in matchers plus any registered via `register_qfmatcher`, exposed as
+--- the `easytasks.quickfix_matchers` tasks-file global (e.g.
+--- `easytasks.quickfix_matchers.gcc`). Registering under an existing name
+--- overrides the built-in.
 ---@type table<string, easytasks.QfMatcher>
-local _user_matchers = {}
+local _matchers = vim.tbl_extend("force", {}, qfmatchers)
 
 ---@param s string
 ---@return string
@@ -12,26 +16,39 @@ local function _strip_ansi(s)
     return (s:gsub("\27%[[%d;]*[A-Za-z]", ""))
 end
 
----@param name string?
----@return (fun(line: string): easytasks.QfItem?)?, string?
-local function _make_qf_parser(name)
-    if not name or name == "" then return nil end
-    local fn = _user_matchers[name] or qfmatchers[name]
-    if not fn then return nil, "unknown quickfix matcher: " .. name end
-    local ctx = {}
-    return function(line) return fn(_strip_ansi(line), ctx) end
+--- Combine a task's `quickfix_matchers` (a list of matcher functions) into a
+--- single per-line parser: each matcher gets its own state `ctx`, tried in
+--- declared order, first non-nil result wins.
+---@param qf_matchers easytasks.QfMatcher[]?
+---@return (fun(line: string): easytasks.QfItem?)?
+local function _make_qf_parser(qf_matchers)
+    if type(qf_matchers) ~= "table" or #qf_matchers == 0 then return nil end
+    local wrapped = {}
+    for _, fn in ipairs(qf_matchers) do
+        local ctx = {}
+        wrapped[#wrapped + 1] = function(line) return fn(line, ctx) end
+    end
+    return function(line)
+        line = _strip_ansi(line)
+        for _, fn in ipairs(wrapped) do
+            local item = fn(line)
+            if item then return item end
+        end
+        return nil
+    end
 end
 
 --- Register a custom quickfix matcher for run tasks.
 ---@param name string
 ---@param fn   easytasks.QfMatcher
 local function _register_qfmatcher(name, fn)
-    _user_matchers[name] = fn
+    _matchers[name] = fn
 end
 
----@type easytasks.TaskTypeDef & { register_qfmatcher: fun(name: string, fn: easytasks.QfMatcher) }
+---@type easytasks.TaskTypeDef & { register_qfmatcher: fun(name: string, fn: easytasks.QfMatcher), matchers: table<string, easytasks.QfMatcher> }
 local M = {
     register_qfmatcher = _register_qfmatcher,
+    matchers = _matchers,
 
     dispose = function(bufnrs)
         for _, be in ipairs(bufnrs) do
@@ -49,12 +66,7 @@ local M = {
             return function() end
         end
 
-        local qf_parse, qf_err = _make_qf_parser(task.quickfix_matcher)
-        if qf_err then
-            notify.notify_error(qf_err)
-            on_done(false)
-            return function() end
-        end
+        local qf_parse = _make_qf_parser(task.quickfix_matchers)
 
         if qf_parse then
             vim.fn.setqflist({}, "r")
@@ -130,6 +142,17 @@ local M = {
         end
         if type(c) ~= "string" and type(c) ~= "table" then
             return false, "run task '" .. tostring(task.name) .. "': `command` must be a string or array"
+        end
+        if task.quickfix_matchers ~= nil then
+            if type(task.quickfix_matchers) ~= "table" then
+                return false, "run task '" .. tostring(task.name) .. "': `quickfix_matchers` must be an array"
+            end
+            for i, m in ipairs(task.quickfix_matchers) do
+                if type(m) ~= "function" then
+                    return false, ("run task '%s': quickfix_matchers[%d] is not a function"):format(
+                        tostring(task.name), i)
+                end
+            end
         end
         return true
     end,
