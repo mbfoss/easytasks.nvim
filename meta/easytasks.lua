@@ -140,38 +140,6 @@ function values.select_pid() end
 ---@field storage_dir?    string
 ---@field debug_backend?  string   Name of the debug backend (default "easydap")
 
--- ─── Module surface ──────────────────────────────────────────────────────────────
-
----@class easytasks
----@field types  easytasks.types   Task constructors (also `require("easytasks.types")`)
----@field values easytasks.values  Dynamic value helpers for task field values
-local M = {}
-
----@param opts easytasks.Config?
-function M.setup(opts) end
-
-function M.enable() end
-
-function M.disable() end
-
----@return boolean
-function M.in_project() end
-
---- Register a task type (module path, factory, or resolved definition).
----@param name   string
----@param loader easytasks.TypeLoader
-function M.register_task_type(name, loader) end
-
---- Register a custom quickfix matcher for use in `run` tasks.
----@param name string
----@param fn   easytasks.QfMatcher
-function M.register_qfmatcher(name, fn) end
-
---- Register a debug backend definition (selected via `config.debug_backend`).
----@param name string
----@param def  easytasks.debug.BackendDef
-function M.register_debug_backend(name, def) end
-
 -- ─── tasks.lua global ────────────────────────────────────────────────────────
 -- Injected into a `tasks.lua` file's environment when it is run via `:Tasks`
 -- (see runner/exec.lua), so authoring needs no `require("easytasks")`:
@@ -184,10 +152,49 @@ function M.register_debug_backend(name, def) end
 -- Deliberately just the authoring surface, not the full `easytasks` module:
 -- lifecycle/extension methods (`setup`, `enable`, `register_task_type`, …)
 -- belong in your init.lua via `require("easytasks")`, not in a task file.
+
 ---@class easytasks.TasksFileGlobal
 ---@field types  easytasks.types   Task constructors (`easytasks.types.run { … }`)
 ---@field values easytasks.values  Dynamic value helpers for task field values
 ---@type easytasks.TasksFileGlobal
 easytasks = nil
 
-return M
+
+--- Task constructors for authoring `tasks.lua`:
+---
+---     local types = require("easytasks.types")
+---
+---     ---@type easytasks.Tasks
+---     return {
+---       build = types.run { command = "make" },
+---       test  = types.run { command = "make test", depends_on = { "build" } },
+---     }
+---
+--- Each constructor tags the spec with its `type` and returns it. A custom task
+--- type registered via `require("easytasks").register_task_type(name, …)` is
+--- also callable as `types.<name> { … }`.
+---@class easytasks.types
+local types = {}
+
+--- Construct a `run` (process) task.
+---@param spec easytasks.RunSpec
+---@return easytasks.RunSpec
+function types.run(spec) end
+
+--- Construct a `composite` task (behaviour is its `depends_on` resolution).
+---@param spec easytasks.CompositeSpec
+---@return easytasks.CompositeSpec
+function types.composite(spec) end
+
+--- Construct a `debug` task, run through a DAP backend.
+---@param spec easytasks.DebugSpec
+---@return easytasks.DebugSpec
+function types.debug(spec) end
+
+--- Generic constructor for a task of any registered `type` (escape hatch for
+--- custom types without a dedicated builder).
+---@param type string
+---@param spec table?
+---@return table
+function types.task(type, spec) end
+
