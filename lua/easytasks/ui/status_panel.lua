@@ -40,6 +40,7 @@ local _log_sub          = nil ---@type easytasks.LogSub?
 
 local _augroup          = vim.api.nvim_create_augroup("EasyTasksStatusPanel", { clear = true })
 
+local _set_win_buf      ---@type fun(bufnr: integer)  forward declaration (defined after _attach_buf)
 local _refresh_winbar   ---@type fun()  forward declaration (defined after _build_winbar)
 local _throttled_refresh_winbar = throttle.throttle_wrap(100, function()
     vim.schedule(_refresh_winbar)
@@ -206,9 +207,20 @@ local function _attach_buf(bufnr)
             _unread_bufnrs[bufnr] = nil
         end,
     })
+    -- Switch the panel away before the buffer disappears. No group so this
+    -- autocmd outlives panel open/close cycles (buffers do too).
+    vim.api.nvim_create_autocmd("BufUnload", {
+        buffer   = bufnr,
+        once     = true,
+        callback = function()
+            if not _win or not vim.api.nvim_win_is_valid(_win) then return end
+            if vim.api.nvim_win_get_buf(_win) ~= bufnr then return end
+            _set_win_buf(_get_empty_buf())
+        end,
+    })
 end
 
-local function _set_win_buf(bufnr)
+_set_win_buf = function(bufnr)
     if not _win or not vim.api.nvim_win_is_valid(_win) then return end
     if not vim.api.nvim_buf_is_valid(bufnr) then return end
     vim.wo[_win].winfixbuf = false

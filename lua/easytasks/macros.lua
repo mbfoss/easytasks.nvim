@@ -3,7 +3,7 @@
 ---@field tasks table<string,table> all tasks in the file
 
 ---@type { [string]: fun(ctx: easytasks.MacroCtx, ...): any, string? }
-local M = {}
+local M            = {}
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,13 +60,29 @@ function M.cwd(ctx)
     return (ctx.task and ctx.task.cwd) or vim.fn.getcwd()
 end
 
-function M.projectdir(_)
+function M.projectdir(_, ...)
+    local resolve = false
+    for i = 1, select("#", ...) do
+        local arg = select(i, ...)
+        if type(arg) ~= "string" then
+            return nil, ("invalid argument #%d: expected string"):format(i)
+        end
+        if arg:lower() == "resolve" then
+            resolve = true
+        else
+            return nil, ("invalid argument: %q (expected 'resolve')"):format(arg)
+        end
+    end
     local cwd = vim.fn.getcwd()
-    local tasks_file = vim.fs.joinpath(cwd, require("easytasks.config").tasks_filename)
+    local tasks_file = vim.fs.joinpath(
+        cwd,
+        require("easytasks.config").tasks_filename
+    )
     if vim.fn.filereadable(tasks_file) == 0 then
         return nil, "tasks file not found in cwd: " .. cwd
     end
-    return cwd
+
+    return resolve and vim.fn.resolve(cwd) or cwd
 end
 
 ---@param varname string
