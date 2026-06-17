@@ -57,32 +57,16 @@ end
 
 ---@param ctx easytasks.MacroCtx
 function M.cwd(ctx)
-    return (ctx.task and ctx.task.cwd) or vim.fn.getcwd()
+    return (ctx.task and ctx.task.cwd) or vim.fn.resolve(vim.fn.getcwd())
 end
 
-function M.projectdir(_, ...)
-    local resolve = false
-    for i = 1, select("#", ...) do
-        local arg = select(i, ...)
-        if type(arg) ~= "string" then
-            return nil, ("invalid argument #%d: expected string"):format(i)
-        end
-        if arg:lower() == "resolve" then
-            resolve = true
-        else
-            return nil, ("invalid argument: %q (expected 'resolve')"):format(arg)
-        end
-    end
+function M.projectdir(_, resolve)
     local cwd = vim.fn.getcwd()
-    local tasks_file = vim.fs.joinpath(
-        cwd,
-        require("easytasks.config").tasks_filename
-    )
+    local tasks_file = vim.fs.joinpath(cwd, require("easytasks.config").tasks_filename)
     if vim.fn.filereadable(tasks_file) == 0 then
         return nil, "tasks file not found in cwd: " .. cwd
     end
-
-    return resolve and vim.fn.resolve(cwd) or cwd
+    return vim.fn.resolve(cwd)
 end
 
 ---@param varname string
@@ -107,7 +91,7 @@ function M.prompt(_, prompt_text, default, completion)
     if result == nil then return nil, "Prompt cancelled" end
     if completion == "file" or completion == "dir" then
         if vim.fn.isabsolutepath(result) == 0 then
-            return vim.fs.joinpath(vim.fn.getcwd(), result)
+            return vim.fn.resolve(vim.fs.joinpath(vim.fn.getcwd(), result))
         end
     end
     return result

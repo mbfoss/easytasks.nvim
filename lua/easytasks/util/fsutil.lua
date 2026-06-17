@@ -43,7 +43,7 @@ end
 ---@param path string
 ---@param base string?
 function M.get_relative_path(path, base)
-    base = base or vim.fn.getcwd()
+    base = base or vim.fn.resolve(vim.fn.getcwd())
 
     local full_path = vim.fn.fnamemodify(path, ":p")
     base = vim.fn.fnamemodify(base, ":p")
