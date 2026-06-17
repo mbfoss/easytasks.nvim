@@ -3,6 +3,10 @@
 -- be plain data or a function evaluated lazily at run time.
 local types = require("easytasks.types")
 
+--- The value a `tasks.lua` file returns: a map of task name → task spec.
+--- Annotate the returned table with `---@type easytasks.Tasks` for completion.
+---@alias easytasks.Tasks table<string, easytasks.BaseSpec>
+
 ---@type easytasks.Tasks
 return {
     -- Run the plenary test suite.

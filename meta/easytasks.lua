@@ -1,5 +1,12 @@
 ---@meta easytasks
 
+--- These classes/aliases intentionally mirror lua/easytasks/annotations.lua
+--- (see CLAUDE.md). `Lua.workspace.ignoreDir` excludes meta/ from this repo's
+--- own workspace scan, but opening a meta/ file directly still loads it
+--- alongside annotations.lua, so lua_ls flags the mirrored fields/aliases as
+--- duplicates. Suppressed since the duplication itself is by design.
+---@diagnostic disable: duplicate-doc-field, duplicate-doc-alias
+
 --- Public type definitions for authoring `tasks.lua` and configuring
 --- easytasks.nvim, packaged as a curated lua-language-server library.
 ---

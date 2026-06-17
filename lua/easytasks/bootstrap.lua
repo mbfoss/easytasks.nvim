@@ -5,10 +5,10 @@
 ---   • creates or updates `.luarc.json` so lua_ls loads only the plugin's
 ---     curated public type library (`meta/`) — never the internal `lua/` tree,
 ---     which would leak private annotations into completion.
-local config = require("easytasks.config")
-local ui     = require("easytasks.ui")
+local config  = require("easytasks.config")
+local ui      = require("easytasks.ui")
 
-local M = {}
+local M       = {}
 
 local _SCHEMA = "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json"
 
@@ -122,8 +122,8 @@ local function _ensure_tasks_file(dir)
         "-- easytasks.nvim task file. Returns a map of task name → task spec, each",
         "-- built with a typed constructor. A field value may be plain data or a",
         "-- function, evaluated lazily at run time. Run tasks with :Tasks.",
-        'local types = require("easytasks.types")',
-        'local expand = require("easytasks.expand")',
+        'local types = require("easytasks.types ") ---@type easytasks.types',
+        'local expand = require("easytasks.expand ") ---@type easytasks.expand',
         "",
         "---@type easytasks.Tasks",
         "return {",

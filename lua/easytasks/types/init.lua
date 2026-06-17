@@ -4,6 +4,8 @@
 ---@field label string
 ---@field spec  table   task-shaped spec (may include `name`/`type`)
 
+---@alias easytasks.TypeLoader string|table|fun(): table
+
 ---@class easytasks.Types
 local M = {}
 
