@@ -38,13 +38,17 @@ end
 
 ---@param str string
 ---@param max_len number
+---@param right? boolean  crop from the left, keeping the end of the string
 ---@return string preview
 ---@return boolean is_different
-function M.crop_string_for_ui(str, max_len)
-	assert(type(str) == 'string', str)
-	max_len = max_len > 2 and max_len or 2
-	if #str <= max_len then return str, false end
-	return str:sub(1, max_len - 1) .. "…", true
+function M.crop_for_ui(str, max_len, right)
+    assert(type(str) == 'string', str)
+    max_len = max_len > 2 and max_len or 2
+    if #str <= max_len then return str, false end
+    if right then
+        return "…" .. str:sub(#str - max_len + 2), true
+    end
+    return str:sub(1, max_len - 1) .. "…", true
 end
 
 ---@param path string
