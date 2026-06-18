@@ -1,5 +1,18 @@
 local ordered = require("easytasks.util.table_util").ordered
 local notify  = require("easytasks.ui")
+local project = require("easytasks.project")
+
+--- Resolve a (possibly relative) task file path against the project root.
+---@param path string
+---@return string
+local function _resolve(path)
+    path = vim.fs.normalize(path)
+    if vim.fn.fnamemodify(path, ":p") == path then
+        return path -- already absolute
+    end
+    local root = project.find_root()
+    return root and vim.fs.normalize(vim.fs.joinpath(root, path)) or path
+end
 
 -- Names exposed to a lua task: Lua's own standard library plus Neovim's `vim`
 -- table. Globals added by plugins/extensions are intentionally excluded, as are
@@ -18,28 +31,28 @@ local _ALLOWED = {
     "vim",
 }
 
--- A `lua` task runs a chunk of Lua code supplied directly in the tasks file.
--- The chunk receives the run context as its sole vararg (`local ctx = ...`) and
--- runs in a restricted environment: only Lua's standard library, `vim`, and the
+-- A `lua` task runs a Lua script file referenced from the tasks file. The
+-- chunk receives the run context as its sole vararg (`local ctx = ...`) and runs
+-- in a restricted environment: only Lua's standard library, `vim`, and the
 -- predefined `report`, `print`, `task`, are visible (see _ALLOWED).
 -- The chunk succeeds unless it raises an error or explicitly returns `false`.
 ---@type easytasks.TaskTypeDef
 local M = {
     ---@return fun()
     start = function(task, ctx, on_done)
-        local code = task.code
-        if type(code) == "table" then
-            code = table.concat(code, "\n")
-        end
-        if type(code) ~= "string" or code == "" then
-            notify.notify_error("lua task '" .. task.name .. "' has no code")
+        local file = task.file
+        if type(file) ~= "string" or file == "" then
+            notify.notify_error("lua task '" .. task.name .. "' has no file")
             on_done(false)
             return function() end
         end
 
-        local chunk, compile_err = load(code, "=lua task '" .. task.name .. "'")
+        local path = _resolve(file)
+        -- loadfile reads, compiles, and reports a missing/unreadable file in one
+        -- step; the chunk name defaults to the path for readable error messages.
+        local chunk, compile_err = loadfile(path)
         if not chunk then
-            ctx.report("compile error: " .. tostring(compile_err))
+            ctx.report("cannot load lua file: " .. tostring(compile_err))
             on_done(false)
             return function() end
         end
@@ -79,30 +92,23 @@ local M = {
 
     schema = {
         description = "Definition of a `lua` task",
-        ["x-order"] = { "name", "type", "if_running", "depends_on", "depends_order", "save_buffers", "code" },
-        required    = { "code" },
+        ["x-order"] = { "name", "type", "if_running", "depends_on", "depends_order", "save_buffers", "file" },
+        required    = { "file" },
         properties  = {
-            code = {
+            file = {
+                type        = "string",
+                minLength   = 1,
                 description =
-                "Lua code to execute in a restricted environment: Lua's standard library and `vim` are available, but plugin/extension globals and the `load`/`require`/`debug` escape hatches are not. The chunk receives the run context as its sole vararg (`local ctx = ...`); `report`, `print`, `task`, are predefined. The task fails if the chunk errors or returns `false`.",
-                oneOf       = {
-                    { type = "string", minLength = 1, description = "Lua source code" },
-                    {
-                        type        = "array",
-                        minItems    = 1,
-                        description = "Lua source as an array of lines, joined with newlines",
-                        items       = { type = "string", description = "A line of Lua source" },
-                    },
-                },
+                "Path to a Lua script file to execute in a restricted environment: Lua's standard library and `vim` are available, but plugin/extension globals and the `load`/`require`/`debug` escape hatches are not. Relative paths are resolved against the project root (the directory containing the tasks file). The chunk receives the run context as its sole vararg (`local ctx = ...`); `report`, `print`, `task`, are predefined. The task fails if the chunk errors or returns `false`.",
             },
         },
     },
 
     templates = {
         {
-            label = "Lua code",
-            task  = ordered({ name = "lua", type = "lua", code = "" },
-                { "name", "type", "code" }),
+            label = "Lua script",
+            task  = ordered({ name = "lua", type = "lua", file = "" },
+                { "name", "type", "file" }),
         },
     },
 }
