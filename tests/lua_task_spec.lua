@@ -39,13 +39,21 @@ end
 
 describe("lua task", function()
     local prev_cwd
+    local prev_notify
+    local notifications
 
     before_each(function()
         prev_cwd = vim.fn.getcwd()
+        -- Capture notifications instead of letting ERROR-level ones write to
+        -- stderr (which the headless harness reports as a spurious error).
+        notifications = {}
+        prev_notify = vim.notify
+        vim.notify = function(msg) table.insert(notifications, msg) end
     end)
 
     after_each(function()
         vim.fn.chdir(prev_cwd)
+        vim.notify = prev_notify
     end)
 
     it("runs a script file and reports its output", function()
@@ -128,5 +136,7 @@ describe("lua task", function()
     it("fails when no file is given", function()
         local ok = run({ name = "t", type = "lua" })
         assert.is_false(ok)
+        assert.is_true(#notifications >= 1)
+        assert.is_true(notifications[#notifications]:match("has no file") ~= nil)
     end)
 end)

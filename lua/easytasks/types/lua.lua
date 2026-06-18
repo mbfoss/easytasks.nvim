@@ -15,10 +15,17 @@ local function _resolve(path)
 end
 
 -- Names exposed to a lua task: Lua's own standard library plus Neovim's `vim`
--- table. Globals added by plugins/extensions are intentionally excluded, as are
--- the escape hatches (`load`, `loadstring`, `require`, `dofile`, `loadfile`,
--- `getfenv`, `setfenv`, `debug`, `package`, `ffi`, `jit`, `_G`) that could be
--- used to climb back into the real global environment.
+-- table. Globals added by plugins/extensions are not exposed, and the obvious
+-- escape hatches (`load`, `loadstring`, `require`, `dofile`, `loadfile`,
+-- `getfenv`, `setfenv`, `debug`, `package`, `ffi`, `jit`, `_G`) are left out.
+--
+-- This is NOT a security sandbox. The exposed stdlib tables (`string`, `os`,
+-- `io`, `vim`, ...) are the real shared instances, so a task can mutate them
+-- process-wide, and `vim` alone is a full escape hatch -- `vim.cmd("lua ...")`,
+-- `vim.fn`, `vim.uv`, `os.execute`, etc. all reach the real global environment
+-- and the system. The allow-list only keeps honest tasks from *accidentally*
+-- leaking globals; treat task code as trusted (same as a Makefile or
+-- `.nvim.lua`), not as a confined guest.
 local _ALLOWED = {
     -- base library
     "assert", "collectgarbage", "error", "ipairs", "next", "pairs",
@@ -57,9 +64,11 @@ local M = {
             return function() end
         end
 
-        -- Restricted environment: only the allow-listed builtins plus the
+        -- Curated environment: only the allow-listed builtins plus the
         -- task-specific helpers. No `__index` fallthrough, so plugin-injected
-        -- globals are invisible and there is no path back to the real `_G`.
+        -- globals are invisible and a bare `x = 1` lands here instead of `_G`.
+        -- This is convenience, not confinement -- see the _ALLOWED note above:
+        -- `vim`/`os`/`io` still reach the real globals and the system.
         local env = {
             report = ctx.report,
             task   = vim.deepcopy(task or {}),
@@ -75,7 +84,9 @@ local M = {
             if env[name] == nil then env[name] = _G[name] end
         end
 
-        -- LuaJIT (Neovim's runtime) has no env parameter on load(); use setfenv.
+        -- LuaJIT (Neovim's runtime) has no env parameter on load(); use setfenv
+        -- to point the chunk's free variables at `env`. This redirects accidental
+        -- global writes away from `_G` -- it does not sandbox a determined task.
         if setfenv then setfenv(chunk, env) end
 
         local ok, result = pcall(chunk, ctx)
