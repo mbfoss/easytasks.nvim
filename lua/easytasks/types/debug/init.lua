@@ -43,7 +43,14 @@ local function _resolve(name)
     if cached ~= nil then return cached or nil end
     local def = _backends[name]
     if def == nil then return nil end
-    local result = type(def) == "function" and def() --[[@as easytasks.debug.Backend]] or def
+    -- A factory returning nil means the backend is unavailable; don't fall back
+    -- to the factory itself (the classic `a and b() or c` pitfall when b() is nil).
+    local result ---@type easytasks.debug.Backend?
+    if type(def) == "function" then
+        result = def() --[[@as easytasks.debug.Backend?]]
+    else
+        result = def
+    end
     _resolved[name] = result or false
     return result
 end
