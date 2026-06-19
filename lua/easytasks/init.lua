@@ -42,16 +42,19 @@ function M.enable()
     if _enabled then return end
     _enabled = true
 
+    -- Map the tasks file to a dedicated filetype so its treesitter queries
+    -- (base TOML highlights + `lua` script injection) and the LSP apply only to
+    -- it, never to other `.toml` files.
+    vim.filetype.add({ filename = { [config.tasks_filename] = "easytasks" } })
+
     local augroup = vim.api.nvim_create_augroup("easytasks_tasks_lsp", { clear = true })
     vim.api.nvim_create_autocmd("FileType", {
-        pattern  = { "toml" },
+        pattern  = { "easytasks" },
         group    = augroup,
         callback = function(ev)
-            if vim.fn.fnamemodify(ev.file, ":t") == config.tasks_filename then
-                require("tomltools.lsp").start(ev.buf, {
-                    schema = function() return require("easytasks.types").build_resolved_schema() end,
-                })
-            end
+            require("tomltools.lsp").start(ev.buf, {
+                schema = function() return require("easytasks.types").build_resolved_schema() end,
+            })
         end,
     })
 
@@ -64,7 +67,7 @@ function M.disable()
     vim.api.nvim_del_augroup_by_name("easytasks_tasks_lsp")
     local tomltools_lsp = require("tomltools.lsp")
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.bo[buf].filetype == "toml" then
+        if vim.bo[buf].filetype == "easytasks" then
             tomltools_lsp.stop(buf)
         end
     end
