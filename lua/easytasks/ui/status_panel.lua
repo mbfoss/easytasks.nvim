@@ -17,6 +17,14 @@ local _known_buf_counts = {} ---@type table<string, integer>  bufnr count as of 
 local _active_run_id    = nil ---@type string?
 local _active_page      = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
+-- Restarting a task already in the panel is an exception to the "don't disturb a
+-- focused user" rule: the re-run takes over the view even while the panel is
+-- focused. _restart_pending_name is the task name of an active run that was just
+-- disposed (a same-named re-run arriving next is the restart); _restart_follow_run
+-- is the run_id we keep showing past the focus guard until it finishes.
+local _restart_pending_name = nil ---@type string?
+local _restart_follow_run   = nil ---@type string?
+
 local _subscribed       = false
 local _jump_mode        = false
 local _attached_bufs    = {} ---@type table<integer, true>  bufnrs where nvim_buf_attach has been called
@@ -445,6 +453,8 @@ end
 ---@param run_id string?
 ---@param page   integer?  explicit page index; defaults to best page of the entry or 0
 local function _set_active_run(run_id, page)
+    -- Switching to any other run cancels an in-progress restart follow.
+    if run_id ~= _restart_follow_run then _restart_follow_run = nil end
     _active_run_id = run_id
     local e        = run_id and _run_map[run_id]
     _active_page   = page ~= nil and page or (e and _best_page(e) or 0)
@@ -472,13 +482,16 @@ local function _is_focused()
 end
 
 ---Render the active run after a state change. Skipped while the user is focused
----in the panel so we don't disturb them. When new buffers appeared, advances to
----the best page first.
+---in the panel so we don't disturb them — except for a restarted run, which keeps
+---the view past the focus guard. When new buffers appeared, advances to the best
+---page first.
 ---@param entry      easytasks.RunEntry
 ---@param prev_count integer  buffer count before this state change
-local function _follow_active_run(entry, prev_count)
+---@param run_id     string   the run this entry belongs to
+local function _follow_active_run(entry, prev_count, run_id)
     if not _win or not vim.api.nvim_win_is_valid(_win) then return end
-    if _is_focused() then return end
+    local force = run_id == _restart_follow_run
+    if _is_focused() and not force then return end
     if #entry.bufnrs > prev_count then
         _activate_best_page(entry)
     end
@@ -507,15 +520,31 @@ local function _on_state_change(run_id, entry)
 
     if is_new then table.insert(_runs, run_id) end
 
+    -- A re-run of the task that was active when it got disposed (a restart) takes
+    -- over the panel even while it's focused, then stays followed until it ends.
+    local is_restart = is_new and entry.primary
+        and _restart_pending_name == entry.task_name
+    if is_new and entry.primary then _restart_pending_name = nil end
+
     -- A run the user just launched (run/restart/parallel) takes over the display,
     -- unless they're working inside the panel. Dependency runs aren't `primary`,
     -- so they never steal the view. Always show something if nothing is active.
-    if not _active_run_id or (is_new and entry.primary and not _is_focused()) then
+    if not _active_run_id
+        or (is_new and entry.primary and not _is_focused())
+        or is_restart then
         _set_active_run(run_id)
+        if is_restart then _restart_follow_run = run_id end
+    end
+
+    -- Once a restart-followed run finishes, stop overriding the focus guard so its
+    -- final state change doesn't disturb a focused user.
+    if _restart_follow_run == run_id
+        and entry.state ~= "running" and entry.state ~= "waiting" then
+        _restart_follow_run = nil
     end
 
     if _active_run_id == run_id then
-        vim.schedule(function() _follow_active_run(entry, prev_count) end)
+        vim.schedule(function() _follow_active_run(entry, prev_count, run_id) end)
     end
 
     vim.schedule(_refresh_winbar)
@@ -540,11 +569,19 @@ end
 local function _on_dispose(run_id)
     local idx = _run_idx(run_id)
     if not idx then return end
+    local was_active = _active_run_id == run_id
+    local name       = (_run_map[run_id] or {}).task_name
     table.remove(_runs, idx)
     _run_map[run_id]          = nil
     _known_buf_counts[run_id] = nil
 
-    if _active_run_id == run_id then
+    if was_active then
+        -- A restart disposes the old run, then synchronously launches the new one.
+        -- Remember this run's name so that same-tick re-run is recognised as a
+        -- restart and takes over the focused panel. Cleared next tick so a plain
+        -- manual disposal doesn't linger as a false restart hint.
+        _restart_pending_name = name
+        vim.schedule(function() _restart_pending_name = nil end)
         _set_active_run(_runs[#_runs])
         -- Switch synchronously so the window leaves the buffer before it is deleted.
         _show_active()
