@@ -103,7 +103,7 @@ local M = {
 
     schema = {
         description = "Definition of a `lua` task",
-        ["x-order"] = { "name", "type", "if_running", "depends_on", "depends_order", "save_buffers", "file" },
+        ["x-order"] = { "type", "if_running", "depends_on", "depends_order", "save_buffers", "file" },
         required    = { "file" },
         properties  = {
             file = {

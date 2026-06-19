@@ -130,17 +130,19 @@ local function _load_tasks(toml_path)
             or (short .. ": " .. e.message)
         return nil, nil, msg
     end
-    if not result.data.tasks then
+    if type(result.data.tasks) ~= "table" then
         return nil, nil, "no tasks table in " .. toml_path
     end
     local by_name = {}
     local ordered = {} ---@type string[]
-    for _, task in ipairs(result.data.tasks) do
-        if task.name and not by_name[task.name] then
-            by_name[task.name] = task
-            table.insert(ordered, task.name)
-        end
+    -- Tasks are a name-keyed map; stamp the key onto each task as `.name` so the
+    -- rest of the codebase can keep reading `task.name`.
+    for name, task in pairs(result.data.tasks) do
+        task.name     = name
+        by_name[name] = task
+        table.insert(ordered, name)
     end
+    table.sort(ordered) -- maps have no inherent order; present names alphabetically
     return by_name, ordered, nil
 end
 

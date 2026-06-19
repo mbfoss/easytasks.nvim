@@ -6,11 +6,6 @@ local M = {}
 --- Properties present on every task regardless of type.
 --- The `type` field itself is omitted here; `build` inserts it with the correct enum.
 M.base_properties = {
-    name = {
-        type        = "string",
-        minLength   = 1,
-        description = "Unique, non-empty name of the task",
-    },
     if_running = {
         type                  = "string",
         enum                  = { "wait", "restart", "refuse", "parallel",  },
@@ -92,8 +87,8 @@ function M.build(type_registry)
         )
         props.type = { const = name }
 
-        -- required = ["name", "type"] + whatever the type adds
-        local required = { "name", "type" }
+        -- required = ["type"] + whatever the type adds
+        local required = { "type" }
         for _, r in ipairs(ts.required or {}) do
             if not vim.tbl_contains(required, r) then
                 required[#required + 1] = r
@@ -129,14 +124,14 @@ function M.build(type_registry)
         required             = { "tasks" },
         properties           = {
             tasks = {
-                type                 = "array",
-                description          = "List of task definitions",
-                additionalProperties = false,
-                items                = {
+                type                 = "object",
+                description          = "Map of task name → task definition",
+                propertyNames        = { minLength = 1 },
+                additionalProperties = {
                     type        = "object",
-                    required    = { "name", "type" },
-                    ["x-order"] = { "name", "type" },
-                    description = "Single task definition entry",
+                    required    = { "type" },
+                    ["x-order"] = { "type" },
+                    description = "Single task definition",
                     properties  = vim.tbl_extend("force", vim.deepcopy(M.base_properties), {
                         type = {
                             type        = "string",
