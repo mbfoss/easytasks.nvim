@@ -452,6 +452,36 @@ local function _set_active_run(run_id, page)
     _active_page      = page ~= nil and page or (e and _best_page(e) or 0)
 end
 
+---Advance the shown page to the entry's highest-priority buffer, but only if it
+---outranks the page currently shown. The info page (0) counts as priority -1, so
+---any real buffer beats it; otherwise the buffer's own priority is compared.
+---@param entry easytasks.RunEntry
+local function _activate_best_page(entry)
+    local cur_pri = _active_page == 0
+        and -1
+        or (entry.bufnrs[_active_page] and entry.bufnrs[_active_page].priority or 0)
+    local best = _best_page(entry)
+    local best_pri = best > 0
+        and (entry.bufnrs[best].priority or 0)
+        or -1
+    if best_pri > cur_pri then _active_page = best end
+end
+
+---Switch the panel to the active run after a state change. Skipped while the
+---user is focused in the panel, unless this is a fresh run replacing the same
+---task. When new buffers appeared, advances to the best page before rendering.
+---@param entry      easytasks.RunEntry
+---@param prev_count integer  buffer count before this state change
+---@param replace    boolean  true if a fresh run is replacing the same task
+local function _follow_active_run(entry, prev_count, replace)
+    if not _win or not vim.api.nvim_win_is_valid(_win) then return end
+    if not replace and vim.api.nvim_get_current_win() == _win then return end
+    if #entry.bufnrs > prev_count then
+        _activate_best_page(entry)
+    end
+    _show_active()
+end
+
 ---@param run_id string
 ---@param entry  easytasks.RunEntry
 local function _on_state_change(run_id, entry)
@@ -486,24 +516,7 @@ local function _on_state_change(run_id, entry)
     local replace = is_new and (not prev_task_name or prev_task_name == entry.task_name)
 
     if _active_run_id == run_id then
-        vim.schedule(function()
-            if not _win or not vim.api.nvim_win_is_valid(_win) then return end
-            if not replace and vim.api.nvim_get_current_win() == _win then return end
-            if #entry.bufnrs > prev_count then
-                -- New buffer(s) added: advance to the highest-priority page if it
-                -- beats the one currently shown (-1 for the info page, otherwise
-                -- the buffer's own priority).
-                local cur_pri = _active_page == 0
-                    and -1
-                    or (entry.bufnrs[_active_page] and entry.bufnrs[_active_page].priority or 0)
-                local best = _best_page(entry)
-                local best_pri = best > 0
-                    and (entry.bufnrs[best].priority or 0)
-                    or -1
-                if best_pri > cur_pri then _active_page = best end
-            end
-            _show_active()
-        end)
+        vim.schedule(function() _follow_active_run(entry, prev_count, replace) end)
     end
 
     vim.schedule(_refresh_winbar)
