@@ -69,6 +69,7 @@ local function _setup_hl()
     vim.api.nvim_set_hl(0, "EasyTasksBadgeErr", { link = "DiagnosticError", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksBadgeWarn", { link = "DiagnosticWarn", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksBadgeHint", { link = "DiagnosticHint", default = true })
+    vim.api.nvim_set_hl(0, "EasyTasksBadgeMuted", { link = "WinBar", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksJumpKey",
         { fg = 0xffffff, bg = 0xcc2222, bold = true, default = true })
     vim.api.nvim_set_hl(0, "EasyTasksUnread", { link = "DiagnosticHint", default = true })
@@ -81,12 +82,12 @@ local _badge = {
     ok      = { icon = "✓", hl = "EasyTasksBadgeOk" },
     failed  = { icon = "✗", hl = "EasyTasksBadgeErr" },
     stopped = { icon = "✗", hl = "EasyTasksBadgeHint" },
-    idle    = { icon = "●", hl = "Comment" },
+    idle    = { icon = "●", hl = "EasyTasksBadgeMuted" },
 }
 
 -- shell tabs are not tasks, so they show a fixed neutral badge regardless of
 -- whether the shell is still running or has exited.
-local _shell_badge = { icon = "❯", hl = "Comment" }
+local _shell_badge = { icon = "❯", hl = "EasyTasksBadgeMuted" }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ end
 ---@return string
 local function _build_winbar(width)
     if #_runs == 0 then
-        return "%#WinBar# %#Comment#No tasks%#WinBar#"
+        return "%#WinBar# %#EasyTasksBadgeMuted#No tasks%#WinBar#"
     end
 
     local active_idx = _active_run_id and _run_idx(_active_run_id)
@@ -324,7 +325,7 @@ local function _build_winbar(width)
                     if k ~= "" and #be.label > 0 then
                         -- replace first label char with jump key; width unchanged
                         local rest     = vim.fn.strcharpart(be.label, 1)
-                        local after_hl = is_cur and tab_hl or "%#Comment#"
+                        local after_hl = is_cur and tab_hl or "%#EasyTasksBadgeMuted#"
                         if has_unread then
                             part = string.format(
                                 "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%%#EasyTasksUnread#•%s%%X",
@@ -348,7 +349,7 @@ local function _build_winbar(width)
                                 page_id, be.label, tab_hl)
                         else
                             part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%%#Comment#%s%%#EasyTasksUnread#•%s%%X",
+                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%%#EasyTasksUnread#•%s%%X",
                                 page_id, be.label, tab_hl)
                         end
                     elseif is_cur then
@@ -356,7 +357,7 @@ local function _build_winbar(width)
                             "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, be.label)
                     else
                         part = string.format(
-                            "%%%d@v:lua._EasyTasksWbc@%%#Comment#%s%s%%X",
+                            "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%s%%X",
                             page_id, be.label, tab_hl)
                     end
                 end
@@ -366,7 +367,7 @@ local function _build_winbar(width)
         end
 
         if run_idx > 1 then
-            push(3, "%#Comment#")
+            push(3, "%#EasyTasksBadgeMuted#")
             push(2, "│")
         end
         push(2, " ")
