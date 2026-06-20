@@ -1,7 +1,7 @@
---- Shared restricted-environment machinery for the `lua` and `lua_file` task
---- types: building the curated globals table and running a compiled chunk in
---- it. See the module-level comment in each task type for the security
---- caveats of this "restriction".
+--- Restricted-environment machinery for the `lua_file` task type: building the
+--- curated globals table and running a compiled chunk in it. See the
+--- module-level comment in the task type for the security caveats of this
+--- "restriction".
 local M = {}
 
 -- Names exposed to a lua task: Lua's own standard library plus Neovim's `vim`
