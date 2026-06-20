@@ -34,7 +34,6 @@ local project      = require("easytasks.project")
 ---@field message string
 
 ---@class easytasks.RunCtx
----@field tasks      table<string,table>
 ---@field add_bufnr  fun(bufnr: integer, label?: string, priority?: integer)
 ---@field report     fun(message: string)
 
@@ -373,7 +372,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary)
 
     ---@type easytasks.RunCtx
     local ctx = {
-        tasks     = tasks,
         report    = function(msg) _append_report(run_id, msg) end,
         add_bufnr = function(bufnr, label, priority)
             if not label then

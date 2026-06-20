@@ -59,7 +59,7 @@ describe("lua_file task", function()
     it("runs a script file and reports its output", function()
         local root = make_project()
         write_script(root, "scripts/hello.lua", {
-            "report('hello from file')",
+            "context.report('hello from file')",
             "return true",
         })
         vim.fn.chdir(root)
@@ -71,7 +71,7 @@ describe("lua_file task", function()
 
     it("resolves relative paths against the project root, not cwd", function()
         local root = make_project()
-        write_script(root, "task.lua", { "report('ran')" })
+        write_script(root, "task.lua", { "context.report('ran')" })
         vim.fn.chdir(root)
         -- move cwd somewhere else; find_root() should still locate the project
         -- because the test stays inside `root`, so a bare relative path resolves
@@ -83,7 +83,7 @@ describe("lua_file task", function()
 
     it("accepts an absolute path", function()
         local root = make_project()
-        local abs = write_script(root, "abs.lua", { "report('abs')" })
+        local abs = write_script(root, "abs.lua", { "context.report('abs')" })
         vim.fn.chdir(root)
 
         local ok, out = run({ name = "t", type = "lua_file", file = abs })
@@ -94,9 +94,9 @@ describe("lua_file task", function()
     it("runs in a restricted environment", function()
         local root = make_project()
         write_script(root, "env.lua", {
-            "report('vim=' .. tostring(vim ~= nil))",
-            "report('require=' .. tostring(require ~= nil))",
-            "report('task=' .. tostring(task.name))",
+            "context.report('vim=' .. tostring(vim ~= nil))",
+            "context.report('require=' .. tostring(require ~= nil))",
+            "context.report('task=' .. tostring(context.task.name))",
         })
         vim.fn.chdir(root)
 
