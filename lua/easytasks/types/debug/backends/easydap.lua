@@ -85,7 +85,7 @@ end
 
 ---@return easytasks.debug.Backend?
 return function()
-    local ok, m      = pcall(require, "easydap")
+    local ok, m      = pcall(require, "easydap.task")
     local ok2, adaps = pcall(require, "easydap.adapters")
     if not ok then return nil end
     local adapters = ok2 and function()
@@ -95,7 +95,14 @@ return function()
     end or nil
     return {
         schema    = _schema(adapters),
-        run       = m.run,
+        -- easydap.run takes (task, opts); adapt the backend's (params, ctx, on_done).
+        run       = function(params, ctx, on_done)
+            return m.start(params, {
+                    add_bufnr = ctx.add_bufnr,
+                    report    = ctx.report,
+                },
+                on_done)
+        end,
         adapters  = adapters,
         templates = ok2 and require("easydap.task").templates or nil,
     }
