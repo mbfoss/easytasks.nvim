@@ -12,13 +12,6 @@ end
 vim.opt.rtp:append(".")
 vim.opt.rtp:append(plenary_dir)
 
--- easytasks.setup() requires `tomltools`; make it discoverable. Prefer an
--- explicit override, otherwise fall back to the sibling plugin directory.
-local tomltools_dir = os.getenv("NVIM_TOMLTOOLS_DIR") or "../tomltools.nvim"
-if vim.fn.isdirectory(tomltools_dir) == 1 then
-    vim.opt.rtp:append(tomltools_dir)
-end
-
 local easytasks = require("easytasks")
 easytasks.setup()
 

@@ -3,7 +3,7 @@
 --- and task state tracking.
 local async        = require("easytasks.util.async")
 local Signal       = require("easytasks.util.Signal")
-local tomltools    = require("tomltools")
+local toml         = require("easytasks.toml")
 local task_types   = require("easytasks.types")
 local resolver     = require("easytasks.runner.resolver")
 local notify       = require("easytasks.ui")
@@ -122,7 +122,7 @@ local function _load_tasks(toml_path)
     local lines = vim.fn.readfile(toml_path)
     if not lines then return nil, nil, nil, "cannot read " .. toml_path end
     local short  = vim.fn.fnamemodify(toml_path, ":~:.")
-    local result = tomltools.parse(table.concat(lines, "\n") .. "\n", task_types.build_resolved_schema())
+    local result = toml.parse(table.concat(lines, "\n") .. "\n", task_types.build_resolved_schema())
     if not result.ok then
         local e   = result.errors[1]
         local msg = e.range and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message)
@@ -362,7 +362,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables
     -- their behaviour is entirely their dependencies, so dumping their config
     -- after the deps have already run is just noise.
     if not type_def.no_command then
-        _append_report(run_id, "resolved task:\n" .. table.concat(tomltools.encode(task), "\n"))
+        _append_report(run_id, "resolved task:\n" .. table.concat(toml.encode(task), "\n"))
     end
 
     -- Save buffers immediately before this task's own effective run (after its

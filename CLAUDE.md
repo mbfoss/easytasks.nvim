@@ -5,8 +5,9 @@
 `easytasks.nvim` is a Neovim task runner. Tasks are declared in a per-project
 TOML file (`tasks.toml` by default) and run from within Neovim via the `:Tasks`
 command. The plugin provides schema-backed LSP completion/diagnostics for the
-tasks file (through `tomltools`), several built-in task types, task
-dependencies, value macros, and a status-panel UI.
+tasks file (via a vendored TOML engine + language server under
+[toml/](lua/easytasks/toml/) and [lsp/](lua/easytasks/lsp/)), several built-in
+task types, task dependencies, value macros, and a status-panel UI.
 
 The public API lives in [lua/easytasks/init.lua](lua/easytasks/init.lua):
 `setup`, `enable`/`disable`, and the extension points `register_task_type`,
@@ -28,6 +29,13 @@ The public API lives in [lua/easytasks/init.lua](lua/easytasks/init.lua):
   `depends_order`) into the full schema used by the LSP.
 - [macros.lua](lua/easytasks/macros.lua) — `${name}` / `${name:args}`
   substitutions available in task config values.
+- [toml/](lua/easytasks/toml/) — vendored TOML engine (parser, decoder,
+  encoder, schema validator/navigator). [toml/init.lua](lua/easytasks/toml/init.lua)
+  exposes the public `parse`/`encode`/`find_path` API used by the runner and
+  commands.
+- [lsp/](lua/easytasks/lsp/) — vendored in-process language server for the tasks
+  file (completion, diagnostics, hover, code actions, formatting), driven by the
+  resolved task schema. Attached by name to the tasks buffer only.
 - [ui/](lua/easytasks/ui/) — status panel and tree view.
 - [util/](lua/easytasks/util/) — shared helpers (async, signals, tree, terminal,
   etc.).

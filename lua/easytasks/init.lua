@@ -60,7 +60,7 @@ function M.enable()
         group    = augroup,
         callback = function(ev)
             if not _is_tasks_buf(ev.buf) then return end
-            require("tomltools.lsp").start(ev.buf, {
+            require("easytasks.lsp").start(ev.buf, {
                 schema = function() return require("easytasks.types").build_resolved_schema() end,
             })
         end,
@@ -73,10 +73,10 @@ function M.disable()
     if not _enabled then return end
     _enabled = false
     vim.api.nvim_del_augroup_by_name("easytasks_tasks_lsp")
-    local tomltools_lsp = require("tomltools.lsp")
+    local lsp = require("easytasks.lsp")
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
         if _is_tasks_buf(buf) then
-            tomltools_lsp.stop(buf)
+            lsp.stop(buf)
         end
     end
 end
