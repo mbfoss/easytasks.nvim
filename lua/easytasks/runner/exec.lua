@@ -33,8 +33,14 @@ local project      = require("easytasks.project")
 ---@field time    integer  unix timestamp
 ---@field message string
 
+---Presentation options for a buffer registered with the run host.
+---@class easytasks.AddBufOpts
+---@field label?      string
+---@field priority?   integer
+---@field autoscroll? boolean
+
 ---@class easytasks.RunCtx
----@field add_bufnr  fun(bufnr: integer, label?: string, priority?: integer, autoscroll?: boolean)
+---@field add_bufnr  fun(bufnr: integer, opts?: easytasks.AddBufOpts)
 ---@field report     fun(message: string)
 
 ---@alias easytasks.TaskState "idle"|"running"|"waiting"|"ok"|"failed"|"stopped"
@@ -373,16 +379,18 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables
     ---@type easytasks.RunCtx
     local ctx = {
         report    = function(msg) _append_report(run_id, msg) end,
-        add_bufnr = function(bufnr, label, priority, autoscroll)
+        add_bufnr = function(bufnr, opts)
+            opts = opts or {}
+            local label = opts.label
             if not label then
                 label = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
             end
-            -- The producer signals autoscroll through the contract arg; the status
+            -- The producer signals autoscroll through the contract opts; the status
             -- panel reads it from this buffer-local var (set here, not by the producer).
-            if autoscroll then
+            if opts.autoscroll then
                 pcall(vim.api.nvim_buf_set_var, bufnr, "easytasks_autoscroll", true)
             end
-            table.insert(entry.bufnrs, { bufnr = bufnr, label = label, priority = priority or 0 })
+            table.insert(entry.bufnrs, { bufnr = bufnr, label = label, priority = opts.priority or 0 })
             _notify_state(run_id)
             vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
                 buffer   = bufnr,
