@@ -106,6 +106,6 @@ return function()
             })
         end,
         adapters  = adapters,
-        templates = m.templates,
+        templates = require("easytasks.types.debug.backends.easydap_templates"),
     }
 end
