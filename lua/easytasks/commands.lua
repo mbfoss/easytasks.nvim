@@ -214,7 +214,7 @@ end
 function M.register(cmd_name)
     local usercmd = require("easytasks.util.usercmd")
     usercmd.register_user_cmd(cmd_name,
-        function(_, args, _)
+        function(_, args, cmd_opts)
             local action = args[1]
             table.remove(args, 1)
             if action == nil or action == "" or action == "run" then
@@ -231,8 +231,8 @@ function M.register(cmd_name)
                 _add_template_command()
             elseif action == "panel" then
                 local sub = args[1]
-                if sub == "pick" then
-                    status_panel.jump()
+                if sub == "jump" then
+                    status_panel.jump(cmd_opts.count)
                 elseif sub == "remove" then
                     _dispose_command()
                 elseif sub == "clear" then
@@ -243,7 +243,7 @@ function M.register(cmd_name)
             else
                 local _sub = usercmd.get_subcommand(action)
                 if _sub then
-                    _sub.run(action, args, _)
+                    _sub.run(action, args, cmd_opts)
                 else
                     ui.notify_warning("Invalid action: " .. tostring(action))
                 end
@@ -251,6 +251,7 @@ function M.register(cmd_name)
         end,
         {
             desc = cmd_name,
+            count = true,
             subcommand_fn = function(_, rest, arg_lead)
                 if #rest == 0 then
                     local built_in = { "run", "rerun", "shell", "stop", "cancel", "template", "panel" }
@@ -258,7 +259,7 @@ function M.register(cmd_name)
                     return built_in
                 end
                 if rest[1] == "panel" and #rest == 1 then
-                    return { "pick", "remove", "clear" }
+                    return { "jump", "remove", "clear" }
                 end
                 if #rest >= 1 then
                     local _sub = usercmd.get_subcommand(rest[1])

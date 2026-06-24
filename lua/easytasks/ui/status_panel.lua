@@ -26,11 +26,8 @@ local _restart_pending_name = nil ---@type string?
 local _restart_follow_run   = nil ---@type string?
 
 local _subscribed       = false
-local _jump_mode        = false
 local _attached_bufs    = {} ---@type table<integer, true>  bufnrs where nvim_buf_attach has been called
 local _unread_bufnrs    = {} ---@type table<integer, true>  bufnrs with new lines added while not visible
-local _jump_targets     = {} ---@type {run_id:string, page:integer}[]
-local _JUMP_KEYS        = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()"
 
 local _log_buf          = nil ---@type integer?
 local _empty_buf        = nil ---@type integer?
@@ -70,8 +67,6 @@ local function _setup_hl()
     vim.api.nvim_set_hl(0, "EasyTasksBadgeWarn", { link = "DiagnosticWarn", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksBadgeHint", { link = "DiagnosticHint", default = true })
     vim.api.nvim_set_hl(0, "EasyTasksBadgeMuted", { link = "WinBar", default = true })
-    vim.api.nvim_set_hl(0, "EasyTasksJumpKey",
-        { fg = 0xffffff, bg = 0xcc2222, bold = true, default = true })
     vim.api.nvim_set_hl(0, "EasyTasksUnread", { link = "DiagnosticHint", default = true })
 end
 
@@ -292,8 +287,6 @@ local function _build_winbar(width)
     local items = {} ---@type {[1]:integer,[2]:string}[]
     local function push(kind, text) items[#items + 1] = { kind, text } end
 
-    local jump_idx = 0
-
     for run_idx, run_id in ipairs(_runs) do
         local entry = _run_map[run_id]
         if not entry then goto continue end
@@ -301,65 +294,33 @@ local function _build_winbar(width)
         local is_active = run_idx == active_idx
         local tab_hl    = is_active and "%#EasyTasksActiveTab#" or "%#WinBar#"
 
-        -- assign jump key for the info tab before building page_sfx so indices
-        -- match _jump_targets order (info tab first, then buffer tabs)
-        local task_key  = ""
-        if _jump_mode then
-            jump_idx = jump_idx + 1
-            task_key = _JUMP_KEYS:sub(jump_idx, jump_idx)
-        end
-
         -- buffer tabs shown for every task; task name itself is the info tab.
         -- shell tabs have no info/log page — the name tab is the terminal itself.
         local page_sfx = ""
         if #entry.bufnrs > 0 and not entry.is_shell then
             local parts = {}
             for pi, be in ipairs(entry.bufnrs) do
-                local page_id   = run_idx * 10 + pi
-                local is_cur    = is_active and pi == _active_page
+                local page_id    = run_idx * 10 + pi
+                local is_cur     = is_active and pi == _active_page
                 local has_unread = _unread_bufnrs[be.bufnr]
                 local part
-                if _jump_mode then
-                    jump_idx = jump_idx + 1
-                    local k  = _JUMP_KEYS:sub(jump_idx, jump_idx)
-                    if k ~= "" and #be.label > 0 then
-                        -- replace first label char with jump key; width unchanged
-                        local rest     = vim.fn.strcharpart(be.label, 1)
-                        local after_hl = is_cur and tab_hl or "%#EasyTasksBadgeMuted#"
-                        if has_unread then
-                            part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%%#EasyTasksUnread#•%s%%X",
-                                page_id, k, after_hl, rest, tab_hl)
-                        elseif is_cur then
-                            part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%%X",
-                                page_id, k, after_hl, rest)
-                        else
-                            part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksJumpKey#%s%s%s%s%%X",
-                                page_id, k, after_hl, rest, tab_hl)
-                        end
-                    end
-                end
-                if not part then
-                    if has_unread then
-                        if is_cur then
-                            part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%s%%#EasyTasksUnread#•%s%%X",
-                                page_id, be.label, tab_hl)
-                        else
-                            part = string.format(
-                                "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%%#EasyTasksUnread#•%s%%X",
-                                page_id, be.label, tab_hl)
-                        end
-                    elseif is_cur then
+                if has_unread then
+                    if is_cur then
                         part = string.format(
-                            "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, be.label)
+                            "%%%d@v:lua._EasyTasksWbc@%s%%#EasyTasksUnread#•%s%%X",
+                            page_id, be.label, tab_hl)
                     else
                         part = string.format(
-                            "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%s%%X",
+                            "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%%#EasyTasksUnread#•%s%%X",
                             page_id, be.label, tab_hl)
                     end
+                elseif is_cur then
+                    part = string.format(
+                        "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, be.label)
+                else
+                    part = string.format(
+                        "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%s%%X",
+                        page_id, be.label, tab_hl)
                 end
                 parts[#parts + 1] = part
             end
@@ -373,17 +334,11 @@ local function _build_winbar(width)
         push(2, " ")
         push(3, tab_hl)
         push(3, string.format("%%%d@v:lua._EasyTasksWbc@", run_idx * 10))
+        push(2, run_idx .. " ")
         push(3, "%#" .. b.hl .. "#")
         push(2, b.icon .. " ")
         push(3, tab_hl)
-        if _jump_mode and task_key ~= "" then
-            push(3, "%#EasyTasksJumpKey#")
-            push(2, task_key)
-            push(3, tab_hl)
-            push(1, vim.fn.strcharpart(entry.task_name, 1))
-        else
-            push(1, entry.task_name)
-        end
+        push(1, entry.task_name)
         push(3, "%X")
         if page_sfx ~= "" then push(3, page_sfx) end
         push(3, "%#WinBar#")
@@ -734,46 +689,24 @@ function M.toggle()
     end
 end
 
---- Show jump-key hints in the winbar, then navigate to whichever tab the user picks.
-function M.jump()
+--- Activate the nth panel tab (1-based, left to right, matching the number
+--- prefixes shown in the winbar) and focus the panel on it. Driven by the
+--- command count, e.g. `:3Tasks panel jump`.
+---@param n integer?  tab number; defaults to 1 when omitted or non-positive
+function M.jump(n)
     M.open()
-    if #_runs == 0 then return end
-
-    -- build flat target list in the same order _build_winbar assigns keys:
-    -- info tab then buffer tabs for each run
-    _jump_targets = {}
-    for _, run_id in ipairs(_runs) do
-        local entry = _run_map[run_id]
-        if not entry then goto continue end
-        table.insert(_jump_targets, { run_id = run_id, page = 0 })
-        if not entry.is_shell then
-            for pi = 1, #entry.bufnrs do
-                table.insert(_jump_targets, { run_id = run_id, page = pi })
-            end
-        end
-        ::continue::
+    n = (n and n > 0) and n or 1
+    local run_id = _runs[n]
+    if not run_id then
+        require("easytasks.ui").notify_warning("no tab " .. n)
+        return
     end
-
-    _jump_mode = true
+    _set_active_run(run_id)
+    _show_active()
     _refresh_winbar()
-    vim.cmd("redraw")
-
-    local char = vim.fn.getcharstr()
-    _jump_mode = false
-
-    if char ~= "\27" then
-        for i, target in ipairs(_jump_targets) do
-            if _JUMP_KEYS:sub(i, i) == char then
-                _set_active_run(target.run_id, target.page)
-                _show_active()
-                break
-            end
-        end
+    if _win and vim.api.nvim_win_is_valid(_win) then
+        vim.api.nvim_set_current_win(_win)
     end
-
-    _jump_targets = {}
-
-    _refresh_winbar()
 end
 
 --- Open an interactive shell in a standalone panel tab (not backed by a task).

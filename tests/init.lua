@@ -9,6 +9,7 @@ if vim.fn.isdirectory(plenary_dir) == 0 then
     vim.fn.system({ "git", "-C", plenary_dir, "checkout", "FETCH_HEAD" })
 end
 
+
 vim.opt.rtp:append(".")
 vim.opt.rtp:append(plenary_dir)
 
@@ -16,3 +17,7 @@ local easytasks = require("easytasks")
 easytasks.setup()
 
 vim.cmd("runtime plugin/plenary.vim")
+
+local testdir = "tests/"
+require('plenary.test_harness').test_directory(testdir,
+    { init = testdir })
