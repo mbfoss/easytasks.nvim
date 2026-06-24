@@ -14,7 +14,7 @@ unit_test:
 
 .PHONY: toml_test
 toml_test:
-	@cd tests && /Users/Dev/homebrew/Cellar/toml-test/2.2.0/bin/toml-test \
+	@cd tests && toml-test \
 		test \
 		--toml=1.1.0 \
 		--color=never \

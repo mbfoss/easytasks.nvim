@@ -29,6 +29,12 @@ local _subscribed       = false
 local _attached_bufs    = {} ---@type table<integer, true>  bufnrs where nvim_buf_attach has been called
 local _unread_bufnrs    = {} ---@type table<integer, true>  bufnrs with new lines added while not visible
 
+-- Flat, winbar-order map from global page number to its navigable target. Every
+-- tab and page the winbar draws gets one sequential number (left to right);
+-- _build_winbar rebuilds this each render and it is the single source of truth
+-- for click handling and `:Tasks panel jump N`.
+local _page_targets     = {} ---@type { run_id: string, page: integer }[]
+
 local _log_buf          = nil ---@type integer?
 local _empty_buf        = nil ---@type integer?
 
@@ -287,6 +293,10 @@ local function _build_winbar(width)
     local items = {} ---@type {[1]:integer,[2]:string}[]
     local function push(kind, text) items[#items + 1] = { kind, text } end
 
+    -- rebuild the global page numbering as we render; click/jump read it back.
+    _page_targets = {}
+    local gnum = 0 -- running global page number, incremented per navigable target
+
     for run_idx, run_id in ipairs(_runs) do
         local entry = _run_map[run_id]
         if not entry then goto continue end
@@ -294,33 +304,43 @@ local function _build_winbar(width)
         local is_active = run_idx == active_idx
         local tab_hl    = is_active and "%#EasyTasksActiveTab#" or "%#WinBar#"
 
+        -- the task name tab is its info page (page 0) and takes the first number for
+        -- this run; shells have no info page, so the name tab is the terminal (we
+        -- still record page 0 — _show_active resolves shells to their terminal buf).
+        gnum            = gnum + 1
+        local name_num  = gnum
+        _page_targets[name_num] = { run_id = run_id, page = 0 }
+
         -- buffer tabs shown for every task; task name itself is the info tab.
         -- shell tabs have no info/log page — the name tab is the terminal itself.
         local page_sfx = ""
         if #entry.bufnrs > 0 and not entry.is_shell then
             local parts = {}
             for pi, be in ipairs(entry.bufnrs) do
-                local page_id    = run_idx * 10 + pi
+                gnum             = gnum + 1
+                local page_num   = gnum
+                _page_targets[page_num] = { run_id = run_id, page = pi }
                 local is_cur     = is_active and pi == _active_page
                 local has_unread = _unread_bufnrs[be.bufnr]
+                local lbl        = page_num .. ":" .. be.label
                 local part
                 if has_unread then
                     if is_cur then
                         part = string.format(
                             "%%%d@v:lua._EasyTasksWbc@%s%%#EasyTasksUnread#•%s%%X",
-                            page_id, be.label, tab_hl)
+                            page_num, lbl, tab_hl)
                     else
                         part = string.format(
                             "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%%#EasyTasksUnread#•%s%%X",
-                            page_id, be.label, tab_hl)
+                            page_num, lbl, tab_hl)
                     end
                 elseif is_cur then
                     part = string.format(
-                        "%%%d@v:lua._EasyTasksWbc@%s%%X", page_id, be.label)
+                        "%%%d@v:lua._EasyTasksWbc@%s%%X", page_num, lbl)
                 else
                     part = string.format(
                         "%%%d@v:lua._EasyTasksWbc@%%#EasyTasksBadgeMuted#%s%s%%X",
-                        page_id, be.label, tab_hl)
+                        page_num, lbl, tab_hl)
                 end
                 parts[#parts + 1] = part
             end
@@ -333,8 +353,8 @@ local function _build_winbar(width)
         end
         push(2, " ")
         push(3, tab_hl)
-        push(3, string.format("%%%d@v:lua._EasyTasksWbc@", run_idx * 10))
-        push(2, run_idx .. " ")
+        push(3, string.format("%%%d@v:lua._EasyTasksWbc@", name_num))
+        push(2, name_num .. " ")
         push(3, "%#" .. b.hl .. "#")
         push(2, b.icon .. " ")
         push(3, tab_hl)
@@ -508,13 +528,11 @@ end
 
 -- ── Winbar click handler (global — required by %N@v:lua.fn@ syntax) ───────────
 
----@param id integer  run_idx*10 for tab clicks, run_idx*10+page_idx for page labels
+---@param id integer  global page number assigned by _build_winbar
 _G._EasyTasksWbc = function(id)
-    local run_idx  = math.floor(id / 10)
-    local page_idx = id % 10
-    local run_id   = _runs[run_idx]
-    if not run_id then return end
-    _set_active_run(run_id, page_idx)
+    local target = _page_targets[id]
+    if not target then return end
+    _set_active_run(target.run_id, target.page)
     _show_active()
     _refresh_winbar()
 end
@@ -689,19 +707,24 @@ function M.toggle()
     end
 end
 
---- Activate the nth panel tab (1-based, left to right, matching the number
---- prefixes shown in the winbar) and focus the panel on it. Driven by the
---- command count, e.g. `:3Tasks panel jump`.
----@param n integer?  tab number; defaults to 1 when omitted or non-positive
+--- Activate the nth panel page (1-based, left to right, matching the number
+--- prefixes shown in the winbar) and focus the panel on it. The numbering is
+--- global across every tab and page — a task's name/info tab, each of its buffer
+--- pages, and each shell all get one sequential number. Accepts both an argument
+--- (`:Tasks panel jump 3`) and a command count (`:3Tasks panel jump`).
+---@param n integer?  page number; defaults to 1 when omitted or non-positive
 function M.jump(n)
     M.open()
+    -- ensure _page_targets reflects current state (open() refreshes on first open;
+    -- this also covers the already-open case).
+    _refresh_winbar()
     n = (n and n > 0) and n or 1
-    local run_id = _runs[n]
-    if not run_id then
-        require("easytasks.ui").notify_warning("no tab " .. n)
+    local target = _page_targets[n]
+    if not target then
+        require("easytasks.ui").notify_warning("no page " .. n)
         return
     end
-    _set_active_run(run_id)
+    _set_active_run(target.run_id, target.page)
     _show_active()
     _refresh_winbar()
     if _win and vim.api.nvim_win_is_valid(_win) then
