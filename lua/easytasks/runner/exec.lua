@@ -127,10 +127,10 @@ end
 local function _load_tasks(toml_path)
     local lines = vim.fn.readfile(toml_path)
     if not lines then return nil, nil, nil, "cannot read " .. toml_path end
-    local short  = vim.fn.fnamemodify(toml_path, ":~:.")
-    local result = toml.parse(table.concat(lines, "\n") .. "\n", task_types.build_resolved_schema())
+    local short        = vim.fn.fnamemodify(toml_path, ":~:.")
+    local data, errors = toml.decode(table.concat(lines, "\n") .. "\n", task_types.build_resolved_schema())
 
-    ---@param e tomltools.Error|tomltools.ParseError
+    ---@param e tomltools.Error
     ---@return string
     local function _fmt_err(e)
         return e.range and (short .. ":" .. (e.range[1] + 1) .. ": " .. e.message)
@@ -138,10 +138,10 @@ local function _load_tasks(toml_path)
     end
 
     -- Any parse, decode, or schema-validation error is fatal.
-    if #result.errors > 0 then
-        return nil, nil, nil, _fmt_err(result.errors[1])
+    if #errors > 0 then
+        return nil, nil, nil, _fmt_err(errors[1])
     end
-    if not result.data or not result.data.tasks then
+    if not data or not data.tasks then
         return nil, nil, nil, "no tasks table in " .. toml_path
     end
 
@@ -149,7 +149,7 @@ local function _load_tasks(toml_path)
     local ordered    = {} ---@type string[]
     local duplicates = {} ---@type string[]
     local seen_dup   = {}
-    for _, task in ipairs(result.data.tasks) do
+    for _, task in ipairs(data.tasks) do
         if task.name then
             if by_name[task.name] then
                 if not seen_dup[task.name] then
@@ -167,7 +167,7 @@ local function _load_tasks(toml_path)
         return nil, nil, nil, ("%s: duplicate task name%s: %s"):format(
             short, #duplicates == 1 and "" or "s", table.concat(duplicates, ", "))
     end
-    return by_name, ordered, result.data.variables or {}, nil
+    return by_name, ordered, data.variables or {}, nil
 end
 
 -- ─── Dependency validation ───────────────────────────────────────────────────
