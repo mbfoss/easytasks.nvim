@@ -51,7 +51,7 @@ end
 ---@param schema table
 ---@param data any
 ---@param node_id integer?
----@param dt tomltools.toml.DecodeTree?
+---@param dt tomltools.DecodeTree?
 ---@param errors loop.json.ValidationError[]
 local function _validate(schema, data, node_id, dt, errors)
     local function child_id(key)
@@ -347,7 +347,7 @@ end
 
 ---@param schema table
 ---@param data any
----@param dt tomltools.toml.DecodeTree?
+---@param dt tomltools.DecodeTree?
 ---@return boolean valid
 ---@return loop.json.ValidationError[] errors
 function M.validate(schema, data, dt)

@@ -14,4 +14,10 @@ unit_test:
 .PHONY: test
 test: unit_test
 
+# Re-vendor the TOML engine from upstream (see development.md). Pass REF to pin a
+# branch/tag/commit, e.g. `make update-tomltools REF=v1.2.3`.
+.PHONY: update-tomltools
+update-tomltools:
+	@scripts/update-tomltools.sh ${REF}
+
 

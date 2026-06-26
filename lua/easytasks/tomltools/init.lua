@@ -12,17 +12,12 @@ local M         = {}
 ---@field range   integer[]?  { r1, c1, r2, c2 } 0-indexed; nil when location is unknown
 ---@field message string
 
----@class tomltools.ParseResult
----@field data   table?
----@field errors tomltools.Error[]
----@field ok     boolean
-
 --- Parse, decode, and optionally validate a TOML string.
 --- All error types (parse, decode, schema) are normalised to { range, message }.
 ---@param text   string
 ---@param schema table?  JSON Schema; validation is skipped when nil
----@return tomltools.ParseResult
-function M.parse(text, schema)
+---@return table? data, tomltools.Error[]
+function M.decode(text, schema)
     ---@type tomltools.Error[]
     local errors = {}
 
@@ -31,7 +26,7 @@ function M.parse(text, schema)
         errors[#errors + 1] = { range = e.range, message = e.message }
     end
     if not parsed.cst then
-        return { ok = false, errors = errors }
+        return nil, errors
     end
 
     local decoded = decoder.decode(parsed.cst)
@@ -39,7 +34,7 @@ function M.parse(text, schema)
         errors[#errors + 1] = { range = e.range, message = e.message }
     end
     if not decoded.data then
-        return { ok = false, errors = errors }
+        return nil, errors
     end
 
     if schema then
@@ -53,24 +48,7 @@ function M.parse(text, schema)
         end
     end
 
-    return {
-        ok     = #errors == 0,
-        data   = decoded.data,
-        errors = errors,
-    }
-end
-
---- Decode a TOML string into a Lua table.
---- Returns the decoded table on success, or `nil` plus the list of errors.
----@param text string
----@return table?            data
----@return tomltools.Error[]? errors
-function M.decode(text)
-    local result = M.parse(text)
-    if not result.ok then
-        return nil, result.errors
-    end
-    return result.data
+    return decoded.data, errors
 end
 
 --- Reformat a TOML document, normalising whitespace and layout while preserving

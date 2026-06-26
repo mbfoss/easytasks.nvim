@@ -1,0 +1,5 @@
+# Pinned upstream commit for lua/easytasks/tomltools.
+# Written by scripts/update-tomltools.sh on 2026-06-26T06:56:02Z.
+repo=https://github.com/mbfoss/tomltools.git
+ref=main
+commit=f24c3c4d9b1ed32ee8c1a60d3af4c694825f25ce

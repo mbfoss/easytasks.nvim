@@ -63,53 +63,34 @@ namespace instead:
 | Imported as | `require("easytasks.tomltools")` (and `.parser`, `.Cst`, …) |
 
 **Invariant:** every internal `require("tomltools…")` inside the vendored files
-is rewritten to `require("easytasks.tomltools…")`. This rewrite must be
-re-applied after every update (step 4 below). LuaCATS type annotations
+is rewritten to `require("easytasks.tomltools…")`. The update script below
+re-applies this rewrite on every sync. LuaCATS type annotations
 (`---@class tomltools.Cst`, etc.) are left as the upstream `tomltools.*` names —
 they are documentation only and do not affect module resolution.
 
 ### Updating the vendored engine
 
-The upstream remote (added once):
+Run the update script. It adds the upstream remote if missing, mirrors
+`lua/tomltools/*.lua` into `lua/easytasks/tomltools/` with the namespace rewrite
+applied, prunes any files upstream deleted, verifies no bare `tomltools` require
+survived, and records the pinned commit in [scripts/tomltools.lock](scripts/tomltools.lock):
 
 ```sh
-git remote add tomltools https://github.com/mbfoss/tomltools.git
+scripts/update-tomltools.sh          # vendor upstream main
+scripts/update-tomltools.sh v1.2.3   # …or a specific tag / branch / commit
 ```
 
-`git subtree` cannot split a subdirectory straight out of a *remote* ref, and
-upstream nests the library at `lua/tomltools/`. So the update extracts that
-subdir onto a throwaway branch first, then merges it into the vendored prefix:
+The script does **not** commit. Review the diff, run the suite, then commit:
 
 ```sh
-# 1. Fetch upstream.
-git fetch tomltools
-
-# 2. Extract just lua/tomltools/ into a split branch.
-#    (no --squash on the temp add: `subtree split` needs real history to walk)
-git switch -c _tt_tmp
-git subtree add   --prefix=_ttsrc tomltools main
-git subtree split --prefix=_ttsrc/lua/tomltools --branch _tt_split
-git switch main
-git branch -D _tt_tmp                 # drop the throwaway; _tt_split survives
-
-# 3. Merge the new snapshot into the vendored prefix.
-git subtree merge --prefix=lua/easytasks/tomltools _tt_split --squash
-
-# 4. Re-apply the private-namespace rewrite (upstream uses bare `tomltools.*`).
-perl -pi -e 's/(require\(\s*["\x27])tomltools/${1}easytasks.tomltools/g' \
-  lua/easytasks/tomltools/*.lua
-
-# 5. Verify nothing bare remains, then commit and clean up.
-grep -rEn 'require\(\s*["'"'"']tomltools' lua/easytasks/tomltools \
-  && echo "!! fix the lines above" || echo "ok: all requires namespaced"
-git add lua/easytasks/tomltools
+git diff lua/easytasks/tomltools
+make test
+git add lua/easytasks/tomltools scripts/tomltools.lock
 git commit -m "Update vendored tomltools"
-git branch -D _tt_split
 ```
 
-> If step 3 reports merge conflicts, they are almost always on a `require` line
-> that upstream changed — resolve by taking upstream's line, then let step 4
-> re-namespace it.
+The currently vendored commit is recorded in `scripts/tomltools.lock`. Note that
+the pinned commit may lag `main` on purpose — pass an explicit ref to move it.
 
 ### After updating: check the consuming API
 
