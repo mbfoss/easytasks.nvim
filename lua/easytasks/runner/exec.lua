@@ -266,6 +266,18 @@ local function _dispose_finished(task_name)
     for _, rid in ipairs(to_dispose) do M.dispose(rid) end
 end
 
+--- Stop a single run by id: flag it and invoke its cancel (if any). Used both by
+--- the public `stop` and to propagate a stop request down to a task's in-flight
+--- dependency runs, which are tracked under different task names.
+---@param run_id string
+local function _stop_run(run_id)
+    local entry = _running[run_id]
+    if not entry then return end
+    if entry.state ~= "running" and entry.state ~= "waiting" then return end
+    entry.stop_requested = true
+    if entry.cancel then entry.cancel() end
+end
+
 --- Run a single task (and its dependencies) as a coroutine.
 --- Always creates and fully owns its RunEntry — entry is created synchronously
 --- before the first yield, so it is visible to callers immediately.
@@ -275,8 +287,9 @@ end
 ---@param run_id?   string   pre-existing run_id to reuse (e.g. a waiting entry)
 ---@param ephemeral boolean?
 ---@param primary   boolean?  true for user-initiated launches (not dependencies)
+---@param on_start? fun(run_id: string)  notified with the new run_id when a fresh entry is created, so a caller can track this run (e.g. to cancel it as a dependency)
 ---@return boolean ok
-local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables)
+local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables, on_start)
     local task = tasks[name]
     if not task then
         notify.notify_error("unknown task: " .. name)
@@ -305,6 +318,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables
             reports   = {},
         }
         _running[run_id] = entry
+        if on_start then on_start(run_id) end
     end
     _notify_state(run_id)
     _append_report(run_id, "started")
@@ -322,36 +336,57 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, variables
     if #deps > 0 then
         entry.state       = "waiting"
         entry.waiting_for = deps
+        -- Run-ids of the dependency runs currently in flight. They live under
+        -- their own task names, so a stop aimed at this (merely waiting) task
+        -- would otherwise leave them running and this coroutine blocked forever.
+        -- Each dependency reports its id here as it starts; the cancel below then
+        -- propagates the stop down to them (stopping a finished run is a no-op).
+        local dep_runs    = {}
+        local function track_dep(rid) dep_runs[rid] = true end
+        entry.cancel      = function()
+            for rid in pairs(dep_runs) do _stop_run(rid) end
+        end
         _notify_state(run_id)
         _append_report(run_id, "waiting for: " .. table.concat(deps, ", "))
+
+        ---@param dep_name string
+        ---@return string
+        local function dep_unmet(dep_name)
+            return "dependency '" .. dep_name .. "' "
+                .. (entry.stop_requested and "stopped" or "failed")
+        end
 
         local deps_ok
         if task.depends_order == "parallel" then
             local fns = vim.tbl_map(function(dep_name)
-                return function() return _run_task_coro(dep_name, tasks, nil, nil, nil, variables) end
+                return function() return _run_task_coro(dep_name, tasks, nil, nil, nil, variables, track_dep) end
             end, deps)
             local results = async.wait_all(fns)
             deps_ok = true
             for i, r in ipairs(results) do
                 if not r.ok or not r.result then
                     deps_ok = false
-                    _append_report(run_id, "dependency '" .. deps[i] .. "' failed")
+                    _append_report(run_id, dep_unmet(deps[i]))
                 end
             end
         else
             deps_ok = true
             for _, dep_name in ipairs(deps) do
-                local r = async.wait_one(function() return _run_task_coro(dep_name, tasks, nil, nil, nil, variables) end)
+                local r = async.wait_one(function() return _run_task_coro(dep_name, tasks, nil, nil, nil, variables, track_dep) end)
                 if not r.ok or not r.result then
                     deps_ok = false
-                    _append_report(run_id, "dependency '" .. dep_name .. "' failed")
+                    _append_report(run_id, dep_unmet(dep_name))
                     break
                 end
             end
         end
 
+        -- The deps cancel is only meaningful while waiting; clear it so a later
+        -- stop targets this task's own run rather than the finished dependencies.
+        entry.cancel = nil
+
         if not deps_ok then
-            return finish("failed")
+            return finish(entry.stop_requested and "stopped" or "failed")
         end
 
         entry.state       = "running"
@@ -598,18 +633,14 @@ function M.list(toml_path)
     return ordered, by_name, err
 end
 
---- Stop all active instances of a task.
+--- Stop all active instances of a task. A task that is only waiting for its
+--- dependencies has its in-flight dependency runs cancelled too, so the wait
+--- unblocks and the task settles as "stopped".
 ---@param task_name string
 function M.stop(task_name)
-    local count = 0
-    for _, entry in pairs(_running) do
-        if entry.task_name == task_name and not entry.ephemeral
-            and (entry.state == "running" or entry.state == "waiting") then
-            entry.stop_requested = true
-            if entry.cancel then
-                entry.cancel()
-            end
-            count = count + 1
+    for run_id, entry in pairs(_running) do
+        if entry.task_name == task_name and not entry.ephemeral then
+            _stop_run(run_id)
         end
     end
 end
