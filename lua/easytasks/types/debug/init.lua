@@ -37,12 +37,11 @@ local function _schema(adapters)
                 maximum     = 65535,
                 description = "TCP port of the DAP server to connect to (attach only; required for `remote` adapter)",
             },
-            request         = {
-                description = "Whether to launch a new process or attach to a running one",
-                oneOf       = {
-                    { type = "string", const = "launch", description = "Start the program under the debugger" },
-                    { type = "string", const = "attach", description = "Attach to an already-running process" },
-                },
+            request         =
+            {
+                type                   = { "string", "null" },
+                enum                   = { "launch", "attach" },
+                ["x-enumDescriptions"] = { "Start the program under the debugger", "Attach to an already-running process" },
             },
             command         = {
                 description =
@@ -150,10 +149,10 @@ end
 function M.start(task, ctx, on_done)
     local m = require("easydap.task")
     return m.start(_build_params(task), {
-                add_bufnr = ctx.add_bufnr,
-                report    = ctx.report,
-                on_done   = on_done,
-            })
+        add_bufnr = ctx.add_bufnr,
+        report    = ctx.report,
+        on_done   = on_done,
+    })
 end
 
 M.schema = function()
