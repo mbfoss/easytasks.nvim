@@ -105,7 +105,7 @@ local function _eval_macro(inner, ctx)
         return nil, macro_err
     end
     local valtype = type(val)
-    if valtype ~= "nil" and valtype ~= "number" and valtype ~= "string" then
+    if valtype ~= "nil" and valtype ~= "boolean" and valtype ~= "number" and valtype ~= "string" then
         return nil, "Invalid return type: " .. valtype
     end
     return val
