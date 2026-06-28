@@ -138,11 +138,50 @@ describe("macro argument parsing", function()
         assert.are.equal("#1:a:b:c", res.x)
     end)
 
-    it("honours backslash-escaped commas as literal characters", function()
+    it("keeps commas literal inside a double-quoted argument", function()
         register_nargs("nargs4")
-        local ok, res = resolve({ x = [[${nargs4:a\,b,c}]] })
+        local ok, res = resolve({ x = [[${nargs4:"a,b",c}]] })
         assert.is_true(ok)
         assert.are.equal("#2:a,b|c", res.x)
+    end)
+
+    it("keeps commas literal inside a single-quoted argument", function()
+        register_nargs("nargs4b")
+        local ok, res = resolve({ x = "${nargs4b:'a,b',c}" })
+        assert.is_true(ok)
+        assert.are.equal("#2:a,b|c", res.x)
+    end)
+
+    it("unescapes a doubled quote inside a quoted argument", function()
+        register_nargs("nargs4c")
+        local ok, res = resolve({ x = [[${nargs4c:"a""b"}]] })
+        assert.is_true(ok)
+        assert.are.equal([[#1:a"b]], res.x)
+    end)
+
+    it("expands a nested macro inside a quoted argument", function()
+        register_nargs("nargs4d")
+        macros.register("withcomma2", function() return "x,y" end)
+        -- The comma is protected by quotes; the nested macro still expands and
+        -- its output is not re-split.
+        local ok, res = resolve({ x = [[${nargs4d:"<${withcomma2}>"}]] })
+        assert.is_true(ok)
+        assert.are.equal("#1:<x,y>", res.x)
+    end)
+
+    it("treats a backslash as a literal character (no longer an escape)", function()
+        register_nargs("nargs4e")
+        -- '\' is literal now, so the comma still splits into two args.
+        local ok, res = resolve({ x = [[${nargs4e:a\,b}]] })
+        assert.is_true(ok)
+        assert.are.equal([[#2:a\|b]], res.x)
+    end)
+
+    it("treats a quoted empty string as one argument", function()
+        register_nargs("nargs4f")
+        local ok, res = resolve({ x = [[${nargs4f:""}]] })
+        assert.is_true(ok)
+        assert.are.equal("#1:", res.x)
     end)
 
     it("preserves empty argument slots", function()

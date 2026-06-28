@@ -3,6 +3,10 @@ local M = {}
 
 local macros = require("easytasks.macros")
 
+--- Find the extent of a `${...}` span by matching braces. Brace counting is the
+--- only structure recognised here; there is no backslash escape, so the braces
+--- inside an argument must be balanced (or wrapped in a nested macro). `start_pos`
+--- points at the opening `{`.
 ---@param str       string
 ---@param start_pos integer
 ---@return string|nil content, integer|nil end_pos, string|nil err
@@ -12,10 +16,7 @@ local function _parse_nested(str, start_pos)
     local i      = start_pos
     while i <= #str do
         local char = str:sub(i, i)
-        if char == "\\" and i < #str then
-            result = result .. char .. str:sub(i + 1, i + 1)
-            i      = i + 2
-        elseif char == "{" then
+        if char == "{" then
             stack  = stack + 1
             result = result .. char
             i      = i + 1
@@ -32,55 +33,76 @@ local function _parse_nested(str, start_pos)
     return nil, nil, "Unterminated macro"
 end
 
---- Split a raw macro body on top-level occurrences of `sep`. A separator counts
---- only when it is neither backslash-escaped nor inside a nested `${...}` span:
---- `\X` is consumed to a literal `X`, and `${...}` spans are copied verbatim so
---- their own separators survive to be re-parsed when that span is expanded.
---- This runs on the *unexpanded* template, so separators produced by a macro's
---- output can never be mistaken for argument boundaries.
+--- Split a raw macro body into a name and arguments. The first top-level `:` ends
+--- the name and begins the argument list; subsequent top-level `:` are literal,
+--- and top-level `,` separate arguments. There is no backslash escape: to keep a
+--- comma (or any other separator) inside a single argument, wrap that argument in
+--- quotes — either `"..."` or `'...'`. A literal quote inside a quoted argument is
+--- written by doubling it (`""` -> `"`, `''` -> `'`), mirroring how `$$` escapes a
+--- literal `$`. Quoting only suppresses comma splitting; a nested `${...}` macro
+--- still expands normally inside a quoted argument.
 ---
---- Splitting is a single left-to-right pass so each backslash escape is consumed
---- exactly once: the first top-level `:` ends the name and begins the argument
---- list, subsequent top-level `:` are literal, and top-level `,` separate
---- arguments. A backslash escapes the following character (`\,`, `\:`, `\\`);
---- `${...}` spans are copied verbatim. An empty argument region (`${name:}`)
---- yields no arguments, while `${name:a,}` yields two (`"a"`, `""`).
+--- Splitting runs on the *unexpanded* template and copies `${...}` spans verbatim
+--- (even inside quotes), so separators produced by a macro's output can never be
+--- mistaken for argument boundaries. An empty argument region (`${name:}`) yields
+--- no arguments, `${name:a,}` yields two (`"a"`, `""`), and an explicitly quoted
+--- empty argument (`${name:""}`) yields one (`""`).
 ---@param inner string
 ---@return string name, string[] args
 local function _parse_body(inner)
-    local name        ---@type string?
-    local args = {}    ---@type string[]
-    local cur  = ""
-    local in_args = false
+    local name           ---@type string?
+    local args     = {}  ---@type string[]
+    local cur      = ""
+    local in_args  = false   -- have we passed the name and entered the arg list?
+    local at_start = false   -- positioned at the start of an argument value?
+    local quoted   = false   -- was the current argument opened with a quote?
+    local quote          ---@type string? active quote char, nil outside a span
     local i, n = 1, #inner
     while i <= n do
         local char = inner:sub(i, i)
-        if char == "\\" and i < n then
-            cur = cur .. inner:sub(i + 1, i + 1)
-            i   = i + 2
-        elseif char == "$" and inner:sub(i + 1, i + 1) == "{" then
+        if char == "$" and inner:sub(i + 1, i + 1) == "{" then
+            -- Copy a nested macro span verbatim (even inside quotes) so its own
+            -- separators and quotes survive to be re-parsed when it is expanded.
             local _, end_pos = _parse_nested(inner, i + 1)
             if not end_pos then -- unterminated; copy the remainder verbatim
                 cur = cur .. inner:sub(i)
                 break
             end
-            cur = cur .. inner:sub(i, end_pos)
-            i   = end_pos + 1
+            cur      = cur .. inner:sub(i, end_pos)
+            i        = end_pos + 1
+            at_start = false
+        elseif quote then
+            if char == quote then
+                if inner:sub(i + 1, i + 1) == quote then -- doubled = literal quote
+                    cur = cur .. quote
+                    i   = i + 2
+                else                                     -- closing quote
+                    quote = nil
+                    i     = i + 1
+                end
+            else
+                cur = cur .. char
+                i   = i + 1
+            end
         elseif char == ":" and not in_args then
-            name, cur, in_args = cur, "", true
+            name, cur, in_args, at_start = cur, "", true, true
             i = i + 1
         elseif char == "," and in_args then
             args[#args + 1] = cur
-            cur = ""
-            i   = i + 1
+            cur, at_start, quoted = "", true, false
+            i = i + 1
+        elseif (char == '"' or char == "'") and in_args and at_start then
+            quote, quoted, at_start = char, true, false
+            i = i + 1
         else
-            cur = cur .. char
-            i   = i + 1
+            cur      = cur .. char
+            at_start = false
+            i        = i + 1
         end
     end
     if not in_args then return cur, args end
-    -- finalize the last argument unless the whole region was empty
-    if cur ~= "" or #args > 0 then args[#args + 1] = cur end
+    -- finalize the last argument unless the region was empty and unquoted
+    if cur ~= "" or quoted or #args > 0 then args[#args + 1] = cur end
     return name --[[@as string]], args
 end
 
