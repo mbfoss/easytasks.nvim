@@ -142,7 +142,7 @@ function _builtins.prompt(_, prompt_text, default, completion)
     return result
 end
 
-_builtins["select-pid"] = function(_)
+_builtins["select-pid"] = function(_, prompt)
     local lines = vim.fn.systemlist("ps -eo pid,user,comm 2>/dev/null")
     if not lines or #lines == 0 then
         return nil, "No processes found"
@@ -166,7 +166,7 @@ _builtins["select-pid"] = function(_)
     local co = coroutine.running()
     vim.schedule(function()
         local labels = vim.tbl_map(function(c) return c.label end, choices)
-        vim.ui.select(labels, { prompt = "Select process to attach" }, function(selected)
+        vim.ui.select(labels, { prompt = type(prompt) == "string" and prompt or  "Select process" }, function(selected)
             if not selected then
                 coroutine.resume(co, nil)
                 return

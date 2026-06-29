@@ -169,7 +169,7 @@ function M.async_load_text_file(path, opts, callback)
 
                 total_read = total_read + #data
                 if max_size and total_read > max_size then
-                    table.insert(chunks, data:sub(1, total_read - max_size))
+                    table.insert(chunks, data:sub(1, #data - (total_read - max_size)))
                     return finish(nil, true)
                 end
 
