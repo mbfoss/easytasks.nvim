@@ -167,6 +167,15 @@ local function _load_tasks(toml_path)
         return nil, nil, nil, ("%s: duplicate task name%s: %s"):format(
             short, #duplicates == 1 and "" or "s", table.concat(duplicates, ", "))
     end
+    do
+        local expressions_reg = require("easytasks.expressions")
+        for name in pairs(data.expressions or {}) do
+            if expressions_reg.get(name) then
+                return nil, nil, nil, ("%s: Builtin expression name cannot be used: %s"):format(
+                    short, name)
+            end
+        end
+    end
     return by_name, ordered, data.expressions or {}, nil
 end
 
@@ -344,7 +353,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
         -- propagates the stop down to them (stopping a finished run is a no-op).
         local dep_runs    = {}
         local function track_dep(rid) dep_runs[rid] = true end
-        entry.cancel      = function()
+        entry.cancel = function()
             for rid in pairs(dep_runs) do _stop_run(rid) end
         end
         _notify_state(run_id)
@@ -373,7 +382,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
         else
             deps_ok = true
             for _, dep_name in ipairs(deps) do
-                local r = async.wait_one(function() return _run_task_coro(dep_name, tasks, nil, nil, nil, expressions, track_dep) end)
+                local r = async.wait_one(function()
+                    return _run_task_coro(dep_name, tasks, nil, nil, nil, expressions,
+                        track_dep)
+                end)
                 if not r.ok or not r.result then
                     deps_ok = false
                     _append_report(run_id, dep_unmet(dep_name))
@@ -403,9 +415,10 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
 
     -- ── expression resolution ────────────────────────────────────────────────
     local expression_ok, resolved = coroutine.yield(function(waker)
-        resolver.resolve_expressions(task, { task = task, tasks = tasks, expressions = expressions or {} }, function(ok, result, err)
-            waker(ok, ok and result or err)
-        end)
+        resolver.resolve_expressions(task, { task = task, tasks = tasks, expressions = expressions or {} },
+            function(ok, result, err)
+                waker(ok, ok and result or err)
+            end)
     end)
     if not expression_ok then
         _append_report(run_id, "expression error: " .. tostring(resolved))
