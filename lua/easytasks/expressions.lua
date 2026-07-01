@@ -6,36 +6,82 @@
 
 ---@alias easytasks.ExpressionFn fun(ctx: easytasks.ExpressionCtx, ...): any, string?
 
-local M            = {}
+local M             = {}
 
 --- All expressions, built-in and user-registered, keyed by name. Private;
 --- built-ins are defined below via `function _expressions.<name>`, and
 --- `M.register` adds user ones. A single map keeps lookup (`M.get`) and
 --- enumeration (`M.list`, used by LSP completion) trivial and complete.
 ---@type table<string, easytasks.ExpressionFn>
-local _expressions = {}
+local _expressions  = {}
 
 --- Set of built-in names, snapshotted once all built-ins are defined. Used to
 --- forbid overriding a built-in via `M.register`.
 ---@type table<string, boolean>
-local _builtin     = {}
+local _builtin      = {}
 
 --- Names of *raw-body* expressions: instead of tokenized arguments they receive
 --- everything after their name verbatim (quotes and separators intact, only
 --- nested `{{ … }}` holes expanded) so a sublanguage keeps its own quoting.
 --- `shell` and `lua` are raw; users may opt in via `M.register(name, fn, {raw=true})`.
 ---@type table<string, boolean>
-local _raw         = { shell = true, lua = true }
+local _raw          = { shell = true, lua = true }
 
 --- One-line descriptions, keyed by name, surfaced in LSP completion. Built-in
 --- descriptions are seeded below; `M.register` may add one via `opts.description`.
 ---@type table<string, string>
 local _descriptions = {}
 
+local _valid_complete_types = {
+  arglist = true,
+  augroup = true,
+  breakpoint = true,
+  buffer = true,
+  color = true,
+  command = true,
+  compiler = true,
+  diff_buffer = true,
+  dir = true,
+  dir_in_path = true,
+  environment = true,
+  event = true,
+  expression = true,
+  file = true,
+  file_in_path = true,
+  filetype = true,
+  function_ = true,
+  help = true,
+  highlight = true,
+  history = true,
+  keymap = true,
+  locale = true,
+  lua = true,
+  mapclear = true,
+  mapping = true,
+  menu = true,
+  messages = true,
+  option = true,
+  packadd = true,
+  retab = true,
+  runtime = true,
+  scriptnames = true,
+  shellcmd = true,
+  shellcmdline = true,
+  sign = true,
+  syntax = true,
+  syntime = true,
+  tag = true,
+  tag_listfiles = true,
+  user = true,
+  var = true,
+  custom = true,
+  customlist = true,
+}
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
-local _nofile_err  = "current buffer is not a regular file"
-local _badtype_err = "current file type is not `%s`"
+local _nofile_err   = "current buffer is not a regular file"
+local _badtype_err  = "current file type is not `%s`"
 
 local function _is_file()
     local buf = vim.api.nvim_get_current_buf()
@@ -150,31 +196,13 @@ function _expressions.lua(_, code)
     return result
 end
 
---- Cast a value to a number. Use as a sole expression so the number survives expression
---- resolution (e.g. `port = "${num:${prompt:Port}}"`); inside a larger string
---- it is stringified like any other expression result.
----@param value string
-function _expressions.num(_, value)
-    if value == nil or value == "" then return nil, "num expression requires a value" end
-    local n = tonumber(value)
-    if n == nil then return nil, "not a number: '" .. value .. "'" end
-    return n
-end
-
---- Cast a value to a boolean. Accepts true/false, 1/0, yes/no (case-insensitive).
----@param value string
-function _expressions.bool(_, value)
-    if value == nil then return nil, "bool expression requires a value" end
-    local v = vim.trim(value):lower()
-    if v == "true" or v == "1" or v == "yes" then return true end
-    if v == "false" or v == "0" or v == "no" then return false end
-    return nil, "not a boolean: '" .. value .. "'"
-end
-
 ---@param prompt_text string
 ---@param default string?
 ---@param completion string?
 function _expressions.prompt(_, prompt_text, default, completion)
+    if not _valid_complete_types[completion] then
+        error("invalid completion type: " .. tostring(completion))
+    end
     if not prompt_text then return nil, "prompt expression requires prompt text" end
     local co = coroutine.running()
     vim.schedule(function()
@@ -216,7 +244,7 @@ _expressions["select-pid"] = function(_, prompt)
     local co = coroutine.running()
     vim.schedule(function()
         local labels = vim.tbl_map(function(c) return c.label end, choices)
-        vim.ui.select(labels, { prompt = type(prompt) == "string" and prompt or  "Select process" }, function(selected)
+        vim.ui.select(labels, { prompt = type(prompt) == "string" and prompt or "Select process" }, function(selected)
             if not selected then
                 coroutine.resume(co, nil)
                 return
@@ -240,20 +268,18 @@ end
 -- can forbid overriding one, and seed their completion descriptions.
 for name in pairs(_expressions) do _builtin[name] = true end
 
-_descriptions.lbrace      = "Insert a literal {{ (a hole opener); }} is already literal"
-_descriptions.file        = "Absolute path of the current file (optionally require a filetype)"
-_descriptions.filename    = "Filename (with extension) of the current file"
-_descriptions.fileroot    = "Absolute path of the current file without its extension"
-_descriptions.filedir     = "Absolute directory of the current file"
-_descriptions.fileext     = "Extension of the current file (without the dot)"
-_descriptions.cwd         = "The task's working directory, or the editor cwd"
-_descriptions.projectdir  = "Absolute path of the project root (where the tasks file lives)"
-_descriptions.env         = "Value of an environment variable: env VARNAME"
-_descriptions.shell       = "stdout of a shell command, trailing newlines stripped: shell CMD…"
-_descriptions.lua         = "Result of evaluating Lua source: lua CODE…"
-_descriptions.num         = "Cast a value to a number: num VALUE"
-_descriptions.bool        = "Cast a value to a boolean: bool VALUE"
-_descriptions.prompt      = "Ask for input at run time: prompt TEXT [default] [completion]"
+_descriptions.lbrace        = "{{lbrace}} is resolved to a literal `{{` \nequivalent to `{{{{`"
+_descriptions.file          = "Absolute path of the current file (optionally require a filetype)"
+_descriptions.filename      = "Filename (with extension) of the current file"
+_descriptions.fileroot      = "Absolute path of the current file without its extension"
+_descriptions.filedir       = "Absolute directory of the current file"
+_descriptions.fileext       = "Extension of the current file (without the dot)"
+_descriptions.cwd           = "The task's working directory, or the editor cwd"
+_descriptions.projectdir    = "Absolute path of the project root (where the tasks file lives)"
+_descriptions.env           = "Value of an environment variable: env VARNAME"
+_descriptions.shell         = "stdout of a shell command, trailing newlines stripped: shell CMD…"
+_descriptions.lua           = "Result of evaluating Lua source: lua CODE…"
+_descriptions.prompt        = "Ask for input at run time: prompt TEXT [default] [completion]"
 _descriptions["select-pid"] = "Pick a running process and yield its PID"
 
 -- ── Public API ──────────────────────────────────────────────────────────────
