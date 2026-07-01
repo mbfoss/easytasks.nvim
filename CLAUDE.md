@@ -30,7 +30,7 @@ The public API lives in [lua/easytasks/init.lua](lua/easytasks/init.lua):
   fragment; [types/schema.lua](lua/easytasks/types/schema.lua) merges them with
   the shared `base_properties` (name, `if_running`, `depends_on`,
   `depends_order`) into the full schema used by the LSP.
-- [expressions.lua](lua/easytasks/expressions.lua) — `${name}` / `${name:args}`
+- [expressions.lua](lua/easytasks/expressions.lua) — `{{ name }}` / `{{ name args }}`
   substitutions available in task config values.
 - [toml/](lua/easytasks/toml/) — vendored TOML engine (parser, decoder,
   encoder, schema validator/navigator). [toml/init.lua](lua/easytasks/toml/init.lua)

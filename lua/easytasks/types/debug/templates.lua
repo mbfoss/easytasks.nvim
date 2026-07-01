@@ -20,7 +20,7 @@ return {
             type       = "debug",
             adapter    = "lldb",
             request    = "attach",
-            process_id = "${select-pid}",
+            process_id = "{{ select-pid }}",
         }, { "name", "type", "adapter", "request", "process_id" }),
     },
 
@@ -42,7 +42,7 @@ return {
             type       = "debug",
             adapter    = "codelldb",
             request    = "attach",
-            process_id = "${select-pid}",
+            process_id = "{{ select-pid }}",
         }, { "name", "type", "adapter", "request", "process_id" }),
     },
 
@@ -64,7 +64,7 @@ return {
             type       = "debug",
             adapter    = "gdb",
             request    = "attach",
-            process_id = "${select-pid}",
+            process_id = "{{ select-pid }}",
         }, { "name", "type", "adapter", "request", "request_args" }),
     },
 

@@ -75,7 +75,7 @@ local function _schema(adapters)
             },
             process_id   = {
                 type        = { "number", "string", "null" },
-                description = "Process Id. used when attaching to a process, use ${select-pid} to open selector",
+                description = "Process Id. used when attaching to a process, use {{ select-pid }} to open selector",
             },
             request_args    = {
                 type                 = { "object", "null" },

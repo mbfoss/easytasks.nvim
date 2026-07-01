@@ -3,7 +3,7 @@
 ---@field tasks       table<string,table>  all tasks in the file
 ---@field expressions table<string,string> named inline expression templates from the [expressions] table
 ---@field _resolving? table<string,true>   names of inline expressions currently on the resolution stack (cycle guard)
----@field _args?      {n:integer,[integer]:any}[]  stack of positional-argument frames; the top frame backs ${1}, ${2}, … inside an inline template
+---@field _args?      {n:integer,[integer]:any}[]  stack of positional-argument frames; the top frame backs {{1}}, {{2}}, … inside an inline template
 
 ---@alias easytasks.ExpressionFn fun(ctx: easytasks.ExpressionCtx, ...): any, string?
 
@@ -17,6 +17,13 @@ local _builtins    = {}
 --- User-registered expressions, keyed by name. Private; populated via `M.register`.
 ---@type table<string, easytasks.ExpressionFn>
 local _registry    = {}
+
+--- Names of *raw-body* expressions: instead of tokenized arguments they receive
+--- everything after their name verbatim (quotes and separators intact, only
+--- nested `{{ … }}` holes expanded) so a sublanguage keeps its own quoting.
+--- `shell` and `lua` are raw; users may opt in via `M.register(name, fn, {raw=true})`.
+---@type table<string, boolean>
+local _raw         = { shell = true, lua = true }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,12 +98,12 @@ end
 
 --- Run a shell command and return its stdout with trailing newlines stripped
 --- (like `$(...)` command substitution). A non-zero exit status is an error.
---- The argument list is re-joined on `,`, so a command may contain commas
---- without quoting: `${shell:printf a, b}` runs `printf a, b`.
----@param ... string  command words
+--- `shell` is a raw-body expression: the whole command reaches the shell
+--- verbatim, so it keeps its own quoting: `{{ shell printf 'a, b' }}`.
+---@param cmd string  the command
 ---@return string? output, string? err
-function _builtins.shell(_, ...)
-    local cmd = table.concat({ ... }, ",")
+function _builtins.shell(_, cmd)
+    cmd = cmd or ""
     if cmd == "" then return nil, "shell expression requires a command" end
     local out = vim.fn.system(cmd)
     if vim.v.shell_error ~= 0 then
@@ -107,13 +114,14 @@ end
 
 --- Evaluate Lua code and return its result. The code is tried first as an
 --- expression (`return <code>`) and, failing that, as a statement chunk, so
---- both `${lua:1 + 1}` and `${lua:return os.time()}` work. The argument list is
---- re-joined on `,`, so calls with multiple arguments need no quoting:
---- `${lua:math.max(1, 2)}`. The result must be a string, number, boolean, or nil.
----@param ... string  Lua source fragments
+--- both `{{ lua 1 + 1 }}` and `{{ lua return os.time() }}` work. `lua` is a
+--- raw-body expression: the source reaches the interpreter verbatim, keeping its
+--- own quoting: `{{ lua math.max(1, 2) }}`, `{{ lua return 'hi' }}`. The result
+--- must be a string, number, boolean, or nil.
+---@param code string  Lua source
 ---@return any result, string? err
-function _builtins.lua(_, ...)
-    local code = table.concat({ ... }, ",")
+function _builtins.lua(_, code)
+    code = code or ""
     if code == "" then return nil, "lua expression requires code" end
     local chunk, load_err = load("return " .. code, "=[easytasks lua expression]", "t")
     if not chunk then
@@ -221,15 +229,26 @@ function M.get(name)
     return _builtins[name] or _registry[name]
 end
 
+--- Whether `name` is a raw-body expression (receives its body verbatim rather
+--- than as tokenized arguments). See `_raw`.
+---@param name string
+---@return boolean
+function M.is_raw(name)
+    return _raw[name] == true
+end
+
 --- Register a user expression for use in task config values. Built-in expressions cannot
---- be overridden; attempting to do so raises an error.
+--- be overridden; attempting to do so raises an error. Pass `{ raw = true }` to
+--- make it a raw-body expression (see `M.is_raw`).
 ---@param name string
 ---@param fn   easytasks.ExpressionFn
-function M.register(name, fn)
+---@param opts? { raw?: boolean }
+function M.register(name, fn, opts)
     if _builtins[name] then
         error("easytasks: cannot override built-in expression '" .. name .. "'", 2)
     end
     _registry[name] = fn
+    _raw[name] = opts and opts.raw or nil
 end
 
 return M

@@ -20,12 +20,14 @@ function M.register_qfmatcher(name, fn)
 end
 
 --- Register a custom expression for use in task config values.
---- Expression syntax in TOML: `${name}` or `${name:arg1,arg2}`.
---- Built-in expressions cannot be overridden (raises an error).
+--- Expression syntax in TOML: `{{ name }}` or `{{ name arg1 arg2 }}`.
+--- Built-in expressions cannot be overridden (raises an error). Pass
+--- `{ raw = true }` to receive the raw body instead of tokenized arguments.
 ---@param name string
 ---@param fn   easytasks.ExpressionFn
-function M.register_expression(name, fn)
-    require("easytasks.expressions").register(name, fn)
+---@param opts? { raw?: boolean }
+function M.register_expression(name, fn, opts)
+    require("easytasks.expressions").register(name, fn, opts)
 end
 
 local _enabled = false
