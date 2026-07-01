@@ -8,7 +8,8 @@ local expressions = require("easytasks.expressions")
 --- A task string is literal text with `{{ … }}` *holes*. Nothing outside a hole
 --- is special, so the top level never needs escaping: a bare `$`, `\`, or single
 --- `}` is literal, and DAP-style `${var}` passes through untouched. Only the
---- two-character sequence `{{` begins a hole.
+--- two-character sequence `{{` begins a hole; a bare `}}` outside a hole is
+--- already literal. The one escape is `{{!`, which emits a literal `{{`.
 ---
 --- Inside a hole the body is a shell-style word list: whitespace separates the
 --- expression *name* (first word) from its *arguments*. An argument may be
@@ -24,9 +25,15 @@ local expressions = require("easytasks.expressions")
 --- quotes and all — so those sublanguages keep their own quoting. Only nested
 --- `{{ … }}` holes are expanded first.
 ---
---- Known limitations: a literal `{{` in output has no escape (use `'{{'` inside a
---- hole if you must produce one), and a literal `}}` inside a quoted argument is
---- not supported (it closes the hole early).
+--- To emit a literal `{{` in output, write `{{!`. A literal `}}` needs nothing —
+--- it is only special *inside* a hole (where it closes one); everywhere else it
+--- passes through unchanged. The escape is a top-level construct because holes
+--- are located by brace nesting alone (quotes are ignored, so a raw shell body
+--- may carry unbalanced quotes); that means a `{{` can never be hidden from the
+--- hole finder from *inside* a hole, only escaped before one begins.
+---
+--- Known limitation: a literal `}}` inside a quoted argument is not supported (it
+--- closes the hole early); put such text in ordinary literal output instead.
 
 ---@type fun(str: string, open_at: integer): string?, integer?, string?
 local _find_span
@@ -326,12 +333,19 @@ _expand_recursive = function(str, ctx)
             break
         end
         if open > i then res[#res + 1] = str:sub(i, open - 1) end
-        local content, close, err = _find_span(str, open)
-        if not close then return nil, err end
-        local val, eval_err = _eval_expression(content --[[@as string]], ctx)
-        if eval_err then return nil, eval_err end
-        res[#res + 1] = val == nil and "" or tostring(val)
-        i = close + 1
+        if str:sub(open + 2, open + 2) == "!" then
+            -- `{{!` is the escape for a literal `{{` (the only sequence special
+            -- at the top level; a bare `}}` is already literal).
+            res[#res + 1] = "{{"
+            i = open + 3
+        else
+            local content, close, err = _find_span(str, open)
+            if not close then return nil, err end
+            local val, eval_err = _eval_expression(content --[[@as string]], ctx)
+            if eval_err then return nil, eval_err end
+            res[#res + 1] = val == nil and "" or tostring(val)
+            i = close + 1
+        end
     end
     return table.concat(res)
 end
@@ -345,7 +359,7 @@ end
 ---@return any value, string? err
 _expand_value = function(str, ctx)
     local trimmed = vim.trim(str)
-    if trimmed:sub(1, 2) == "{{" then
+    if trimmed:sub(1, 2) == "{{" and trimmed:sub(3, 3) ~= "!" then
         local content, close = _find_span(trimmed, 1)
         if content ~= nil and close == #trimmed then
             return _eval_expression(content, ctx)
