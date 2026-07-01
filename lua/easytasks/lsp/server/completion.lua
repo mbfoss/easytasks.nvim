@@ -87,8 +87,12 @@ local function value_items(schema, open_quote, ctx)
         .Snippet, insertText = "[$1]" } end
     if has("object") then items[#items + 1] = { label = "{}", documentation = desc, kind = CK.Value, insertTextFormat =
         IF.Snippet, insertText = "{$1}" } end
-    if not open_quote and has("string") then items[#items + 1] = { label = '"', documentation = desc, kind = CK.Text, insertText =
-        '"' } end
+    if not open_quote and has("string") then 
+        items[#items + 1] = { label = '"', documentation = desc, kind = CK.Text, insertText =
+        '"' }
+        items[#items + 1] = { label = "'", documentation = desc, kind = CK.Text, insertText =
+        "'" }
+    end
     return items
 end
 
