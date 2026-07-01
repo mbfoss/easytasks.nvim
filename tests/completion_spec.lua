@@ -228,7 +228,7 @@ describe("completion – value side", function()
     end)
 
     it("offers a quote starter for plain strings", function()
-        expect("title = |", { '"' })
+        expect("title = |", { '"', "'" })
     end)
 
     it("offers nothing for an unconstrained integer", function()
@@ -336,7 +336,7 @@ describe("completion – inline tables", function()
     end)
 
     it("suggests a value starter inside an inline table", function()
-        expect("server = { host = | }", { '"' })
+        expect("server = { host = | }", { '"', "'" })
     end)
 
     it("offers nothing for an unconstrained value inside an inline table", function()
@@ -453,11 +453,11 @@ describe("completion – value starters", function()
     end)
 
     it("offers only a quote starter for a string|integer union", function()
-        assert.same({ '"' }, labels(complete_with(schema, "multi = |")))
+        assert.same({ '"', "'" }, labels(complete_with(schema, "multi = |")))
     end)
 
     it("treats a nullable string as a string", function()
-        assert.same({ '"' }, labels(complete_with(schema, "nul = |")))
+        assert.same({ '"', "'" }, labels(complete_with(schema, "nul = |")))
     end)
 
     it("offers nothing for a const-valued field", function()
@@ -532,7 +532,7 @@ describe("completion – dotted & quoted keys", function()
     end)
 
     it("resolves the value schema of a dotted key", function()
-        expect("server.host = |", { '"' })
+        expect("server.host = |", { '"', "'" })
     end)
 end)
 
@@ -549,7 +549,7 @@ describe("completion – nested inline tables", function()
     end)
 
     it("resolves a value inside an inline-table array literal", function()
-        expect('tasks = [ { name = | } ]', { '"' })
+        expect('tasks = [ { name = | } ]', { '"', "'" })
     end)
 end)
 
