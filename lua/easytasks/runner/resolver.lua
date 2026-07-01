@@ -3,44 +3,87 @@ local M = {}
 
 local expressions = require("easytasks.expressions")
 
---- Find the extent of a `${...}` span by matching braces. Brace counting is the
---- only structure recognised here; there is no backslash escape, so the braces
---- inside an argument must be balanced (or wrapped in a nested expression). `start_pos`
---- points at the opening `{`.
+--- Find the extent of a `${...}` span and return its inner text. `start_pos`
+--- points at the opening `{`. Three things are skipped while looking for the
+--- matching `}`, so they cannot end the span prematurely:
+---   * a nested `${...}` (consumed recursively, as an opaque unit),
+---   * a quoted argument span — a `"..."`/`'...'` opened at an argument boundary
+---     (with `""`/`''` for a literal quote) — inside which every character,
+---     including braces, is literal, and
+---   * bare `{`/`}` pairs, which are balance-counted as literal text.
+--- These quoting rules are exactly those `_parse_body` applies when it later
+--- splits the same body, so the span found here and the split agree. A body that
+--- ends with an open quote or unbalanced brace is a hard error (rather than
+--- silently mis-parsed).
 ---@param str       string
----@param start_pos integer
+---@param start_pos integer  index of the opening `{`
 ---@return string|nil content, integer|nil end_pos, string|nil err
 local function _parse_nested(str, start_pos)
-    local stack  = 0
-    local result = ""
-    local i      = start_pos
-    while i <= #str do
+    local n        = #str
+    local i        = start_pos + 1  -- first char of the body
+    local depth    = 0              -- bare-brace nesting inside this body
+    local in_args  = false          -- past the first top-level `:`?
+    local at_start = false          -- at the start of an argument value?
+    local quote               ---@type string? active quote char, nil outside a span
+    while i <= n do
         local char = str:sub(i, i)
-        if char == "{" then
-            stack  = stack + 1
-            result = result .. char
-            i      = i + 1
+        -- A nested `${...}` is opaque and is recognised even inside a quoted span,
+        -- exactly as `_parse_body` copies it verbatim before applying quote rules.
+        if char == "$" and str:sub(i + 1, i + 1) == "{" then
+            local _, close, err = _parse_nested(str, i + 1)
+            if not close then return nil, nil, err end
+            i        = close + 1
+            at_start = false
+        elseif quote then
+            if char == quote then
+                if str:sub(i + 1, i + 1) == quote then -- doubled = literal quote
+                    i = i + 2
+                else                                   -- closing quote
+                    quote = nil
+                    i     = i + 1
+                end
+            else
+                i = i + 1                              -- literal (braces included)
+            end
+        elseif char == "{" then
+            depth    = depth + 1
+            at_start = false
+            i        = i + 1
         elseif char == "}" then
-            stack = stack - 1
-            if stack == 0 then return result:sub(2), i end
-            result = result .. char
-            i      = i + 1
+            if depth == 0 then return str:sub(start_pos + 1, i - 1), i end
+            depth    = depth - 1
+            at_start = false
+            i        = i + 1
+        elseif char == ":" and not in_args then
+            in_args, at_start = true, true
+            i = i + 1
+        elseif char == "," and in_args then
+            at_start = true
+            i = i + 1
+        elseif (char == '"' or char == "'") and in_args and at_start then
+            quote, at_start = char, false
+            i = i + 1
         else
-            result = result .. char
-            i      = i + 1
+            at_start = false
+            i        = i + 1
         end
     end
+    if quote then return nil, nil, "Unterminated quote in expression" end
     return nil, nil, "Unterminated expression"
 end
 
 --- Split a raw expression body into a name and arguments. The first top-level `:` ends
 --- the name and begins the argument list; subsequent top-level `:` are literal,
 --- and top-level `,` separate arguments. There is no backslash escape: to keep a
---- comma (or any other separator) inside a single argument, wrap that argument in
---- quotes — either `"..."` or `'...'`. A literal quote inside a quoted argument is
---- written by doubling it (`""` -> `"`, `''` -> `'`), mirroring how `$$` escapes a
---- literal `$`. Quoting only suppresses comma splitting; a nested `${...}` expression
---- still expands normally inside a quoted argument.
+--- comma, colon, or an unbalanced brace inside a single argument, wrap that
+--- argument in quotes — either `"..."` or `'...'`. A quote is only structural when
+--- it opens at an argument boundary (right after the `:` or a separating `,`); a
+--- quote appearing mid-argument is a literal character, so quotes that belong to a
+--- shell command or Lua snippet pass through untouched. A literal quote inside a
+--- quoted argument is written by doubling it (`""` -> `"`, `''` -> `'`), mirroring
+--- how `$$` escapes a literal `$`. Quoting suppresses `,`/`:` splitting and brace
+--- matching alike; a nested `${...}` expression still expands normally inside a
+--- quoted argument.
 ---
 --- Splitting runs on the *unexpanded* template and copies `${...}` spans verbatim
 --- (even inside quotes), so separators produced by a expression's output can never be
