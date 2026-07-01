@@ -51,6 +51,16 @@ end
 
 -- ── Built-in expressions ──────────────────────────────────────────────────
 
+--- Emit a literal `{{`. The escape hatch for a hole opener in output, since a
+--- literal `{{` cannot be produced from *inside* a hole (holes are located by
+--- brace nesting). Equivalent to writing `{{{{`. A literal `}}` needs no escape —
+--- it is already literal outside a hole. Takes no argument (it emits the braces
+--- itself; it cannot receive them, as that would reopen a hole).
+---@return string
+function _expressions.lbrace()
+    return "{{"
+end
+
 function _expressions.file(_, filetype)
     local err = _check_file(filetype)
     if err then return nil, err end
@@ -230,6 +240,7 @@ end
 -- can forbid overriding one, and seed their completion descriptions.
 for name in pairs(_expressions) do _builtin[name] = true end
 
+_descriptions.lbrace      = "Insert a literal {{ (a hole opener); }} is already literal"
 _descriptions.file        = "Absolute path of the current file (optionally require a filetype)"
 _descriptions.filename    = "Filename (with extension) of the current file"
 _descriptions.fileroot    = "Absolute path of the current file without its extension"

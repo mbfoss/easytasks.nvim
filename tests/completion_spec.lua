@@ -658,6 +658,23 @@ describe("completion – expression names inside {{ … }}", function()
         assert.same({}, labels(complete_expr([[title = "{{ env }}x|"]])))
     end)
 
+    it("does not reach back across an earlier closed hole (only replaces the name)", function()
+        -- title = "{{}}{{na|  → the second hole's name "na" starts at column 15.
+        local it = item(complete_expr([[title = "{{}}{{na|"]]), "env")
+        assert.not_nil(it)
+        assert.same({ line = 0, character = 15 }, it.textEdit.range.start)
+        assert.same({ line = 0, character = 17 }, it.textEdit.range["end"])
+        assert.equals("env", it.textEdit.newText)
+    end)
+
+    it("does not offer after a {{{{ escape (a literal {{, not an opener)", function()
+        assert.same({}, labels(complete_expr([[title = "{{{{|"]])))
+    end)
+
+    it("offers after a real opener that follows a {{{{ escape", function()
+        assert.same({ "env", "shell" }, labels(complete_expr([[title = "{{{{{{|"]])))
+    end)
+
     it("fires across a line break in a multiline string", function()
         assert.same({ "env", "shell" }, labels(complete_expr("title = \"\"\"{{\n  |")))
     end)

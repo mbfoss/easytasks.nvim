@@ -226,38 +226,41 @@ local function directly_in_array(cst, tok_id)
     return anc ~= nil and cst:kind(anc) == K.Array
 end
 
--- True when the cursor sits in the *name* position of an open `{{ … }}` hole:
--- right after `{{`, optionally with whitespace and a partially-typed name, but
--- with no whitespace separating that name from the cursor (a space after the name
--- means we have moved on to arguments). Recognising a partial name is what makes
--- a manual completion request (e.g. <C-Space> after `{{ en`) work, not just the
--- trigger-character case. Newlines count as whitespace, so a hole opened on an
--- earlier line of a multiline string is handled too. Kept local so the lsp/
--- folder stays self-contained.
----@param lines string[]
----@param row   integer  0-based cursor line
----@param col   integer  0-based cursor column (byte offset)
----@return boolean
-local function at_expr_name(lines, row, col)
-    -- Text before the cursor. Only join earlier lines when the current line has
-    -- no `{{` itself (i.e. a hole that could have opened further up).
-    local cur    = (lines[row + 1] or ""):sub(1, col)
-    local before = cur
-    if row > 0 and not cur:find("{{", 1, true) then
-        local parts = {}
-        for r = 1, row do parts[#parts + 1] = lines[r] or "" end
-        parts[#parts + 1] = cur
-        before = table.concat(parts, "\n")
+-- If the cursor is in the *name* position of an open `{{ … }}` hole, return the
+-- partial name typed so far (possibly ""); otherwise return nil. A single
+-- left-to-right scan of `before` tracks holes opening and closing and honours the
+-- `{{{{` escape (a literal `{{`, not an opener), so it does not fire after
+-- `{{{{` and never reaches back across an already-closed `{{ }}`. Name position
+-- means: only whitespace then one run of non-brace, non-space characters reaches
+-- the cursor — a space would put us in argument position. Newlines count as
+-- whitespace, so a hole opened earlier in a multiline string works too. Kept
+-- local so the lsp/ folder stays self-contained.
+---@param before string  document text before the cursor
+---@return string? partial  the partial name, or nil if not in name position
+local function hole_name_partial(before)
+    local n, i = #before, 1
+    local name_start ---@type integer?  index where the open hole's content begins
+    while i <= n do
+        if before:sub(i, i + 1) == "{{" then
+            if before:sub(i + 2, i + 3) == "{{" then
+                i = i + 4              -- `{{{{` escape → literal `{{`, not an opener
+            else
+                name_start = i + 2     -- opener → hole content begins here
+                i = i + 2
+            end
+        elseif name_start and before:sub(i, i + 1) == "}}" then
+            name_start = nil           -- hole closed
+            i = i + 2
+        else
+            i = i + 1
+        end
     end
-
-    -- Position of the last `{{`; the hole is open only if no later `}}` closes it.
-    local open_at = before:match("^.*(){{")
-    if not open_at then return false end
-    local close_at = before:match("^.*()}}")
-    if close_at and close_at > open_at then return false end
-    -- Between the `{{` and the cursor must be name-only: leading whitespace then a
-    -- single run of non-whitespace (the partial name) reaching the cursor.
-    return before:sub(open_at + 2):match("^%s*%S*$") ~= nil
+    if not name_start then return nil end
+    local content = before:sub(name_start)   -- text between the `{{` and the cursor
+    if content:match("^%s*[^%s{}]*$") then
+        return content:match("[^%s{}]*$")
+    end
+    return nil
 end
 
 -- Completion items for the expression names available inside a hole. When a
@@ -345,15 +348,14 @@ function M.handler(context, params, callback)
     if kvp_id then
         if cursor_after_equals(cst, kvp_id, row, col) then
             -- In the name position of a `{{ … }}` hole: offer expression names
-            -- instead of schema value items. A partially-typed name is replaced
-            -- via textEdit so a manual completion request also works.
-            if at_expr_name(lines, row, col) then
-                -- The partial name is the run *after* the `{{` (so `{{abc` yields
-                -- `abc`, not `{{abc`); fall back to the trailing run when the `{{`
-                -- is on an earlier line of a multiline string.
-                local cur     = (lines[row + 1] or ""):sub(1, col)
-                local partial = cur:match("{{%s*(%S*)$") or cur:match("%S*$") or ""
-                local range   = {
+            -- instead of schema value items. The partially-typed name (if any) is
+            -- replaced via textEdit so a manual completion request also works.
+            local parts = {}
+            for r = 1, row do parts[#parts + 1] = lines[r] or "" end
+            parts[#parts + 1] = (lines[row + 1] or ""):sub(1, col)
+            local partial = hole_name_partial(table.concat(parts, "\n"))
+            if partial then
+                local range = {
                     start   = { line = row, character = col - #partial },
                     ["end"] = { line = row, character = col },
                 }
