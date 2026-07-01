@@ -3,149 +3,127 @@ local M = {}
 
 local expressions = require("easytasks.expressions")
 
+--- The escapable characters. A backslash before one of these makes it literal;
+--- a backslash before anything else is itself a literal backslash. This single
+--- rule is the *only* escaping mechanism in expression values — there is no
+--- quoting and no `$$`. See `_unescape` for where the escapes are resolved.
+---   * `$` — so `\${…}` (or a bare `\$`) is a literal `$`, not an expression start
+---   * `,` — a literal comma inside an argument, not an argument separator
+---   * `}` — a literal brace inside an argument, not the end of the `${…}` span
+---   * `\` — a literal backslash (needed only right before another escapable char)
+---@type table<string, boolean>
+local _escapable = { ["$"] = true, [","] = true, ["}"] = true, ["\\"] = true }
+
 --- Find the extent of a `${...}` span and return its inner text. `start_pos`
---- points at the opening `{`. Three things are skipped while looking for the
+--- points at the opening `{`. Two things are skipped while looking for the
 --- matching `}`, so they cannot end the span prematurely:
----   * a nested `${...}` (consumed recursively, as an opaque unit),
----   * a quoted argument span — a `"..."`/`'...'` opened at an argument boundary
----     (with `""`/`''` for a literal quote) — inside which every character,
----     including braces, is literal, and
----   * bare `{`/`}` pairs, which are balance-counted as literal text.
---- These quoting rules are exactly those `_parse_body` applies when it later
---- splits the same body, so the span found here and the split agree. A body that
---- ends with an open quote or unbalanced brace is a hard error (rather than
---- silently mis-parsed).
+---   * an escaped character — a backslash shields the following character, so
+---     `\}` never terminates the span, and
+---   * a nested `${...}` (consumed recursively, as an opaque unit).
+--- These rules mirror exactly what `_parse_body` applies when it later splits the
+--- same body, so the span found here and the split agree. The returned content is
+--- still *escaped*: escapes are resolved later, when the content is expanded.
 ---@param str       string
 ---@param start_pos integer  index of the opening `{`
 ---@return string|nil content, integer|nil end_pos, string|nil err
 local function _parse_nested(str, start_pos)
-    local n        = #str
-    local i        = start_pos + 1  -- first char of the body
-    local depth    = 0              -- bare-brace nesting inside this body
-    local in_args  = false          -- past the first top-level `:`?
-    local at_start = false          -- at the start of an argument value?
-    local quote               ---@type string? active quote char, nil outside a span
+    local n = #str
+    local i = start_pos + 1  -- first char of the body
     while i <= n do
         local char = str:sub(i, i)
-        -- A nested `${...}` is opaque and is recognised even inside a quoted span,
-        -- exactly as `_parse_body` copies it verbatim before applying quote rules.
-        if char == "$" and str:sub(i + 1, i + 1) == "{" then
+        if char == "\\" then
+            i = i + 2  -- skip the escaped character, whatever it is
+        elseif char == "$" and str:sub(i + 1, i + 1) == "{" then
             local _, close, err = _parse_nested(str, i + 1)
             if not close then return nil, nil, err end
-            i        = close + 1
-            at_start = false
-        elseif quote then
-            if char == quote then
-                if str:sub(i + 1, i + 1) == quote then -- doubled = literal quote
-                    i = i + 2
-                else                                   -- closing quote
-                    quote = nil
-                    i     = i + 1
-                end
-            else
-                i = i + 1                              -- literal (braces included)
-            end
-        elseif char == "{" then
-            depth    = depth + 1
-            at_start = false
-            i        = i + 1
+            i = close + 1
         elseif char == "}" then
-            if depth == 0 then return str:sub(start_pos + 1, i - 1), i end
-            depth    = depth - 1
-            at_start = false
-            i        = i + 1
-        elseif char == ":" and not in_args then
-            in_args, at_start = true, true
-            i = i + 1
-        elseif char == "," and in_args then
-            at_start = true
-            i = i + 1
-        elseif (char == '"' or char == "'") and in_args and at_start then
-            quote, at_start = char, false
-            i = i + 1
+            return str:sub(start_pos + 1, i - 1), i
         else
-            at_start = false
-            i        = i + 1
+            i = i + 1
         end
     end
-    if quote then return nil, nil, "Unterminated quote in expression" end
     return nil, nil, "Unterminated expression"
 end
 
---- Split a raw expression body into a name and arguments. The first top-level `:` ends
---- the name and begins the argument list; subsequent top-level `:` are literal,
---- and top-level `,` separate arguments. There is no backslash escape: to keep a
---- comma, colon, or an unbalanced brace inside a single argument, wrap that
---- argument in quotes — either `"..."` or `'...'`. A quote is only structural when
---- it opens at an argument boundary (right after the `:` or a separating `,`); a
---- quote appearing mid-argument is a literal character, so quotes that belong to a
---- shell command or Lua snippet pass through untouched. A literal quote inside a
---- quoted argument is written by doubling it (`""` -> `"`, `''` -> `'`), mirroring
---- how `$$` escapes a literal `$`. Quoting suppresses `,`/`:` splitting and brace
---- matching alike; a nested `${...}` expression still expands normally inside a
---- quoted argument.
+--- Resolve backslash escapes in a fully-literal segment (one that contains no
+--- unexpanded `${...}` span). `\` + an escapable char yields that char; `\`
+--- before anything else is kept as a literal backslash. This is the sole place
+--- escapes are consumed, so every escape is resolved exactly once.
+---@param str string
+---@return string
+local function _unescape(str)
+    if not str:find("\\", 1, true) then return str end
+    local out = {}
+    local i, n = 1, #str
+    while i <= n do
+        local char = str:sub(i, i)
+        if char == "\\" and _escapable[str:sub(i + 1, i + 1)] then
+            out[#out + 1] = str:sub(i + 1, i + 1)
+            i = i + 2
+        else
+            out[#out + 1] = char
+            i = i + 1
+        end
+    end
+    return table.concat(out)
+end
+
+--- Split a raw expression body into a name and arguments. The first top-level `:`
+--- ends the name and begins the argument list; subsequent top-level `:` are
+--- literal, and top-level `,` separate arguments. To keep a comma, a closing
+--- brace, or a literal `$` inside a single argument, escape it with a backslash
+--- (`\,`, `\}`, `\$`); a literal backslash is `\\`. Because `shell`/`lua` re-join
+--- their arguments on `,`, commands and snippets with commas need no escaping.
 ---
---- Splitting runs on the *unexpanded* template and copies `${...}` spans verbatim
---- (even inside quotes), so separators produced by a expression's output can never be
---- mistaken for argument boundaries. An empty argument region (`${name:}`) yields
---- no arguments, `${name:a,}` yields two (`"a"`, `""`), and an explicitly quoted
---- empty argument (`${name:""}`) yields one (`""`).
+--- Splitting runs on the *unexpanded* template and copies `${...}` spans verbatim,
+--- so separators produced by an expression's output can never be mistaken for
+--- argument boundaries, and the escapes inside a span survive to be resolved when
+--- it is expanded. This function only *splits*; the escapes in the name and each
+--- argument are resolved later (by `_expand_recursive`), so each is returned still
+--- escaped. An empty argument region (`${name:}`) yields no arguments, and
+--- `${name:a,}` yields two (`"a"`, `""`).
 ---@param inner string
 ---@return string name, string[] args
 local function _parse_body(inner)
-    local name           ---@type string?
-    local args     = {}  ---@type string[]
-    local cur      = ""
-    local in_args  = false   -- have we passed the name and entered the arg list?
-    local at_start = false   -- positioned at the start of an argument value?
-    local quoted   = false   -- was the current argument opened with a quote?
-    local quote          ---@type string? active quote char, nil outside a span
+    local name          ---@type string?
+    local args    = {}  ---@type string[]
+    local cur     = {}  ---@type string[]
+    local in_args = false   -- have we passed the name and entered the arg list?
     local i, n = 1, #inner
     while i <= n do
         local char = inner:sub(i, i)
-        if char == "$" and inner:sub(i + 1, i + 1) == "{" then
-            -- Copy a nested expression span verbatim (even inside quotes) so its own
-            -- separators and quotes survive to be re-parsed when it is expanded.
+        if char == "\\" then
+            -- Copy the backslash and the char it shields verbatim; the escape is
+            -- resolved later, and an escaped `,`/`}` cannot act as a separator here.
+            cur[#cur + 1] = inner:sub(i, i + 1)
+            i = i + 2
+        elseif char == "$" and inner:sub(i + 1, i + 1) == "{" then
+            -- Copy a nested expression span verbatim so its own separators and
+            -- escapes survive to be re-parsed when it is expanded.
             local _, end_pos = _parse_nested(inner, i + 1)
             if not end_pos then -- unterminated; copy the remainder verbatim
-                cur = cur .. inner:sub(i)
+                cur[#cur + 1] = inner:sub(i)
                 break
             end
-            cur      = cur .. inner:sub(i, end_pos)
-            i        = end_pos + 1
-            at_start = false
-        elseif quote then
-            if char == quote then
-                if inner:sub(i + 1, i + 1) == quote then -- doubled = literal quote
-                    cur = cur .. quote
-                    i   = i + 2
-                else                                     -- closing quote
-                    quote = nil
-                    i     = i + 1
-                end
-            else
-                cur = cur .. char
-                i   = i + 1
-            end
+            cur[#cur + 1] = inner:sub(i, end_pos)
+            i = end_pos + 1
         elseif char == ":" and not in_args then
-            name, cur, in_args, at_start = cur, "", true, true
+            name, cur, in_args = table.concat(cur), {}, true
             i = i + 1
         elseif char == "," and in_args then
-            args[#args + 1] = cur
-            cur, at_start, quoted = "", true, false
-            i = i + 1
-        elseif (char == '"' or char == "'") and in_args and at_start then
-            quote, quoted, at_start = char, true, false
+            args[#args + 1] = table.concat(cur)
+            cur = {}
             i = i + 1
         else
-            cur      = cur .. char
-            at_start = false
-            i        = i + 1
+            cur[#cur + 1] = char
+            i = i + 1
         end
     end
-    if not in_args then return cur, args end
-    -- finalize the last argument unless the region was empty and unquoted
-    if cur ~= "" or quoted or #args > 0 then args[#args + 1] = cur end
+    if not in_args then return table.concat(cur), args end
+    -- finalize the last argument unless the region was empty
+    local last = table.concat(cur)
+    if last ~= "" or #args > 0 then args[#args + 1] = last end
     return name --[[@as string]], args
 end
 
@@ -261,15 +239,17 @@ end
 ---@param ctx easytasks.ExpressionCtx
 ---@return string|nil result, string|nil err
 _expand_recursive = function(str, ctx)
-    local res = ""
-    local i   = 1
-    while i <= #str do
-        local char      = str:sub(i, i)
-        local next_char = str:sub(i + 1, i + 1)
-        if char == "$" and next_char == "$" then
-            res = res .. "$"
-            i   = i + 2
-        elseif char == "$" and next_char == "{" then
+    local res = {}   ---@type string[]
+    local lit = {}   ---@type string[] pending literal run, flushed (unescaped) at each span
+    local i, n = 1, #str
+    while i <= n do
+        local char = str:sub(i, i)
+        if char == "\\" then
+            -- Keep the escape intact for `_unescape`; an escaped `$` therefore
+            -- cannot start an expression.
+            lit[#lit + 1] = str:sub(i, i + 1)
+            i = i + 2
+        elseif char == "$" and str:sub(i + 1, i + 1) == "{" then
             local content, end_pos, parse_err = _parse_nested(str, i + 1)
             if parse_err then return nil, parse_err end
             if not content then return nil, "Failed to parse expression content" end
@@ -277,14 +257,17 @@ _expand_recursive = function(str, ctx)
             local val, eval_err = _eval_expression(content, ctx)
             if eval_err then return nil, eval_err end
 
-            res = res .. tostring(val or "")
-            i   = end_pos + 1
+            res[#res + 1] = _unescape(table.concat(lit))
+            lit = {}
+            res[#res + 1] = tostring(val or "")
+            i = end_pos + 1
         else
-            res = res .. char
-            i   = i + 1
+            lit[#lit + 1] = char
+            i = i + 1
         end
     end
-    return res
+    res[#res + 1] = _unescape(table.concat(lit))
+    return table.concat(res)
 end
 
 --- Expand a single (string) value. When the *entire* trimmed value is one expression
