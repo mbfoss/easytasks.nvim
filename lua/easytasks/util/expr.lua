@@ -165,6 +165,24 @@ function M.tokenize(src)
     return _tokenize(src)
 end
 
+--- If `src:sub(i, i)` opens a verbatim string literal, return the index just
+--- past its closing delimiter; otherwise return `nil`. On an unterminated string
+--- returns `nil, err`. Shared with the runner's hole scanner so that locating a
+--- hole's closing `}}` and tokenizing its interior agree on where strings begin
+--- and end — a `}}` inside a string must not be mistaken for the hole's end.
+---@param src string
+---@param i   integer
+---@return integer? next_i, string? err
+function M.skip_string(src, i)
+    local c = src:sub(i, i)
+    if not _delims[c] then return nil end
+    local n = #src
+    local j = i + 1
+    while j <= n and src:sub(j, j) ~= c do j = j + 1 end
+    if j > n then return nil, "unterminated string" end
+    return j + 1
+end
+
 -- ── Parser ────────────────────────────────────────────────────────────────────
 
 --- Parse `src` (the inner text of a hole) into a single expression AST. Returns

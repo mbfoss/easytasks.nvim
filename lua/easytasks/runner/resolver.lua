@@ -2,51 +2,37 @@
 local M = {}
 
 local expressions = require("easytasks.expressions")
+local expr = require("easytasks.util.expr")
 
---- Expression syntax
---- ─────────────────
+--- Expression evaluation
+--- ─────────────────────
 --- A task string is literal text with `{{ … }}` *holes*. Nothing outside a hole
 --- is special, so the top level never needs escaping: a bare `$`, `\`, or single
 --- `}` is literal, and DAP-style `${var}` passes through untouched. Only the
---- two-character sequence `{{` begins a hole; a bare `}}` outside a hole is
---- already literal. To emit a literal `{{`, double it: `{{{{` → `{{` (or use the
---- `lbrace` built-in, `{{ lbrace }}`).
+--- two-character sequence `{{` opens a hole; a bare `}}` outside a hole is already
+--- literal. To emit a literal `{{`, double it: `{{{{` → `{{` (or use the `lbrace`
+--- built-in, `{{ lbrace }}`).
 ---
---- Inside a hole the body is a shell-style word list: whitespace separates the
---- expression *name* (first word) from its *arguments*. An argument may be
---- quoted to include whitespace or a literal `{{`/`}}`:
----   * `'…'` — a literal segment; nothing inside is interpreted (`''` → a `'`).
----   * `"…"` — like `'…'`, but nested `{{ … }}` holes inside it are expanded
----     (`""` → a `"`).
---- There is no backslash escaping and no `,`/`:` separators, so backslashes in a
---- value never collide with TOML's own string escapes.
+--- The text *inside* a hole is a function-call expression, parsed by
+--- `easytasks.util.expr` into an AST that this module walks: `name(arg, …)` calls
+--- (a bare `name` is a zero-arg call), verbatim string literals
+--- (`` `…` `` / `"…"` / `'…'`), numbers, booleans, `$1`/`$2` positional macro
+--- arguments, `$$` for a literal `$`, and the `..` concatenation operator. Nesting
+--- is function composition — `upper(env(`HOME`))` — so there are no nested `{{ }}`
+--- holes and no per-context quoting rules. See docs/expression-grammar.md.
 ---
---- The `shell` and `lua` built-ins are *raw-body* expressions (see
---- `expressions.is_raw`): everything after the name is passed to them verbatim —
---- quotes and all — so those sublanguages keep their own quoting. Only nested
---- `{{ … }}` holes are expanded first.
----
---- To emit a literal `{{` in output, double it (`{{{{`) or use the `lbrace`
---- built-in. A literal `}}` needs nothing — it is only special *inside* a hole
---- (where it closes one); everywhere else it passes through unchanged. The escape
---- is a top-level construct because holes are located by brace nesting alone
---- (quotes are ignored, so a raw shell body may carry unbalanced quotes); that
---- means a `{{` can never be hidden from the hole finder from *inside* a hole,
---- only escaped before one begins (which is also why `lbrace` takes no argument —
---- it emits the braces itself rather than receiving them).
----
---- Known limitation: a literal `}}` inside a quoted argument is not supported (it
---- closes the hole early); put such text in ordinary literal output instead.
+--- Because string literals are verbatim, the hole scanner (`_find_span`) skips
+--- their contents (via `expr.skip_string`), so a `}}` inside a string never closes
+--- the hole early.
 
 ---@type fun(str: string, open_at: integer): string?, integer?, string?
 local _find_span
 
 --- Find the extent of a `{{ … }}` hole. `open_at` is the index of the opening
---- `{{`'s first `{`. Only brace nesting is tracked — a nested `{{ … }}` is
---- consumed recursively so its `}}` cannot close the outer hole. Quotes are
---- irrelevant here (so a raw shell body may contain any quotes); they only
---- matter later, to `_next_token`. Returns the inner text (between the braces)
---- and the index of the closing `}}`'s second `}`.
+--- `{{`'s first `{`. String literals are skipped so a `}}` inside one does not
+--- close the hole. There are no nested holes in the grammar (nesting is function
+--- composition), so no brace recursion is needed. Returns the inner text (between
+--- the braces) and the index of the closing `}}`'s second `}`.
 ---@param str     string
 ---@param open_at integer
 ---@return string? inner, integer? close_at, string? err
@@ -54,12 +40,12 @@ _find_span = function(str, open_at)
     local n = #str
     local i = open_at + 2
     while i <= n do
-        local char = str:sub(i, i)
-        if char == "{" and str:sub(i + 1, i + 1) == "{" then
-            local _, close, err = _find_span(str, i)
-            if not close then return nil, nil, err end
-            i = close + 1
-        elseif char == "}" and str:sub(i + 1, i + 1) == "}" then
+        local skip, serr = expr.skip_string(str, i)
+        if serr then
+            return nil, nil, "Unterminated string in expression"
+        elseif skip then
+            i = skip
+        elseif str:sub(i, i) == "}" and str:sub(i + 1, i + 1) == "}" then
             return str:sub(open_at + 2, i - 1), i + 1
         else
             i = i + 1
@@ -68,107 +54,31 @@ _find_span = function(str, open_at)
     return nil, nil, "Unterminated expression"
 end
 
---- Skip a single-quoted literal region. `i` is the opening quote; a doubled
---- quote (`''`) is an escaped literal quote and does not close the region.
----@param str string
----@param i   integer  index of the opening `'`
----@return integer? close_at  index of the closing quote, or nil if unterminated
-local function _skip_squote(str, i)
-    local n = #str
-    local j = i + 1
-    while j <= n do
-        if str:sub(j, j) == "'" then
-            if str:sub(j + 1, j + 1) == "'" then j = j + 2 else return j end
-        else
-            j = j + 1
-        end
-    end
-    return nil
-end
-
---- Parse a double-quoted region into segments. Literal runs become `{lit=…}`
---- and nested `{{ … }}` holes become `{span=…}`; a doubled quote (`""`) is a
---- literal `"`. Returns the segment list and the index just past the closing
---- quote.
----@param str  string
----@param open integer  index of the opening `"`
----@return {lit?:string, span?:string}[]? segments, integer? next_i, string? err
-local function _dquote_segments(str, open)
-    local n = #str
-    local segs, buf = {}, {}
-    local function flush() if #buf > 0 then segs[#segs + 1] = { lit = table.concat(buf) }; buf = {} end end
-    local j = open + 1
-    while j <= n do
-        local char = str:sub(j, j)
-        if char == '"' then
-            if str:sub(j + 1, j + 1) == '"' then buf[#buf + 1] = '"'; j = j + 2
-            else flush(); return segs, j + 1 end
-        elseif char == "{" and str:sub(j + 1, j + 1) == "{" then
-            local content, close, err = _find_span(str, j)
-            if not close then return nil, nil, err end
-            flush(); segs[#segs + 1] = { span = content }; j = close + 1
-        else
-            buf[#buf + 1] = char; j = j + 1
-        end
-    end
-    return nil, nil, "Unterminated quote"
-end
-
---- Parse one whitespace-delimited token from `str` beginning at or after `i`.
---- Bare characters, single-quoted literals, double-quoted regions, and nested
---- `{{ … }}` holes concatenate (like the shell) into a single token as long as
---- no unquoted whitespace separates them. Returns the token as a segment list
---- (`{lit=…}` / `{span=…}`) and the index just past it. When only whitespace or
---- end-of-string remains, the segment list is nil.
----@param str string
----@param i   integer
----@return {lit?:string, span?:string}[]? segments, integer? next_i, string? err
-local function _next_token(str, i)
-    local n = #str
-    while i <= n and str:sub(i, i):match("%s") do i = i + 1 end
-    if i > n then return nil, i end
-    local segs, buf = {}, {}
-    local function flush() if #buf > 0 then segs[#segs + 1] = { lit = table.concat(buf) }; buf = {} end end
-    while i <= n do
-        local char = str:sub(i, i)
-        if char:match("%s") then
-            break
-        elseif char == "'" then
-            local close = _skip_squote(str, i)
-            if not close then return nil, nil, "Unterminated quote" end
-            buf[#buf + 1] = (str:sub(i + 1, close - 1):gsub("''", "'"))
-            i = close + 1
-        elseif char == '"' then
-            local dsegs, nexti, err = _dquote_segments(str, i)
-            if not dsegs then return nil, nil, err end
-            flush()
-            for _, s in ipairs(dsegs) do segs[#segs + 1] = s end
-            i = nexti
-        elseif char == "{" and str:sub(i + 1, i + 1) == "{" then
-            local content, close, err = _find_span(str, i)
-            if not close then return nil, nil, err end
-            flush()
-            segs[#segs + 1] = { span = content }
-            i = close + 1
-        else
-            buf[#buf + 1] = char
-            i = i + 1
-        end
-    end
-    flush()
-    return segs, i
-end
-
-local function _async_call(fn, args)
+--- Run `fn` on the main loop and wait (via coroutine yield) for its result, so an
+--- expression may call `vim.*` APIs freely. `n` is the number of arguments in
+--- `args` — passed explicitly so a trailing `nil` argument survives.
+---@param fn   function
+---@param args any[]
+---@param n    integer
+local function _async_call(fn, args, n)
     local parent_co = coroutine.running()
     vim.schedule(function()
         coroutine.wrap(function()
-            local ret = vim.F.pack_len(pcall(fn, unpack(args)))
+            local ret = vim.F.pack_len(pcall(fn, unpack(args, 1, n)))
             coroutine.resume(parent_co, vim.F.unpack_len(ret))
         end)()
     end)
     return coroutine.yield()
 end
+
+---@type fun(inner: string, ctx: easytasks.ExpressionCtx): any, string?
+local _eval_expression
+
+---@type fun(node: easytasks.expr.Node, ctx: easytasks.ExpressionCtx): any, string?
+local _eval_node
+
+---@type fun(node: easytasks.expr.Node, ctx: easytasks.ExpressionCtx): any, string?
+local _eval_call
 
 ---@type fun(str: string, ctx: easytasks.ExpressionCtx): string?, string?
 local _expand_recursive
@@ -176,113 +86,85 @@ local _expand_recursive
 ---@type fun(str: string, ctx: easytasks.ExpressionCtx): any, string?
 local _expand_value
 
----@type fun(inner: string, ctx: easytasks.ExpressionCtx): any, string?
-local _eval_expression
-
---- Evaluate one parsed token to a value. A token that is a *sole* nested hole is
---- evaluated type-preservingly (its number/boolean/… survives); any other token
---- is stringified segment by segment into a single string.
----@param token {lit?:string, span?:string}[]
----@param ctx   easytasks.ExpressionCtx
+--- Evaluate one AST node to a value. Literals yield their value; a `concat`
+--- stringifies its operands (a `nil` operand becomes `""`); a `param` reads the
+--- current inline-expression argument frame; a `call` is delegated to
+--- `_eval_call`. Values are returned type-preservingly (a sole number/boolean
+--- survives) — the caller decides whether to stringify.
+---@param node easytasks.expr.Node
+---@param ctx  easytasks.ExpressionCtx
 ---@return any value, string? err
-local function _eval_token(token, ctx)
-    if #token == 1 and token[1].span then
-        return _eval_expression(token[1].span, ctx)
-    end
-    local parts = {} ---@type string[]
-    for _, seg in ipairs(token) do
-        if seg.lit then
-            parts[#parts + 1] = seg.lit
-        else
-            local val, err = _eval_expression(seg.span, ctx)
-            if err then return nil, err end
-            parts[#parts + 1] = val == nil and "" or tostring(val)
-        end
-    end
-    return table.concat(parts)
-end
-
---- Evaluate a single expression from its *inner* text — the part between `{{` and
---- `}}`. The first whitespace-delimited token is the expression name; the rest
---- are arguments (each parsed by `_next_token` and evaluated by `_eval_token`).
---- Returns the expression's *raw* value; callers decide whether to stringify it
---- (string interpolation) or preserve its type (a sole-expression value; see
---- `_expand_value`).
----
---- A *raw-body* expression (`expressions.is_raw`, e.g. `shell`/`lua`) instead
---- receives everything after its name verbatim — quotes and separators intact,
---- with only nested `{{ … }}` holes expanded — so its sublanguage keeps its own
---- quoting.
----
---- A name that matches no built-in or registered expression is looked up in the
---- inline `[expressions]` table (`ctx.expressions`). Its template is resolved
---- type-preservingly (via `_expand_value`), so an inline definition may reference
---- other expressions; a cycle guard (`ctx._resolving`) turns runaway recursion
---- into an error. An inline expression may take positional arguments: they are
---- evaluated in the caller's scope and exposed inside the template as `{{1}}`,
---- `{{2}}`, … via a per-call argument frame pushed onto `ctx._args`. A wholly
---- numeric name is always such a positional reference, never a lookup.
----@param inner string
----@param ctx   easytasks.ExpressionCtx
----@return any value, string? err
-_eval_expression = function(inner, ctx)
-    local name_seg, name_end_opt, terr = _next_token(inner, 1)
-    if terr then return nil, terr end
-    if not name_seg then return nil, "Unknown expression: ''" end
-    local name_end = name_end_opt --[[@as integer]]
-
-    local name, nerr = _eval_token(name_seg, ctx)
-    if nerr then return nil, nerr end
-    name = vim.trim(tostring(name == nil and "" or name))
-    if name == "" then return nil, "Unknown expression: ''" end
-
-    -- Positional argument reference (`{{1}}`, `{{2}}`, …) inside an inline template.
-    if name:match("^%d+$") then
+_eval_node = function(node, ctx)
+    local kind = node.kind
+    if kind == "string" or kind == "number" or kind == "boolean" then
+        return node.value
+    elseif kind == "dollar" then
+        return "$"
+    elseif kind == "param" then
         local frame = ctx._args and ctx._args[#ctx._args]
         if not frame then
-            return nil, "positional argument {{" .. name .. "}} used outside an inline expression"
+            return nil, ("positional argument $%d used outside an inline expression"):format(node.index)
         end
-        local idx = tonumber(name)
-        if idx < 1 or idx > frame.n then
-            return nil, ("no argument {{%s}} (inline expression received %d)"):format(name, frame.n)
+        if node.index < 1 or node.index > frame.n then
+            return nil, ("no argument $%d (inline expression received %d)"):format(node.index, frame.n)
         end
-        return frame[idx]
+        return frame[node.index]
+    elseif kind == "concat" then
+        local parts = {} ---@type string[]
+        for i = 1, #node.parts do
+            local val, err = _eval_node(node.parts[i], ctx)
+            if err then return nil, err end
+            parts[i] = val == nil and "" or tostring(val)
+        end
+        return table.concat(parts)
+    elseif kind == "call" then
+        return _eval_call(node, ctx)
     end
+    return nil, "internal error: unknown node kind '" .. tostring(kind) .. "'"
+end
 
-    -- Collect the remaining tokens as arguments.
-    ---@type {lit?:string, span?:string}[][]
-    local arg_tokens = {}
-    local i = name_end
-    while true do
-        local seg, nexti, err = _next_token(inner, i)
+--- Evaluate a `call` node. Arguments are evaluated first, in the caller's scope,
+--- type-preservingly. The name is then resolved: a built-in or user-registered
+--- expression (`expressions.get`) is invoked as `fn(ctx, arg1, …)`; otherwise it
+--- is looked up in the inline `[expressions]` table (`ctx.expressions`) and its
+--- template resolved with a fresh positional-argument frame (`$1`, `$2`, …) on
+--- `ctx._args`. A cycle guard (`ctx._resolving`) turns runaway inline recursion
+--- into an error.
+---@param node easytasks.expr.Node
+---@param ctx  easytasks.ExpressionCtx
+---@return any value, string? err
+_eval_call = function(node, ctx)
+    local name = node.name --[[@as string]]
+    local nargs = #node.args
+
+    -- A nil result is a legitimate value (e.g. an unset env var), so track the
+    -- count explicitly rather than via `#` (unreliable with nil array holes).
+    local argvals = {} ---@type any[]
+    for k = 1, nargs do
+        local val, err = _eval_node(node.args[k], ctx)
         if err then return nil, err end
-        if not seg then break end
-        arg_tokens[#arg_tokens + 1] = seg
-        i = nexti
+        argvals[k] = val
     end
 
     local fn = expressions.get(name)
     if not fn then
         local template = ctx.expressions and ctx.expressions[name]
         if template == nil then return nil, "Unknown expression: '" .. name .. "'" end
-        -- Evaluate the call arguments in the caller's scope, type-preservingly, so
-        -- a sole `{{1}}` in the template keeps a number/boolean argument intact.
-        local frame = { n = #arg_tokens }
-        for k, token in ipairs(arg_tokens) do
-            local aval, aerr = _eval_token(token, ctx)
-            if aerr then
-                return nil, ("in inline expression `%s` argument %d: %s"):format(name, k, aerr)
-            end
-            frame[k] = aval
-        end
+
+        local frame = { n = nargs } ---@type {n:integer,[integer]:any}
+        for k = 1, nargs do frame[k] = argvals[k] end
+
         local resolving = ctx._resolving or {}
         ctx._resolving = resolving
         if resolving[name] then return nil, "Expression cycle detected: '" .. name .. "'" end
         resolving[name] = true
+
         local args_stack = ctx._args or {}
         ctx._args = args_stack
         args_stack[#args_stack + 1] = frame
+
         local val, expand_err = _expand_value(template, ctx)
+
         args_stack[#args_stack] = nil
         resolving[name] = nil
         if expand_err then
@@ -291,22 +173,12 @@ _eval_expression = function(inner, ctx)
         return val
     end
 
-    local expression_args = { ctx } ---@type any[]
-    if expressions.is_raw(name) then
-        -- Everything after the name, verbatim (nested holes expanded).
-        local raw = vim.trim(inner:sub(name_end))
-        local body, berr = _expand_recursive(raw, ctx)
-        if berr then return nil, berr end
-        expression_args[2] = body
-    else
-        for _, token in ipairs(arg_tokens) do
-            local arg, arg_err = _eval_token(token, ctx)
-            if arg_err then return nil, arg_err end
-            expression_args[#expression_args + 1] = arg
-        end
-    end
+    -- Built-in / registered function: fn(ctx, arg1, …). Build the argument vector
+    -- with an explicit length so a trailing nil survives to the callee.
+    local call_args = { ctx } ---@type any[]
+    for k = 1, nargs do call_args[k + 1] = argvals[k] end
 
-    local status, val, expression_err = _async_call(fn, expression_args)
+    local status, val, expression_err = _async_call(fn, call_args, nargs + 1)
     if not status then
         return nil, "[" .. name .. "] Expression crashed: " .. tostring(val)
     end
@@ -320,14 +192,26 @@ _eval_expression = function(inner, ctx)
     return val
 end
 
+--- Evaluate a hole's inner text: parse it to an AST and walk it. Returns the
+--- expression's raw value; callers decide whether to stringify it (interpolation)
+--- or preserve its type (a sole hole; see `_expand_value`).
+---@param inner string
+---@param ctx   easytasks.ExpressionCtx
+---@return any value, string? err
+_eval_expression = function(inner, ctx)
+    local ast, perr = expr.parse(inner)
+    if not ast then return nil, perr end
+    return _eval_node(ast, ctx)
+end
+
 --- Expand a string value as interpolation: literal text is copied through and
 --- every `{{ … }}` hole is stringified into place. The top level has no escaping,
---- so backslashes and lone braces are literal.
+--- so backslashes and lone braces are literal; `{{{{` emits a literal `{{`.
 ---@param str string
 ---@param ctx easytasks.ExpressionCtx
 ---@return string|nil result, string|nil err
 _expand_recursive = function(str, ctx)
-    local res = {}   ---@type string[]
+    local res = {} ---@type string[]
     local n, i = #str, 1
     while i <= n do
         local open = str:find("{{", i, true)
@@ -337,9 +221,7 @@ _expand_recursive = function(str, ctx)
         end
         if open > i then res[#res + 1] = str:sub(i, open - 1) end
         if str:sub(open + 2, open + 3) == "{{" then
-            -- `{{{{` escapes a literal `{{` — the "double the delimiter" convention
-            -- (as in Rust/.NET/Python format strings). `{{` is the only sequence
-            -- special at the top level; a bare `}}` is already literal.
+            -- `{{{{` escapes a literal `{{` — the "double the delimiter" convention.
             res[#res + 1] = "{{"
             i = open + 4
         else
@@ -355,9 +237,9 @@ _expand_recursive = function(str, ctx)
 end
 
 --- Expand a single (string) value. When the *entire* trimmed value is one hole
---- (`"{{ name args }}"`), the expression's raw value is returned, so non-string
---- types (numbers, booleans, …) survive intact. Otherwise the value is treated
---- as string interpolation and every hole's result is stringified into place.
+--- (`"{{ name(args) }}"`), the expression's raw value is returned, so non-string
+--- types (numbers, booleans, …) survive intact. Otherwise the value is treated as
+--- string interpolation and every hole's result is stringified into place.
 ---@param str string
 ---@param ctx easytasks.ExpressionCtx
 ---@return any value, string? err

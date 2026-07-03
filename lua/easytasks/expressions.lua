@@ -2,7 +2,7 @@
 ---@field task        table                decoded task data (pre-resolution)
 ---@field expressions table<string,string> named inline expression templates from the [expressions] table
 ---@field _resolving? table<string,true>   names of inline expressions currently on the resolution stack (cycle guard)
----@field _args?      {n:integer,[integer]:any}[]  stack of positional-argument frames; the top frame backs {{1}}, {{2}}, … inside an inline template
+---@field _args?      {n:integer,[integer]:any}[]  stack of positional-argument frames; the top frame backs $1, $2, … inside an inline template
 
 ---@alias easytasks.ExpressionFn fun(ctx: easytasks.ExpressionCtx, ...): any, string?
 
@@ -19,13 +19,6 @@ local _expressions  = {}
 --- forbid overriding a built-in via `M.register`.
 ---@type table<string, boolean>
 local _builtin      = {}
-
---- Names of *raw-body* expressions: instead of tokenized arguments they receive
---- everything after their name verbatim (quotes and separators intact, only
---- nested `{{ … }}` holes expanded) so a sublanguage keeps its own quoting.
---- `shell` and `lua` are raw; users may opt in via `M.register(name, fn, {raw=true})`.
----@type table<string, boolean>
-local _raw          = { shell = true, lua = true }
 
 --- One-line descriptions, keyed by name, surfaced in LSP completion. Built-in
 --- descriptions are seeded below; `M.register` may add one via `opts.description`.
@@ -160,9 +153,9 @@ function _expressions.env(_, varname)
 end
 
 --- Run a shell command and return its stdout with trailing newlines stripped
---- (like `$(...)` command substitution). A non-zero exit status is an error.
---- `shell` is a raw-body expression: the whole command reaches the shell
---- verbatim, so it keeps its own quoting: `{{ shell printf 'a, b' }}`.
+--- (like `$(...)` command substitution). A non-zero exit status is an error. The
+--- command is an ordinary string argument, so a verbatim string literal keeps its
+--- own quoting: `` {{ shell(`printf 'a, b'`) }} ``.
 ---@param cmd string  the command
 ---@return string? output, string? err
 function _expressions.shell(_, cmd)
@@ -176,11 +169,11 @@ function _expressions.shell(_, cmd)
 end
 
 --- Evaluate Lua code and return its result. The code is tried first as an
---- expression (`return <code>`) and, failing that, as a statement chunk, so
---- both `{{ lua 1 + 1 }}` and `{{ lua return os.time() }}` work. `lua` is a
---- raw-body expression: the source reaches the interpreter verbatim, keeping its
---- own quoting: `{{ lua math.max(1, 2) }}`, `{{ lua return 'hi' }}`. The result
---- must be a string, number, boolean, or nil.
+--- expression (`return <code>`) and, failing that, as a statement chunk, so both
+--- `` {{ lua(`1 + 1`) }} `` and `` {{ lua(`return os.time()`) }} `` work. The
+--- source is an ordinary string argument, so a verbatim string literal keeps its
+--- own quoting: `` {{ lua(`math.max(1, 2)`) }} ``. The result must be a string,
+--- number, boolean, or nil.
 ---@param code string  Lua source
 ---@return any result, string? err
 function _expressions.lua(_, code)
@@ -293,14 +286,6 @@ function M.get(name)
     return _expressions[name]
 end
 
---- Whether `name` is a raw-body expression (receives its body verbatim rather
---- than as tokenized arguments). See `_raw`.
----@param name string
----@return boolean
-function M.is_raw(name)
-    return _raw[name] == true
-end
-
 --- List every expression (built-in and user-registered) as `{ name, description }`
 --- entries, sorted by name. Marshaled to the tasks-file LSP so completion can
 --- offer expression names inside a `{{ … }}` hole. Inline `[expressions]` are not
@@ -316,19 +301,17 @@ function M.list()
     return out
 end
 
---- Register a user expression for use in task config values. Built-in expressions cannot
---- be overridden; attempting to do so raises an error. `opts.raw` makes it a
---- raw-body expression (see `M.is_raw`); `opts.description` is shown in LSP
---- completion.
+--- Register a user expression for use in task config values. Built-in expressions
+--- cannot be overridden; attempting to do so raises an error. `opts.description`
+--- is shown in LSP completion.
 ---@param name string
 ---@param fn   easytasks.ExpressionFn
----@param opts? { raw?: boolean, desc?: string }
+---@param opts? { desc?: string }
 function M.register(name, fn, opts)
     if _builtin[name] then
         error("easytasks: cannot override built-in expression '" .. name .. "'", 2)
     end
     _expressions[name]  = fn
-    _raw[name]          = opts and opts.raw or nil
     _descriptions[name] = opts and opts.desc or nil
 end
 
