@@ -61,19 +61,21 @@ local function _validate(schema, data, node_id, dt, errors)
     -- type
     if schema.type ~= nil then
         local allowed = type(schema.type) == "table" and schema.type or { schema.type }
-        local ok = false
+        local ok, bad_schema, bad_type = false, nil, nil
         for _, t in ipairs(allowed) do
-            if t == "null" and data == nil then ok = true
-            elseif t == "boolean" and type(data) == "boolean" then ok = true
-            elseif t == "integer" and type(data) == "number" and data == math.floor(data) then ok = true
-            elseif t == "number" and type(data) == "number" then ok = true
-            elseif t == "string" and type(data) == "string" then ok = true
-            elseif t == "array" and std.islist(data) then ok = true
-            elseif t == "object" and type(data) == "table" and not std.islist(data) then ok = true
-            end
+            if t == "null" then if data == nil then ok = true end
+            elseif t == "boolean" then if type(data) == "boolean" then ok = true end
+            elseif t == "integer" then if type(data) == "number" and data == math.floor(data) then ok = true end
+            elseif t == "number" then if type(data) == "number" then ok = true end
+            elseif t == "string" then if type(data) == "string" then ok = true end
+            elseif t == "array" then if std.islist(data) then ok = true end
+            elseif t == "object" then if type(data) == "table" and not std.islist(data) then ok = true end
+            else bad_schema,bad_type = true,t end
             if ok then break end
         end
-        if not ok then
+        if bad_schema then
+            add_error(errors, node_id, "Invalid type in schema: " .. tostring(bad_type))
+        elseif not ok then
             local expected = std.tbl_map(function (v) return v == "object" and "table" or v end, allowed)
             local got = type(data) ---@type string
             if got == "table" then got = std.islist(data) and "array" or "table"

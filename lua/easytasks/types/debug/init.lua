@@ -24,6 +24,10 @@ local function _param_schema(spec)
     elseif kind == "enum" then
         out.type = spec.type or "string"
         out.enum = spec.enum
+    elseif spec.type == "table" then
+        out.type = "object"
+    elseif spec.type == "list" then
+        out.type = "array"
     else
         out.type = spec.type or "string"
     end
