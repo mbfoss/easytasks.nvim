@@ -1,34 +1,5 @@
 local M = {}
 
----@class easytasks.usercmd.SubcommandDef
----@field run  fun(name:string, args:string[], opts:table)
----@field complete fun(rest:string[], arg_lead:string):string[]
-
----@type table<string, easytasks.usercmd.SubcommandDef>
-local _ext_subcommands = {}
-
----Register a subcommand under the main `Easytasks` command.
----@param name       string
----@param run_fn     fun(name:string, args:string[], opts:table)
----@param opts?      { complete_fn?: fun(rest:string[], arg_lead:string):string[] }
-function M.register_subcommand(name, run_fn, opts)
-    _ext_subcommands[name] = {
-        run      = run_fn,
-        complete = opts and opts.complete_fn or function() return {} end,
-    }
-end
-
----@param name string
----@return easytasks.usercmd.SubcommandDef?
-function M.get_subcommand(name)
-    return _ext_subcommands[name]
-end
-
----@return string[]
-function M.subcommand_names()
-    return vim.tbl_keys(_ext_subcommands)
-end
-
 ---@param str string
 ---@return string[]
 local function _split_args(str)
@@ -36,28 +7,41 @@ local function _split_args(str)
     local i = 1
     local len = #str
     local part = {}
+    local has_part = false
+    local quote = nil
 
     while i <= len do
         local c = str:sub(i, i)
-        if c == '\\' and i < len then
-            table.insert(part, str:sub(i + 1, i + 1))
-            i = i + 2
+        if quote then
+            if c == quote then
+                quote = nil
+            else
+                table.insert(part, c)
+            end
+            i = i + 1
+        elseif c == '"' or c == "'" then
+            quote = c
+            has_part = true
+            i = i + 1
         elseif c:match('%s') then
-            if #part > 0 then
+            if has_part then
                 table.insert(args, table.concat(part))
                 part = {}
+                has_part = false
             end
             i = i + 1
         else
             table.insert(part, c)
+            has_part = true
             i = i + 1
         end
     end
-    if #part > 0 then
+    if has_part then
         table.insert(args, table.concat(part))
     end
     return args
 end
+M._split_args = _split_args
 
 ---@alias easytasks.usercmd.subcommand_fn fun(cmd:string,rest:string[],arg_lead:string):string[]
 
@@ -109,18 +93,17 @@ end
 
 ---@param cmd string
 ---@param run_fn easytasks.usercmd.run_fn
----@param opts {desc:string?,subcommand_fn:easytasks.usercmd.subcommand_fn?,count:boolean?}?
+---@param opts {desc:string?,subcommand_fn:easytasks.usercmd.subcommand_fn?}?
 function M.register_user_cmd(cmd, run_fn, opts)
     opts = opts or {}
     vim.api.nvim_create_user_command(cmd, function(cmd_opts)
             _dispatch(cmd, run_fn, cmd_opts)
         end,
         {
-            nargs = opts.subcommand_fn ~= nil and "*" or nil,
-            count = opts.count or nil,
+            nargs = "*",
             complete = opts.subcommand_fn ~= nil and function(arg_lead, cmd_line, _)
                 return _complete(opts.subcommand_fn, arg_lead, cmd_line)
-            end or nil,
+            end or function() return {} end,
             desc = opts.desc,
         })
 end
