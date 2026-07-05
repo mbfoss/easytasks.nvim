@@ -93,7 +93,7 @@ end
 
 ---@param cmd string
 ---@param run_fn easytasks.usercmd.run_fn
----@param opts {desc:string?,subcommand_fn:easytasks.usercmd.subcommand_fn?}?
+---@param opts {desc:string?,subcommand_fn:easytasks.usercmd.subcommand_fn?,count:boolean,range:boolean}?
 function M.register_user_cmd(cmd, run_fn, opts)
     opts = opts or {}
     vim.api.nvim_create_user_command(cmd, function(cmd_opts)
@@ -101,6 +101,8 @@ function M.register_user_cmd(cmd, run_fn, opts)
         end,
         {
             nargs = "*",
+            count = opts.count,
+            range = opts.range,
             complete = opts.subcommand_fn ~= nil and function(arg_lead, cmd_line, _)
                 return _complete(opts.subcommand_fn, arg_lead, cmd_line)
             end or function() return {} end,
