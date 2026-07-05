@@ -1,224 +1,69 @@
 local ordered = require("easytasks.util.table_util").ordered
 
----@type easytasks.TaskTemplate[]{
-return {
-    -- ── LLDB ──────────────────────────────────────────────────────────────────
-    {
-        label = "Launch (LLDB)",
-        task  = ordered({
-            name         = "debug",
-            type         = "debug",
-            adapter      = "lldb",
-            request      = "launch",
-            request_args = ordered({ program = "a.out", args = {} }, { "program", "args" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach process (LLDB)",
-        task  = ordered({
-            name       = "debug-attach",
-            type       = "debug",
-            adapter    = "lldb",
-            request    = "attach",
-            process_id = "{{ select-pid }}",
-        }, { "name", "type", "adapter", "request", "process_id" }),
-    },
+--- Debug templates are projected from easydap's per-adapter schemas rather than
+--- hand-maintained: one entry per (adapter, request) that easydap declares a
+--- launch/attach schema for, with `parameters` prefilled from the schema's
+--- required and default-bearing params. This keeps the template list in lockstep
+--- with whatever adapters easydap ships.
 
-    -- ── CodeLLDB ──────────────────────────────────────────────────────────────
-    {
-        label = "Launch (CodeLLDB)",
-        task  = ordered({
-            name         = "debug",
-            type         = "debug",
-            adapter      = "codelldb",
-            request      = "launch",
-            request_args = ordered({ program = "${workspaceFolder}/target/debug/app", args = {} }, { "program", "args" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach process (CodeLLDB)",
-        task  = ordered({
-            name       = "debug-attach",
-            type       = "debug",
-            adapter    = "codelldb",
-            request    = "attach",
-            process_id = "{{ select-pid }}",
-        }, { "name", "type", "adapter", "request", "process_id" }),
-    },
+--- A starting value for a schema param: its literal default when it has one,
+--- otherwise a type/kind-appropriate placeholder.
+---@param spec table  an `easydap.ParamSpec` (type/kind/default/required)
+---@return any
+local function _placeholder(spec)
+    if spec.default ~= nil and type(spec.default) ~= "function" then
+        return spec.default
+    end
+    local kind = spec.kind
+    if kind == "argv" then return {} end
+    if kind == "env" then return {} end
+    if kind == "port" then return 0 end
+    if spec.type == "boolean" then return false end
+    if spec.type == "integer" or spec.type == "number" then return 0 end
+    return ""
+end
 
-    -- ── GDB ───────────────────────────────────────────────────────────────────
-    {
-        label = "Launch (GDB)",
-        task  = ordered({
-            name         = "debug",
-            type         = "debug",
-            adapter      = "gdb",
-            request      = "launch",
-            request_args = ordered({ program = "a.out", args = {} }, { "program", "args" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach process (GDB)",
-        task  = ordered({
-            name       = "debug-attach",
-            type       = "debug",
-            adapter    = "gdb",
-            request    = "attach",
-            process_id = "{{ select-pid }}",
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
+--- Build the `parameters` skeleton for one (adapter, request): every required
+--- param plus every param that carries a default, in the schema's sorted order.
+---@param sch  table  the `easydap.schema` module
+---@param adapter string
+---@param request string
+---@return table params, string[] order  empty when the request has no such params
+local function _parameters(sch, adapter, request)
+    local params, order = {}, {}
+    for _, key in ipairs(sch.param_names(adapter, request)) do
+        local spec = sch.spec(adapter, request, key)
+        if spec and (spec.required or spec.default ~= nil) then
+            params[key] = _placeholder(spec)
+            order[#order + 1] = key
+        end
+    end
+    return params, order
+end
 
-    -- ── Python ────────────────────────────────────────────────────────────────
-    {
-        label = "Debug Python file (debugpy)",
-        task  = ordered({
-            name         = "debug-python",
-            type         = "debug",
-            adapter      = "debugpy",
-            request      = "launch",
-            request_args = ordered({
-                justMyCode = false,
-                console    = "integratedTerminal",
-            }, { "justMyCode", "console" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Debug Python module (debugpy-module)",
-        task  = ordered({
-            name    = "debug-python-module",
-            type    = "debug",
-            adapter = "debugpy-module",
-            request = "launch",
-        }, { "name", "type", "adapter", "request" }),
-    },
-
-    -- ── Go ────────────────────────────────────────────────────────────────────
-    {
-        label = "Debug Go (delve)",
-        task  = ordered({
-            name         = "debug-go",
-            type         = "debug",
-            adapter      = "delve",
-            request      = "launch",
-            request_args = ordered({ mode = "debug", args = {} }, { "mode", "args" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach Go process (delve)",
-        task  = ordered({
-            name         = "debug-go-attach",
-            type         = "debug",
-            adapter      = "delve",
-            request      = "attach",
-            request_args = ordered({ processId = 0 }, { "processId" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── JavaScript / TypeScript ───────────────────────────────────────────────
-    {
-        label = "Debug Node.js (js-debug)",
-        task  = ordered({
-            name         = "debug-node",
-            type         = "debug",
-            adapter      = "js-debug",
-            request      = "launch",
-            request_args = ordered({
-                program    = "${workspaceFolder}/index.js",
-                args       = {},
-                sourceMaps = true,
-            }, { "program", "args", "sourceMaps" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach Node.js process (js-debug)",
-        task  = ordered({
-            name         = "debug-node-attach",
-            type         = "debug",
-            adapter      = "js-debug",
-            request      = "attach",
-            request_args = ordered({ port = 9229 }, { "port" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── Bash ──────────────────────────────────────────────────────────────────
-    {
-        label = "Debug Bash script (bash-debug-adapter)",
-        task  = ordered({
-            name         = "debug-bash",
-            type         = "debug",
-            adapter      = "bash-debug-adapter",
-            request      = "launch",
-            request_args = ordered({ program = "${workspaceFolder}/script.sh", args = {} }, { "program", "args" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── PHP ───────────────────────────────────────────────────────────────────
-    {
-        label = "Debug PHP (php-debug-adapter)",
-        task  = ordered({
-            name         = "debug-php",
-            type         = "debug",
-            adapter      = "php-debug-adapter",
-            request      = "launch",
-            request_args = ordered({ port = 9003 }, { "port" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── .NET ──────────────────────────────────────────────────────────────────
-    {
-        label = "Debug .NET (netcoredbg)",
-        task  = ordered({
-            name         = "debug-dotnet",
-            type         = "debug",
-            adapter      = "netcoredbg",
-            request      = "launch",
-            request_args = ordered({ program = "${workspaceFolder}/bin/Debug/net8.0/app.dll" }, { "program" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-    {
-        label = "Attach .NET process (netcoredbg)",
-        task  = ordered({
-            name         = "debug-dotnet-attach",
-            type         = "debug",
-            adapter      = "netcoredbg",
-            request      = "attach",
-            request_args = ordered({ processId = 0 }, { "processId" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── Java ──────────────────────────────────────────────────────────────────
-    {
-        label = "Attach Java process (java-debug-server)",
-        task  = ordered({
-            name         = "debug-java",
-            type         = "debug",
-            adapter      = "java-debug-server",
-            request      = "attach",
-            request_args = ordered({ host = "127.0.0.1", port = 5005 }, { "host", "port" }),
-        }, { "name", "type", "adapter", "request", "request_args" }),
-    },
-
-    -- ── Lua ───────────────────────────────────────────────────────────────────
-    {
-        label = "Debug Lua (local-lua-debugger)",
-        task  = ordered({
-            name    = "debug-lua",
-            type    = "debug",
-            adapter = "local-lua-debugger",
-            request = "launch",
-        }, { "name", "type", "adapter", "request" }),
-    },
-
-    -- ── Remote DAP server ─────────────────────────────────────────────────────
-    {
-        label = "Attach remote DAP server",
-        task  = ordered({
-            name    = "debug-remote",
-            type    = "debug",
-            adapter = "remote",
-            request = "attach",
-            host    = "127.0.0.1",
-            port    = 0
-        }, { "name", "type", "adapter", "request", "host", "port" }),
-    },
-}
+---@return easytasks.TaskTemplate[]
+return function()
+    local sch = require("easydap.schema")
+    local templates = {}
+    for _, adapter in ipairs(sch.adapter_names()) do
+        for _, request in ipairs(sch.requests(adapter)) do
+            local task_keys = { "name", "type", "adapter", "request" }
+            local task = {
+                name    = "debug-" .. adapter,
+                type    = "debug",
+                adapter = adapter,
+                request = request,
+            }
+            local params, order = _parameters(sch, adapter, request)
+            if #order > 0 then
+                task.parameters = ordered(params, order)
+                task_keys[#task_keys + 1] = "parameters"
+            end
+            templates[#templates + 1] = {
+                label = ("%s (%s)"):format(adapter, request),
+                task  = ordered(task, task_keys),
+            }
+        end
+    end
+    return templates
+end
