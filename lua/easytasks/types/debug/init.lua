@@ -3,12 +3,49 @@ local str_util = require("easytasks.util.str_util")
 ---@class easytasks.debug.Module : easytasks.TaskTypeDef
 local M = {}
 
+---@type fun(spec: table, sch: table): table
+local _param_schema
+
+--- Build the `properties`/`required` pair for one schema group (the root
+--- launch/attach field map, or a nested group's `fields`). Fields marked
+--- `fixed` (adapter-pinned identity keys like `type`/`name`) are omitted
+--- entirely — they mirror `easydap.scaffold`'s template rendering, which
+--- treats `fixed` fields as not user-editable.
+---@param group table  a schema group: the root field map or a `{fields=…}` node
+---@param sch   table  the `easydap.schema` module
+---@return table properties, string[] required
+local function _group_schema(group, sch)
+    local props, required = {}, {}
+    for key, spec in pairs(sch.group_fields(group)) do
+        if not spec.fixed then
+            props[key] = _param_schema(spec, sch)
+            if spec.required then required[#required + 1] = key end
+        end
+    end
+    table.sort(required)
+    return props, required
+end
+
 --- Map one easydap `ParamSpec` to a JSON Schema fragment for the tasks-file LSP.
---- `kind` (the spec's semantic refinement) drives the shape; `type` is the
---- fallback for plain params.
+--- A nested group (`kind == "schema"`, holding child specs under `fields`)
+--- recurses into a nested `object` schema; otherwise `kind` (the spec's
+--- semantic refinement) drives the shape, with `type` as the fallback for
+--- plain params.
 ---@param spec table  an `easydap.ParamSpec`
+---@param sch  table  the `easydap.schema` module
 ---@return table
-local function _param_schema(spec)
+_param_schema = function(spec, sch)
+    if sch.is_group(spec) then
+        local props, required = _group_schema(spec, sch)
+        return {
+            description          = spec.desc,
+            type                 = "object",
+            additionalProperties = false,
+            properties           = props,
+            required             = (#required > 0) and required or nil,
+        }
+    end
+
     local out = { description = spec.desc }
     local kind = spec.kind
     if kind == "argv" then
@@ -46,14 +83,7 @@ local function _parameter_branches(sch)
     local branches = {}
     for _, adapter in ipairs(sch.adapter_names()) do
         for _, request in ipairs(sch.requests(adapter)) do
-            local props, required = {}, {}
-            for _, key in ipairs(sch.param_names(adapter, request)) do
-                local spec = sch.spec(adapter, request, key)
-                if spec then
-                    props[key] = _param_schema(spec)
-                    if spec.required then required[#required + 1] = key end
-                end
-            end
+            local props, required = _group_schema(sch.schema(adapter, request), sch)
             -- A task with no `request` defaults to "launch" at run time (see
             -- `M.start`), so the "launch" branch must also match when the field
             -- is absent, not just when it's explicitly set to "launch".
