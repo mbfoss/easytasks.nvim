@@ -178,7 +178,7 @@ local function _schema()
             },
             parameters   = {
                 type                 = { "object", "null" },
-                additionalProperties = true,
+                additionalProperties = false,
                 description          =
                 "Native DAP launch/attach body sent verbatim to the chosen adapter. The valid keys depend on `adapter` and `request` (completed from the adapter's own schema).",
             },
