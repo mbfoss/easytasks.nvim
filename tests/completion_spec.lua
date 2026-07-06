@@ -394,6 +394,60 @@ describe("completion – undecoded sections", function()
 end)
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Name-keyed maps (additionalProperties given as an object schema)
+--
+-- Mirrors the easytasks task file, where tasks are declared as `[tasks.<name>]`
+-- and `tasks` is `{ type=object, additionalProperties = <task schema> }`. The
+-- names are user-defined, so completion resolves task keys/sub-tables through
+-- additionalProperties and enumerates existing entries for header paths.
+-- ─────────────────────────────────────────────────────────────────────────────
+describe("completion – name-keyed maps", function()
+    local KEYED = {
+        type                 = "object",
+        additionalProperties = false,
+        properties           = {
+            tasks = {
+                type                 = "object",
+                additionalProperties = {
+                    type       = "object",
+                    properties = {
+                        type = { type = "string", enum = { "shell" } },
+                        cmd  = { type = "string" },
+                        env  = {
+                            type       = "object",
+                            properties = { HOME = { type = "string" }, PATH = { type = "string" } },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    it("suggests a keyed entry's keys via additionalProperties", function()
+        assert.same({ "cmd", "env", "type" }, labels(complete_with(KEYED, "[tasks.build]\n|")))
+    end)
+
+    it("excludes keys already present in the entry", function()
+        assert.same({ "cmd", "env" }, labels(complete_with(KEYED, '[tasks.build]\ntype = "shell"\n|')))
+    end)
+
+    it("suggests sub-table keys under a keyed entry", function()
+        assert.same({ "HOME", "PATH" },
+            labels(complete_with(KEYED, "[tasks.build]\n[tasks.build.env]\n|")))
+    end)
+
+    it("enumerates existing entries and their sub-tables as header paths", function()
+        local res = complete_with(KEYED, '[tasks.build]\n[tasks.build.env]\nHOME = "/h"\n[|')
+        assert.same({ "tasks", "tasks.build", "tasks.build.env" }, labels(res))
+    end)
+
+    it("resolves keys from the header path for a duplicate keyed sub-table", function()
+        assert.same({ "HOME", "PATH" },
+            labels(complete_with(KEYED, "[tasks.build]\n[tasks.build.env]\n[tasks.build.env]\n|")))
+    end)
+end)
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Property ordering & item shape
 -- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – property ordering", function()

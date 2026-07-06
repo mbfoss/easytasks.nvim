@@ -223,8 +223,18 @@ local function schema_for_header_keys(root_schema, keys)
     local sch = root_schema
     for _, kd in ipairs(keys) do
         local flat = sch and schema_nav.flatten(sch, nil)
-        if not (flat and flat.properties and flat.properties[kd.value]) then return nil end
-        sch = schema_nav.flatten(flat.properties[kd.value], nil)
+        if not flat then return nil end
+        local next_sch
+        if flat.properties and flat.properties[kd.value] then
+            next_sch = flat.properties[kd.value]
+        elseif type(flat.additionalProperties) == "table" then
+            -- Open-set map (e.g. a task under [tasks.<name>]): the key is
+            -- user-defined, so navigate into the value schema.
+            next_sch = flat.additionalProperties
+        else
+            return nil
+        end
+        sch = schema_nav.flatten(next_sch, nil)
         if is_type(sch, "array") and sch.items then sch = schema_nav.flatten(sch.items, nil) end
     end
     return sch

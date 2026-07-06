@@ -145,28 +145,30 @@ local function _load_tasks(toml_path)
         return nil, nil, nil, "no tasks table in " .. toml_path
     end
 
+    -- Tasks are a name-keyed map (`[tasks.<name>]`); the key is the task name.
+    -- TOML forbids duplicate keys, so uniqueness is guaranteed by the parser —
+    -- no duplicate check is needed. The name is not a file field; inject the key
+    -- as `task.name` so the rest of the engine (and task types) can read it.
+    -- Document order is preserved via the decoder's key-order metadata.
+    local table_util = require("easytasks.util.table_util")
     local by_name    = {}
     local ordered    = {} ---@type string[]
-    local duplicates = {} ---@type string[]
-    local seen_dup   = {}
-    for _, task in ipairs(data.tasks) do
-        if task.name then
-            if by_name[task.name] then
-                if not seen_dup[task.name] then
-                    seen_dup[task.name] = true
-                    table.insert(duplicates, task.name)
-                end
-            else
-                by_name[task.name] = task
-                table.insert(ordered, task.name)
-            end
-        end
+
+    ---@param name string
+    local function add_task(name)
+        local task = data.tasks[name]
+        if type(task) ~= "table" or by_name[name] then return end
+        task.name             = name
+        by_name[name]         = task
+        ordered[#ordered + 1] = name
     end
-    -- Duplicate task names are fatal: the run target would be ambiguous.
-    if #duplicates > 0 then
-        return nil, nil, nil, ("%s: duplicate task name%s: %s"):format(
-            short, #duplicates == 1 and "" or "s", table.concat(duplicates, ", "))
-    end
+
+    for _, name in ipairs(table_util.ordered_keys_of(data.tasks) or {}) do add_task(name) end
+    -- Defensive: include any keys absent from the order metadata, sorted.
+    local rest = {}
+    for name in pairs(data.tasks) do if not by_name[name] then rest[#rest + 1] = name end end
+    table.sort(rest)
+    for _, name in ipairs(rest) do add_task(name) end
     do
         local expressions_reg = require("easytasks.expressions")
         for name in pairs(data.expressions or {}) do

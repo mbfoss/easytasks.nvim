@@ -239,8 +239,9 @@ end
 ---@param dt_node integer?   decode node owning `data` (root id at the top call)
 function M.gather_table_paths(schema, data, prefix, results, pos, dt_node)
   local flat = M.flatten(schema, data)
-  if not has_type(flat, "object") or not flat.properties then return end
-  for key, prop in pairs(flat.properties) do
+  if not has_type(flat, "object") then return end
+
+  local function descend(key, prop)
     local cdata = type(data) == "table" and data[key] or nil
     local cnode = child_node(pos, dt_node, key)
     local fprop = M.flatten(prop, cdata)
@@ -257,6 +258,19 @@ function M.gather_table_paths(schema, data, prefix, results, pos, dt_node)
       end
     end
   end
+
+  for key, prop in pairs(flat.properties or {}) do descend(key, prop) end
+
+  -- Open-set maps (additionalProperties given as a schema, e.g. `tasks`): the
+  -- keys are user-defined, so enumerate the ones that exist in the data. This
+  -- surfaces [tasks.build] and its sub-tables ([tasks.build.env]) for completion.
+  if type(flat.additionalProperties) == "table" and type(data) == "table" then
+    for key in pairs(data) do
+      if type(key) == "string" and not (flat.properties and flat.properties[key]) then
+        descend(key, flat.additionalProperties)
+      end
+    end
+  end
 end
 
 -- Enumerate the [[array-of-tables]] section paths reachable from (schema, data),
@@ -269,8 +283,9 @@ end
 ---@param dt_node integer?
 function M.gather_array_table_paths(schema, data, prefix, results, pos, dt_node)
   local flat = M.flatten(schema, data)
-  if not flat.properties then return end
-  for key, prop in pairs(flat.properties) do
+  if not flat.properties and type(flat.additionalProperties) ~= "table" then return end
+
+  local function descend(key, prop)
     local cdata = type(data) == "table" and data[key] or nil
     local cnode = child_node(pos, dt_node, key)
     local fprop = M.flatten(prop, cdata)
@@ -286,6 +301,18 @@ function M.gather_array_table_paths(schema, data, prefix, results, pos, dt_node)
       -- Descend through plain sub-tables so arrays nested under them
       -- (e.g. [[tasks.value.steps]]) are still discovered.
       M.gather_array_table_paths(prop, cdata, path, results, pos, cnode)
+    end
+  end
+
+  for key, prop in pairs(flat.properties or {}) do descend(key, prop) end
+
+  -- Descend through open-set map entries (additionalProperties, e.g. named
+  -- tasks) so arrays-of-tables nested inside a task are still discovered.
+  if type(flat.additionalProperties) == "table" and type(data) == "table" then
+    for key in pairs(data) do
+      if type(key) == "string" and not (flat.properties and flat.properties[key]) then
+        descend(key, flat.additionalProperties)
+      end
     end
   end
 end

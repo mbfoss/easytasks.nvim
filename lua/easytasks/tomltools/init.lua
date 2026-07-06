@@ -106,8 +106,10 @@ end
 --- Encode a Lua table as TOML text *lines* for a single snippet, in the given
 --- style. Useful for inserting a fragment into an existing document; `encode`
 --- is the right choice for whole documents.
+--- For "table" style, `key` may be a dotted key path (string[]), e.g.
+--- `{ "tasks", "build" }` → a `[tasks.build]` header.
 ---@param t    table
----@param opts { style: "inline"|"aot"|"table", key: string?, indent: string? }?
+---@param opts { style: "inline"|"aot"|"table", key: (string|string[])?, indent: string? }?
 ---@return string[]
 function M.encode_entry(t, opts)
     local text
@@ -118,7 +120,8 @@ function M.encode_entry(t, opts)
             assert(opts.key, "encode_entry: key required for table style"),
             t)
     else
-        text = encoder.encode_aot_entry(assert(opts.key, "encode_entry: key required for aot style"), t)
+        text = encoder.encode_aot_entry(
+            assert(opts.key, "encode_entry: key required for aot style") --[[@as string]], t)
     end
     return std.split(text, "\n", { plain = true })
 end

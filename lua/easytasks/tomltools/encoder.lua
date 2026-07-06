@@ -236,14 +236,19 @@ function M.encode_aot_entry(aot_key, item)
 end
 
 --- Encode a Lua table as a [key] table block.
---- Returns "[key]\nfield = val\n..." using ordered/sorted keys.
----@param key string
----@param item       table
+--- Returns "[key]\nfield = val\n..." using ordered/sorted keys. `key` may be a
+--- single key or a list of key segments for a dotted header, e.g.
+--- `{ "tasks", "build" }` → `[tasks.build]` (each segment quoted independently).
+---@param key  string|string[]
+---@param item table
 ---@return string
 function M.encode_table_entry(key, item)
-    local header = "[" .. quote_key(key) .. "]"
-    local out    = { header }
-    emit_section({ key }, item, out)
+    local segments   = type(key) == "table" and key or { key }
+    local quoted     = {}
+    for _, seg in ipairs(segments) do quoted[#quoted + 1] = quote_key(tostring(seg)) end
+    local header     = "[" .. table.concat(quoted, ".") .. "]"
+    local out        = { header }
+    emit_section(segments, item, out)
     return table.concat(out, "\n")
 end
 

@@ -139,20 +139,6 @@ local function _add_template_command()
         return
     end
 
-    local pos   = vim.api.nvim_win_get_cursor(0)
-    local row   = pos[1] - 1
-    local col   = pos[2]
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    table.insert(lines, "\n")
-    local text = table.concat(lines, "\n")
-
-    local path = toml.find_path(text, row, col)
-    if not path or (path[1] and path[1].name ~= "tasks") then
-        ui.notify_warning("cursor is not in a valid template insertion position")
-        return
-    end
-    local _node      = path[1]
-
     local all_types  = task_types.get_all()
     local type_names = {}
     for name, def in pairs(all_types) do
@@ -167,14 +153,16 @@ local function _add_template_command()
 
     local async = require("easytasks.util.async")
 
+    -- Insert the chosen template as a new `[tasks.<name>]` section. The template's
+    -- own name becomes the header key (tasks are keyed by name), and the block is
+    -- put on its own line(s) at the cursor, blank-separated from any preceding text.
     local function apply(tmpl)
-        local insert_lines = toml.encode_entry(tmpl.task, {
-            style  = (_node and _node.type == "array") and "inline" or "aot",
-            key    = "tasks",
-            indent = _node and _node.indent,
-        })
-        vim.api.nvim_win_set_cursor(0, { row + 1, col })
-        vim.api.nvim_put(insert_lines, "c", false, true)
+        local task  = vim.deepcopy(tmpl.task)
+        local name  = (type(task.name) == "string" and task.name ~= "") and task.name or "task"
+        task.name   = nil
+        local block = toml.encode_entry(task, { style = "table", key = { "tasks", name } })
+        if vim.api.nvim_get_current_line() ~= "" then table.insert(block, 1, "") end
+        vim.api.nvim_put(block, "l", true, true)
     end
 
     local function show_templateselect(type_name)

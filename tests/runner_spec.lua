@@ -70,13 +70,31 @@ task_types.register("t_expr", {
 -- ── helpers ──────────────────────────────────────────────────────────────────
 
 --- Write task TOML to a fresh temp file and return its absolute path.
+--- Tasks are a name-keyed map (`[tasks.<name>]`). For brevity the specs still
+--- write the older array-of-tables form (`[[tasks]]` immediately followed by
+--- `name="X"`); this helper rewrites each such pair into a `[tasks.X]` header,
+--- dropping the now-redundant `name` line.
 ---@param lines string[]
 ---@return string path
 local function write_tasks(lines)
+    local out = {}
+    local i   = 1
+    while i <= #lines do
+        local nm = lines[i] == "[[tasks]]"
+            and lines[i + 1] and lines[i + 1]:match('^%s*name%s*=%s*"([^"]*)"')
+        if nm then
+            out[#out + 1] = ("[tasks.%s]"):format(nm)
+            i = i + 2 -- skip the [[tasks]] header and the name line
+        else
+            out[#out + 1] = lines[i]
+            i = i + 1
+        end
+    end
+
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")
     local path = vim.fs.joinpath(root, tasks_filename)
-    vim.fn.writefile(lines, path)
+    vim.fn.writefile(out, path)
     return path
 end
 
@@ -232,13 +250,15 @@ describe("runner exec", function()
         end)
 
         it("fails on duplicate task names", function()
+            -- Two tasks with the same name are two identical `[tasks.dup]`
+            -- headers, which TOML rejects outright as a redefinition.
             local path = write_tasks({
                 "[[tasks]]", 'name="dup"', 'type="t_ok"', "",
                 "[[tasks]]", 'name="dup"', 'type="t_ok"',
             })
             exec.run("dup", path)
             local e = wait_state("dup", "failed")
-            assert.is_true(has_report(e, "duplicate task name"))
+            assert.is_true(has_report(e, "Duplicate table header"))
         end)
 
         it("fails when the file has no valid tasks table", function()

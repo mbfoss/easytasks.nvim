@@ -14,9 +14,10 @@ local M = {}
 
 --- Fields shared by every task, regardless of type. The Lua-type mirror of
 --- `base_properties` below; concrete task types extend this class with their
---- own fields.
+--- own fields. `name` is not a file field — tasks are keyed by name in the
+--- `[tasks.<name>]` header, and the loader injects that key as `name`.
 ---@class easytasks.TaskBase
----@field name           string                            unique, non-empty task name
+---@field name           string                            task name (the `[tasks.<name>]` key; injected at load)
 ---@field type           string                            task type (determines behaviour)
 ---@field if_running?    easytasks.IfRunning               what happens if the task is already running
 ---@field depends_on?    string[]                          names of tasks that must complete before this one runs
@@ -26,11 +27,6 @@ local M = {}
 --- Properties present on every task regardless of type.
 --- The `type` field itself is omitted here; `build` inserts it with the correct enum.
 M.base_properties = {
-    name = {
-        type        = "string",
-        minLength   = 1,
-        description = "Unique, non-empty name of the task",
-    },
     if_running = {
         type                  = "string",
         enum                  = { "wait", "restart", "refuse", "parallel",  },
@@ -112,8 +108,9 @@ function M.build(type_registry)
         )
         props.type = { const = name }
 
-        -- required = ["name", "type"] + whatever the type adds
-        local required = { "name", "type" }
+        -- required = ["type"] + whatever the type adds (the name is the header key,
+        -- not a field).
+        local required = { "type" }
         for _, r in ipairs(ts.required or {}) do
             if not vim.tbl_contains(required, r) then
                 required[#required + 1] = r
@@ -154,14 +151,15 @@ function M.build(type_registry)
                 additionalProperties = { type = "string", description = "Expression template (may contain {{ … }} references)" },
             },
             tasks = {
-                type                 = "array",
-                description          = "List of task definitions",
-                additionalProperties = false,
-                items                = {
+                type                 = "object",
+                description          = "Task definitions, keyed by task name. Declare each task with a `[tasks.<name>]` header; the name is the key.",
+                additionalProperties = {
                     type        = "object",
-                    required    = { "name", "type" },
-                    ["x-order"] = { "name", "type" },
-                    description = "Single task definition entry",
+                    required    = { "type" },
+                    ["x-order"] = { "type" },
+                    description = "A single task definition (its name is the `[tasks.<name>]` key)",
+                    -- No additionalProperties restriction here; the per-type
+                    -- `then` branch (keyed on `type`) enforces the allowed keys.
                     properties  = vim.tbl_extend("force", vim.deepcopy(M.base_properties), {
                         type = {
                             type        = "string",
