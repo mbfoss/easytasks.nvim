@@ -84,7 +84,7 @@ local function _parameter_branches(sch)
                     properties = {
                         parameters = {
                             type                 = "object",
-                            additionalProperties = true,
+                            additionalProperties = false,
                             properties           = props,
                             required             = (#required > 0) and required or nil,
                         },
@@ -178,7 +178,7 @@ local function _schema()
             },
             parameters   = {
                 type                 = { "object", "null" },
-                additionalProperties = false,
+                additionalProperties = true,
                 description          =
                 "Native DAP launch/attach body sent verbatim to the chosen adapter. The valid keys depend on `adapter` and `request` (completed from the adapter's own schema).",
             },
