@@ -679,11 +679,11 @@ function M.dispose(run_id)
 
     local type_def = entry.task_type and task_types.get(entry.task_type)
     if type_def and type_def.dispose then
-        pcall(type_def.dispose, entry.bufnrs)
+        type_def.dispose(entry.bufnrs)
     else
         for _, be in ipairs(entry.bufnrs) do
             if vim.api.nvim_buf_is_valid(be.bufnr) then
-                pcall(vim.api.nvim_buf_delete, be.bufnr, { force = true })
+                vim.api.nvim_buf_delete(be.bufnr, { force = true })
             end
         end
     end

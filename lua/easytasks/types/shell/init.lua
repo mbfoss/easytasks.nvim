@@ -30,15 +30,6 @@ end
 --- syntax (pipes, globs, redirection, `&&`, …) is interpreted.
 ---@type easytasks.TaskTypeDef
 local M = {
-    ---@type easytasks.DisposeFn
-    dispose = function(bufnrs)
-        for _, be in ipairs(bufnrs) do
-            if vim.api.nvim_buf_is_valid(be.bufnr) then
-                pcall(vim.api.nvim_buf_delete, be.bufnr, { force = true })
-            end
-        end
-    end,
-
     ---@type easytasks.RunFn
     start = function(task, ctx, on_done)
         ---@cast task easytasks.ShellTask
