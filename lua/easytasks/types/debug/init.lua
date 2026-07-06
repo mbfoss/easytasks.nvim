@@ -109,7 +109,7 @@ local function _schema()
         description = "Definition of a `debug` task (runs via a DAP adapter)",
         ["x-order"] = {
             "name", "type", "if_running", "depends_on", "depends_order", "save_buffers",
-            "adapter", "request", "command", "cwd", "env", "pid", "host", "port", "parameters", "raw_messages",
+            "adapter", "request", "command", "cwd", "env", "merge_env", "pid", "host", "port", "parameters", "raw_messages",
         },
         required    = { "adapter" },
         properties  = {
@@ -151,6 +151,11 @@ local function _schema()
                 additionalProperties = { type = "string" },
                 description          =
                 "Environment variables for the debuggee — a convenience over `parameters`, mapped onto whatever native key the adapter tags with the `env` role.",
+            },
+            merge_env    = {
+                type        = { "boolean", "null" },
+                description =
+                "When true and `env` is set, merge `env` on top of Neovim's current environment (so the debuggee inherits it) instead of replacing it. Defaults to false.",
             },
             pid          = {
                 type        = { "integer", "null" },
@@ -211,6 +216,7 @@ end
 ---@field command?      string|string[]        program + args mapped onto the adapter's target/args roles
 ---@field cwd?          string                 working directory mapped onto the adapter's cwd role
 ---@field env?          table<string, string>  environment mapped onto the adapter's env role
+---@field merge_env?    boolean                merge `env` on top of Neovim's current environment
 ---@field pid?          integer                PID to attach to, mapped onto the adapter's pid role
 ---@field host?         string
 ---@field port?         integer
@@ -344,6 +350,15 @@ end
 ---@param on_done fun(ok: boolean)
 ---@return fun()
 function M.start(task, ctx, on_done)
+    -- When `merge_env` is set, the task's `env` is layered on top of Neovim's
+    -- current environment so the debuggee inherits it. Work on a shallow copy so
+    -- the original task table (shared with the UI/resolver) is left untouched.
+    if task.merge_env and task.env ~= nil then
+        task = vim.tbl_extend("force", {}, task, {
+            env = vim.tbl_extend("force", vim.fn.environ(), task.env),
+        })
+    end
+
     local params = _build_params(task)
 
     local base   = require("easydap.adapters")[params.adapter]
