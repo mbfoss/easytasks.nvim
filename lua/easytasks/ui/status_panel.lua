@@ -92,6 +92,18 @@ local _shell_badge = { icon = "❯", hl = "EasyTasksBadgeMuted" }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
+-- `vim.wo[win].opt = val` sets both the window-local value AND nvim's hidden
+-- global default (the value new windows inherit), even for options with no
+-- real global scope (winfixbuf, number, signcolumn, ...) — so every panel open
+-- would silently leak its window settings into every future plain window.
+-- Force `scope = "local"` to keep these changes confined to `win`.
+---@param win integer
+---@param opt string
+---@param val any
+local function _setlocal(win, opt, val)
+    vim.api.nvim_set_option_value(opt, val, { win = win, scope = "local" })
+end
+
 ---@param run_id string
 ---@return integer?
 local function _run_idx(run_id)
@@ -232,9 +244,9 @@ end
 _set_win_buf = function(bufnr)
     if not _win or not vim.api.nvim_win_is_valid(_win) then return end
     if not vim.api.nvim_buf_is_valid(bufnr) then return end
-    vim.wo[_win].winfixbuf = false
+    _setlocal(_win, "winfixbuf", false)
     vim.api.nvim_win_set_buf(_win, bufnr)
-    vim.wo[_win].winfixbuf = true
+    _setlocal(_win, "winfixbuf", true)
     _unread_bufnrs[bufnr] = nil
     if vim.bo[bufnr].buftype == "terminal" then
         local last = vim.api.nvim_buf_line_count(bufnr)
@@ -602,13 +614,13 @@ function M.open()
     vim.cmd("bot split")
     _win                        = vim.api.nvim_get_current_win()
 
-    vim.wo[_win].winfixheight   = true
-    vim.wo[_win].winfixbuf      = true
-    vim.wo[_win].number         = false
-    vim.wo[_win].relativenumber = false
-    vim.wo[_win].signcolumn     = "no"
-    vim.wo[_win].spell          = false
-    vim.wo[_win].wrap           = false
+    _setlocal(_win, "winfixheight", true)
+    _setlocal(_win, "winfixbuf", true)
+    _setlocal(_win, "number", false)
+    _setlocal(_win, "relativenumber", false)
+    _setlocal(_win, "signcolumn", "no")
+    _setlocal(_win, "spell", false)
+    _setlocal(_win, "wrap", false)
 
     local height                = _height_ratio
         and math.max(6, math.floor(vim.o.lines * _height_ratio))
@@ -678,6 +690,24 @@ function M.open()
     vim.api.nvim_create_autocmd("WinNew", {
         group    = _augroup,
         callback = function()
+            -- 'winbar' is copied onto a freshly split window (most other
+            -- window-local options, like 'winfixbuf', and window-local
+            -- variables are not). If someone splits the panel window itself,
+            -- the new sibling inherits our winbar text verbatim (click regions
+            -- included), but it is never re-rendered by _refresh_winbar (which
+            -- only targets `_win`), so its page numbers go stale as soon as the
+            -- panel state changes and clicking it jumps to the wrong target.
+            -- Detect the inherited winbar text and confirm it isn't already our
+            -- marked panel window, then strip every panel-special option back
+            -- off immediately so the sibling reverts to a plain window.
+            local new_win = vim.api.nvim_get_current_win()
+            if _win and new_win ~= _win and vim.api.nvim_win_is_valid(_win)
+                and vim.wo[new_win].winbar ~= ""
+                and vim.wo[new_win].winbar == vim.wo[_win].winbar then
+                vim.api.nvim_win_call(new_win, function()
+                    vim.cmd("setlocal winbar< winfixheight< winfixbuf< number< relativenumber< signcolumn< spell< wrap<")
+                end)
+            end
             vim.schedule(function()
                 if _win and vim.api.nvim_win_is_valid(_win) then
                     local target = math.max(6, math.floor(vim.o.lines * (_height_ratio or 0.22)))
