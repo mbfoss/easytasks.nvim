@@ -43,8 +43,8 @@ task_types.register("t_block", {
 })
 -- Records its start order, then succeeds.
 task_types.register("t_order", {
-    start = function(task, _, done)
-        table.insert(run_order, task.name)
+    start = function(_, ctx, done)
+        table.insert(run_order, ctx.name)
         done(true)
         return function() end
     end,

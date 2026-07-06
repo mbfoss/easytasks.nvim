@@ -40,6 +40,7 @@ local project      = require("easytasks.project")
 ---@field autoscroll? boolean
 
 ---@class easytasks.RunCtx
+---@field name       string   the task's name (the `[tasks.<name>]` key)
 ---@field add_bufnr  fun(bufnr: integer, opts?: easytasks.AddBufOpts)
 ---@field report     fun(message: string)
 
@@ -146,10 +147,11 @@ local function _load_tasks(toml_path)
     end
 
     -- Tasks are a name-keyed map (`[tasks.<name>]`); the key is the task name.
-    -- TOML forbids duplicate keys, so uniqueness is guaranteed by the parser —
-    -- no duplicate check is needed. The name is not a file field; inject the key
-    -- as `task.name` so the rest of the engine (and task types) can read it.
-    -- Document order is preserved via the decoder's key-order metadata.
+    -- TOML forbids duplicate keys, so uniqueness is guaranteed by the parser — no
+    -- duplicate check is needed. The name is not stored on the task data; the
+    -- runner carries it alongside (as the run's key and via RunCtx.name), so
+    -- previews/encodes of the task stay free of a synthetic field. Document order
+    -- is preserved via the decoder's key-order metadata.
     local table_util = require("easytasks.util.table_util")
     local by_name    = {}
     local ordered    = {} ---@type string[]
@@ -158,7 +160,6 @@ local function _load_tasks(toml_path)
     local function add_task(name)
         local task = data.tasks[name]
         if type(task) ~= "table" or by_name[name] then return end
-        task.name             = name
         by_name[name]         = task
         ordered[#ordered + 1] = name
     end
@@ -450,6 +451,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
 
     ---@type easytasks.RunCtx
     local ctx = {
+        name      = name,
         report    = function(msg) _append_report(run_id, msg) end,
         add_bufnr = function(bufnr, opts)
             opts = opts or {}
@@ -636,7 +638,6 @@ end
 ---@param task_name string
 ---@param task_def  easytasks.TaskBase  task data (same shape as a decoded TOML task entry)
 function M.run_ephemeral(task_name, task_def)
-    task_def.name = task_name
     _launch(task_name, { [task_name] = task_def }, nil, true)
 end
 

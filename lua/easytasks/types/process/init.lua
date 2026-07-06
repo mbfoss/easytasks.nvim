@@ -38,7 +38,7 @@ local M = {
         ---@cast task easytasks.ProcessTask
         local command = task.command
         if not command then
-            notify.notify_error("process task '" .. task.name .. "' has no command")
+            notify.notify_error("process task '" .. ctx.name .. "' has no command")
             on_done(false)
             return function() end
         end
@@ -60,7 +60,7 @@ local M = {
         if type(command) == "string" then
             cmd = str_util.split_shell_args(command)
             if #cmd == 0 then
-                notify.notify_error("process task '" .. task.name .. "': command string is empty")
+                notify.notify_error("process task '" .. ctx.name .. "': command string is empty")
                 on_done(false)
                 return function() end
             end

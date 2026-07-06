@@ -234,7 +234,6 @@ local function evaluate(cst, with_type_map)
                 process_inline_kvp(kvp_id, result, dt_id)
             end
         end
-        table_util.ordered(result, key_orders[result] or {})
         return result
     end
 
@@ -358,7 +357,6 @@ local function evaluate(cst, with_type_map)
             if invalid then current_table = dead_end_table; current_id = nil end
             if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
-            if not invalid then table_util.ordered(current_table, key_orders[current_table] or {}) end
 
         elseif d.kind == K.AotSection then
             current_table = root
@@ -439,7 +437,6 @@ local function evaluate(cst, with_type_map)
             if invalid then current_table = dead_end_table; current_id = nil end
             if current_id then cst:set_tag(sec_id, current_id) end
             process_section_kvps(sec_id, current_table, current_id)
-            if not invalid then table_util.ordered(current_table, key_orders[current_table] or {}) end
 
         elseif d.kind == K.KeyValuePair then
             process_kvp_at(sec_id, root, dt:root_id())
@@ -452,7 +449,11 @@ local function evaluate(cst, with_type_map)
         for tid, t in pairs(type_by_id) do value_types[tid] = t end
     end
 
-    table_util.ordered(root, key_orders[root] or {})
+    -- Attach insertion-order metadata to every table we tracked keys for. This
+    -- covers intermediate implicit tables (e.g. `a` in `[a.b]` / `[a.c]`)
+    for tbl, ko in pairs(key_orders) do
+        table_util.ordered(tbl, ko)
+    end
     return root, dt, errors, value_types
 end
 

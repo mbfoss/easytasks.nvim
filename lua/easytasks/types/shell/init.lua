@@ -35,7 +35,7 @@ local M = {
         ---@cast task easytasks.ShellTask
         local command = task.command
         if type(command) ~= "string" then
-            notify.notify_error("shell task '" .. task.name .. "': command must be a string")
+            notify.notify_error("shell task '" .. ctx.name .. "': command must be a string")
             on_done(false)
             return function() end
         end

@@ -197,6 +197,8 @@ function M.format(cst)
         end
     end
 
+    if #out == 0 then return "" end
+    table.insert(out, "")
     return table.concat(out, "\n")
 end
 

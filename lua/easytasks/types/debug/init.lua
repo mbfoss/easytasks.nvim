@@ -254,13 +254,14 @@ end
 ---@field raw_messages? boolean
 
 ---@param task easytasks.DebugTask
+---@param name string  the task's name (from RunCtx; not stored on the task)
 ---@return easytasks.debug.Params
-local function _build_params(task)
+local function _build_params(task, name)
     -- `host`/`port` are deliberately omitted here: whether they set the task-level
     -- TCP endpoint depends on the adapter (see `M.start`), so they can't be a plain
     -- task→params copy like the other fields.
     return {
-        name         = task.name,
+        name         = name,
         adapter      = task.adapter,
         request      = task.request,
         parameters   = task.parameters,
@@ -389,7 +390,7 @@ function M.start(task, ctx, on_done)
         })
     end
 
-    local params = _build_params(task)
+    local params = _build_params(task, ctx.name)
 
     local base   = require("easydap.adapters")[params.adapter]
     -- A task-level TCP adapter (its def carries a host/port) connects over an

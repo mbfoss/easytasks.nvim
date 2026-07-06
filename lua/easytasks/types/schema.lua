@@ -14,10 +14,10 @@ local M = {}
 
 --- Fields shared by every task, regardless of type. The Lua-type mirror of
 --- `base_properties` below; concrete task types extend this class with their
---- own fields. `name` is not a file field — tasks are keyed by name in the
---- `[tasks.<name>]` header, and the loader injects that key as `name`.
+--- own fields. The task name is not part of this data — tasks are keyed by name
+--- in the `[tasks.<name>]` header; the runner carries the name separately and
+--- hands it to task types via `RunCtx.name`.
 ---@class easytasks.TaskBase
----@field name           string                            task name (the `[tasks.<name>]` key; injected at load)
 ---@field type           string                            task type (determines behaviour)
 ---@field if_running?    easytasks.IfRunning               what happens if the task is already running
 ---@field depends_on?    string[]                          names of tasks that must complete before this one runs
