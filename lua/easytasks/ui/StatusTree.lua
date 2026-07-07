@@ -1,4 +1,4 @@
-local uitool = require("easytasks.tk.ui_util")
+local ui = require("easytasks.tk.ui")
 
 ---@class easytasks.ui.StatusTree.Item
 ---@field id any
@@ -103,7 +103,7 @@ function StatusTree:create_buffer(on_deleted)
         return self._bufnr, false
     end
 
-    self._bufnr = uitool.create_scratch_buffer(false, {
+    self._bufnr = ui.create_scratch_buffer(false, {
         buftype    = "nofile",
         bufhidden  = "wipe",
         filetype   = self._filetype or "easytasks-tree",
