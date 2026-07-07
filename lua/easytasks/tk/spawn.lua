@@ -3,7 +3,7 @@
 ---@field write fun(data: string?, on_done?: fun())
 
 ---@param cmd      string[]
----@param opts     { cwd?: string, stdin?: boolean, stdout?: fun(data:string), stderr?: fun(data:string) }
+---@param opts     { cwd?: string, env: {string:string}?, stdin?: boolean, stdout?: fun(data:string), stderr?: fun(data:string) }
 ---@param on_exit  fun(code:integer)
 ---@return easytasks.tk.SpawnHandle
 local function spawn(cmd, opts, on_exit)
@@ -35,11 +35,19 @@ local function spawn(cmd, opts, on_exit)
         end
     end
 
+    local env = nil
+    if opts.env and next(opts.env) then env = opts.env end
+    if opts.cwd and vim.fn.has("win32") == 0 then
+        env = env and vim.deepcopy(env) or {}
+        env["PWD"] = opts.cwd
+    end
+    
     local handle ---@type uv.uv_process_t?
     ---@diagnostic disable-next-line: missing-fields
     handle = vim.uv.spawn(cmd[1], {
         args  = vim.list_slice(cmd, 2),
         cwd   = opts.cwd,
+        env = env,
         stdio = { stdin, stdout, stderr },
     }, function(code)
         exit_code = code

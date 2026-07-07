@@ -52,9 +52,9 @@ local function _start_job(cmd, opts)
     local exited
     local env = nil
     if opts.env and next(opts.env) then env = opts.env end
-    if opts.cwd and not vim.fn.has("win32") == 1 then
+    if opts.cwd and vim.fn.has("win32") == 0 then
         env = env and vim.deepcopy(env) or {}
-        env.PWD = opts.cwd
+        env["PWD"] = opts.cwd
     end
     local start_ok, job_id_or_err = pcall(function()
         return vim.fn.jobstart(cmd, {
