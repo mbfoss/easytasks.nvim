@@ -35,7 +35,7 @@ end
 
 ---@param schema     table?
 ---@param open_quote string?
----@param ctx        table
+---@param ctx        { data: any, path: string[]?, range: lsp.Range? }
 ---@return lsp.CompletionItem[]
 local function value_items(schema, open_quote, ctx)
     if not schema then return {} end
@@ -64,13 +64,23 @@ local function value_items(schema, open_quote, ctx)
             local insert      = is_str
                 and (open_quote and (v .. q) or (q .. v .. q))
                 or tostring(v)
-            items[#items + 1] = {
+            local item        = {
                 label         = label,
                 kind          = CK.Text,
                 detail        = s_util.get_type_label(schema),
                 documentation = descs and descs[i] or nil,
                 insertText    = insert,
             }
+            -- Completing inside an already-open string literal: the label carries
+            -- the leading quote, but the client's word boundary excludes it, so a
+            -- partially-typed value (`"pre…`) fails to prefix-match the label and
+            -- the item is filtered out. An explicit textEdit spanning the open
+            -- quote through the cursor makes the client's filter prefix include the
+            -- quote (matching the label) and inserts the whole quoted literal.
+            if is_str and ctx.range then
+                item.textEdit = { range = ctx.range, newText = q .. v .. q }
+            end
+            items[#items + 1] = item
         end
         return items
     end
@@ -474,7 +484,14 @@ function M.handler(context, params, callback)
 
             local open_quote = tok_k == K.String and tok_d and tok_d.text:sub(1, 1) or nil
             local path       = dt_id and dt:key_parts_of(dt_id) or {}
-            callback(nil, result(value_items(sch, open_quote, { data = data, path = path })))
+            -- Replacement range for enum-string values: from the opening quote
+            -- (string token start) through the cursor. Lets the client filter and
+            -- insert against a partially-typed value; only set when a string is open.
+            local str_range  = tok_k == K.String and tok_d and {
+                start   = { line = tok_d.range[1], character = tok_d.range[2] },
+                ["end"] = { line = row, character = col },
+            } or nil
+            callback(nil, result(value_items(sch, open_quote, { data = data, path = path, range = str_range })))
         else
             -- Key side: suggest sibling keys allowed by the parent schema.
             local keys = cst:get_keys(kvp_id)

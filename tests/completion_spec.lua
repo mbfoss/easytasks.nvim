@@ -268,6 +268,30 @@ describe("completion – value side", function()
         local it = item(complete('mode = "|"'), '"dev"')
         assert.equals('dev"', it.insertText)
     end)
+
+    it("still offers enum members while a value is partially typed", function()
+        -- Regression: the quoted label must survive the client's prefix filter.
+        expect('mode = "de|', { '"dev"', '"prod"' })
+    end)
+
+    it("replaces the open quote through the cursor via textEdit", function()
+        -- mode = "de|  → open quote at col 7, cursor at col 10. The textEdit spans
+        -- the quote so the client's filter prefix ("de) matches the quoted label,
+        -- and inserts the full literal.
+        local it = item(complete('mode = "de|'), '"dev"')
+        assert.not_nil(it.textEdit)
+        assert.same({ line = 0, character = 7 }, it.textEdit.range.start)
+        assert.same({ line = 0, character = 10 }, it.textEdit.range["end"])
+        assert.equals('"dev"', it.textEdit.newText)
+    end)
+
+    it("replaces via textEdit for a partially-typed array item enum", function()
+        local it = item(complete('[server]\ntags = ["a|'), '"a"')
+        assert.not_nil(it.textEdit)
+        assert.same({ line = 1, character = 8 }, it.textEdit.range.start)
+        assert.same({ line = 1, character = 10 }, it.textEdit.range["end"])
+        assert.equals('"a"', it.textEdit.newText)
+    end)
 end)
 
 -- ─────────────────────────────────────────────────────────────────────────────
