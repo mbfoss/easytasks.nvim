@@ -129,7 +129,7 @@ hi def link tomlEscape SpecialChar
 
 hi def link easytasksExprDelim  Special
 hi def link easytasksExprEscape SpecialChar
-hi def link easytasksExprFunc   Function
+hi def link easytasksExprFunc   Identifier
 hi def link easytasksExprParam  Identifier
 hi def link easytasksExprString String
 hi def link easytasksExprNumber Number
