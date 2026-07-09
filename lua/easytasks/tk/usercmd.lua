@@ -53,7 +53,7 @@ local function _complete(subcommand_fn, arg_lead, cmd_line)
     local function filter(strs)
         local out = {}
         for _, s in ipairs(strs or {}) do
-            if not vim.startswith(s, '_') and vim.startswith(s, arg_lead) then
+            if vim.startswith(s, arg_lead) then
                 table.insert(out, s)
             end
         end

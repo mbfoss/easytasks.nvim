@@ -41,6 +41,7 @@ local project      = require("easytasks.project")
 
 ---@class easytasks.RunCtx
 ---@field name       string   the task's name (the `[tasks.<name>]` key)
+---@field run_id     string   this run's unique id (`<name>#<counter>`)
 ---@field add_bufnr  fun(bufnr: integer, opts?: easytasks.AddBufOpts)
 ---@field report     fun(message: string)
 
@@ -452,6 +453,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
     ---@type easytasks.RunCtx
     local ctx = {
         name      = name,
+        run_id    = run_id,
         report    = function(msg) _append_report(run_id, msg) end,
         add_bufnr = function(bufnr, opts)
             opts = opts or {}

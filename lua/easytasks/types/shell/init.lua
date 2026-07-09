@@ -55,6 +55,10 @@ local M = {
         local cmd = command
         local label = vim.fn.fnamemodify(cmd:match("^%S+") or cmd, ":t")
 
+        -- A readable buffer name in place of the opaque `term://…`; run_id is
+        -- unique per instance (`<name>#<counter>`) and the label names the command.
+        local bufname = string.format("easytasks://%s/%s", ctx.run_id, label)
+
         local on_data
         if qf_parse then
             on_data = function(_, data)
@@ -73,6 +77,7 @@ local M = {
         end
 
         local handle, spawn_err = term.spawn(cmd, {
+            bufname   = bufname,
             cwd       = task.cwd,
             env       = task.env,
             clear_env = task.clear_env,
