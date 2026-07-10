@@ -125,7 +125,7 @@ end
 ---@return integer bufnr
 local function _refresh_log_buf(entry, run_id)
     if not _log_buf then
-        _log_buf = ui.create_scratch_buffer(false, { bufhidden = "hide" }, function()
+        _log_buf = ui.create_scratch_buffer(false, { bufhidden = "hide", buflisted = false }, function()
             _log_buf = nil
         end)
         vim.api.nvim_buf_set_var(_log_buf, "easytasks_autoscroll", true)
@@ -184,7 +184,7 @@ end
 local function _get_empty_buf()
     if not _empty_buf or not vim.api.nvim_buf_is_valid(_empty_buf) then
         local ns = vim.api.nvim_create_namespace("EasyTasksEmpty")
-        _empty_buf = ui.create_scratch_buffer(false, { bufhidden = "hide" })
+        _empty_buf = ui.create_scratch_buffer(false, { bufhidden = "hide", buflisted = false })
         vim.bo[_empty_buf].modifiable = true
         vim.api.nvim_buf_set_lines(_empty_buf, 0, -1, false, { "" })
         vim.bo[_empty_buf].modifiable = false
