@@ -157,7 +157,7 @@ function M.spawn(cmd, opts, bufnr)
         --- buffer's context, so we delete exactly it — no name matching, no scanning.
         --- The rename is best-effort: on a name clash it no-ops, keeping the term:// name.
 
-        if pcall(vim.api.nvim_buf_set_name, bufnr, opts.bufname .. ' (term)') then
+        if pcall(vim.api.nvim_buf_set_name, bufnr, opts.bufname) then
             vim.api.nvim_buf_call(bufnr, function()
                 local alt = vim.fn.bufnr("#")
                 if alt > 0 and alt ~= bufnr and not vim.api.nvim_buf_is_loaded(alt) then
