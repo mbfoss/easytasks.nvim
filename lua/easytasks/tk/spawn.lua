@@ -1,11 +1,12 @@
 ---@class easytasks.tk.SpawnHandle
 ---@field kill  fun()
 ---@field write fun(data: string?, on_done?: fun())
+---@field get_write_queue_size fun():integer
 
 ---@param cmd      string[]
 ---@param opts     { cwd?: string, env: {string:string}?, stdin?: boolean, stdout?: fun(data:string), stderr?: fun(data:string) }
 ---@param on_exit  fun(code:integer)
----@return easytasks.tk.SpawnHandle
+---@return easytasks.tk.SpawnHandle?
 local function spawn(cmd, opts, on_exit)
     -- stdin is opt-in: only commands that read from stdin (the rg `-` target)
     -- get a pipe, so others keep inheriting/ignoring stdin exactly as before.
@@ -77,7 +78,7 @@ local function spawn(cmd, opts, on_exit)
     if not handle then
         close_pipes()
         vim.schedule(function() on_exit(-1) end)
-        return { kill = function() end, write = function() end }
+        return nil
     end
 
     local out = assert(stdout)
@@ -100,6 +101,7 @@ local function spawn(cmd, opts, on_exit)
         end
     end)
 
+    ---@type easytasks.tk.SpawnHandle
     return {
         kill = function()
             -- close_pipes() stops read callbacks (no EOF will arrive), so set
@@ -133,6 +135,10 @@ local function spawn(cmd, opts, on_exit)
                 if on_done then on_done() end
             end)
         end,
+        get_write_queue_size = function ()
+            if not stdin then return 0 end
+            return stdin:get_write_queue_size()
+        end
     }
 end
 
