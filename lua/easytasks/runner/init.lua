@@ -41,4 +41,13 @@ function M.list_tasks(toml_path)
     return exec.list(toml_path)
 end
 
+--- Evaluate an expression template string against a tasks file, resolving both
+--- built-in and inline `[expressions]`. The result is delivered to `callback`.
+---@param expr      string
+---@param toml_path string
+---@param callback  fun(ok: boolean, result: any, err: string?)
+function M.eval_expression(expr, toml_path, callback)
+    exec.eval(toml_path, expr, callback)
+end
+
 return M

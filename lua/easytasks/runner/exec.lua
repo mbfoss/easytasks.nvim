@@ -652,6 +652,21 @@ function M.list(toml_path)
     return ordered, by_name, err
 end
 
+--- Evaluate an expression template string against the given tasks file, resolving
+--- both built-in and inline `[expressions]`. The result is delivered to `callback`
+--- (like `resolver.resolve_expressions`, on the main loop).
+---@param toml_path string
+---@param expr      string  a value containing `{{ … }}` holes to resolve
+---@param callback  fun(ok: boolean, result: any, err: string?)
+function M.eval(toml_path, expr, callback)
+    local _, _, expressions, err = _load_tasks(toml_path)
+    if err then
+        callback(false, nil, err)
+        return
+    end
+    resolver.resolve_expressions(expr, { task = {}, expressions = expressions or {} }, callback)
+end
+
 --- Stop all active instances of a task. A task that is only waiting for its
 --- dependencies has its in-flight dependency runs cancelled too, so the wait
 --- unblocks and the task settles as "stopped".

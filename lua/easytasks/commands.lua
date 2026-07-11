@@ -47,6 +47,42 @@ local function _shell_command()
     status_panel.open_shell({ cwd = project.find_root() or nil })
 end
 
+--- Prompt for (or take, from the command arguments) an expression template and
+--- print its resolved value. Runs against the current project's tasks file so
+--- inline `[expressions]` are available alongside the built-ins.
+---@param args string[]
+local function _eval_command(args)
+    local cwd, err = project.find_root()
+    if not cwd then
+        ui.notify_error(err or "not in a project root")
+        return
+    end
+    local path = vim.fs.normalize(vim.fs.joinpath(cwd, config.tasks_filename))
+
+    local function run(expr)
+        if not expr or expr == "" then return end
+        -- A bare expression (no `{{ … }}` hole) is treated as an expression name
+        -- and wrapped, so `:Tasks eval file` resolves the `file` expression.
+        if not expr:find("{{", 1, true) then
+            expr = "{{ " .. expr .. " }}"
+        end
+        runner.eval_expression(expr, path, function(ok, result, eval_err)
+            if not ok then
+                ui.notify_error(eval_err or "expression evaluation failed")
+                return
+            end
+            local text = type(result) == "string" and result or vim.inspect(result)
+            vim.api.nvim_echo({ { text } }, true, {})
+        end)
+    end
+
+    if #args > 0 then
+        run(table.concat(args, " "))
+    else
+        vim.ui.input({ prompt = "Evaluate expression: " }, run)
+    end
+end
+
 local function _restart_command()
     if not _last_task then
         ui.notify_warning("no task has been run yet")
@@ -211,6 +247,8 @@ function M.register(cmd_name)
                 _restart_command()
             elseif action == "shell" then
                 _shell_command()
+            elseif action == "eval" then
+                _eval_command(args)
             elseif action == "stop" then
                 _stop_command()
             elseif action == "cancel" then
@@ -242,11 +280,14 @@ function M.register(cmd_name)
             count = true,
             subcommand_fn = function(_, rest, arg_lead)
                 if #rest == 0 then
-                    local built_in = { "run", "rerun", "shell", "stop", "cancel", "template", "panel" }
+                    local built_in = { "run", "rerun", "shell", "eval", "stop", "cancel", "template", "panel" }
                     return built_in
                 end
                 if rest[1] == "panel" and #rest == 1 then
                     return { "jump", "remove", "clear" }
+                end
+                if rest[1] == "eval" then
+                    return {}
                 end
                 if #rest >= 1 then
                     local _sub = usercmd.get_subcommand(rest[1])

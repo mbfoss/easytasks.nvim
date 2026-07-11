@@ -172,7 +172,7 @@ end
 ---@param default string?
 ---@param completion string?
 function _expressions.prompt(_, prompt_text, default, completion)
-    if not _valid_complete_types[completion] then
+    if completion and not _valid_complete_types[completion] then
         error("invalid completion type: " .. tostring(completion))
     end
     if not prompt_text then return nil, "prompt expression requires prompt text" end
