@@ -741,8 +741,8 @@ end
 --- Activate the nth panel page (1-based, left to right, matching the number
 --- prefixes shown in the winbar) and focus the panel on it. The numbering is
 --- global across every tab and page — a task's name/info tab, each of its buffer
---- pages, and each shell all get one sequential number. Accepts both an argument
---- (`:Tasks panel jump 3`) and a command count (`:3Tasks panel jump`).
+--- pages, and each shell all get one sequential number. The target page is given
+--- as an argument (`:Tasks panel jump 3`).
 ---@param n integer?  page number; defaults to 1 when omitted or non-positive
 function M.jump(n)
     M.open()

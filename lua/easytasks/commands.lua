@@ -258,7 +258,7 @@ function M.register(cmd_name)
             elseif action == "panel" then
                 local sub = args[1]
                 if sub == "jump" then
-                    status_panel.jump(tonumber(args[2]) or cmd_opts.count or nil)
+                    status_panel.jump(tonumber(args[2]))
                 elseif sub == "remove" then
                     _dispose_command()
                 elseif sub == "clear" then
@@ -277,7 +277,6 @@ function M.register(cmd_name)
         end,
         {
             desc = cmd_name,
-            count = true,
             subcommand = function(_, rest, arg_lead)
                 if #rest == 0 then
                     return { "run", "rerun", "shell", "eval", "stop", "cancel", "template", "panel" }

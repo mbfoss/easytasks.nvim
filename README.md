@@ -413,11 +413,20 @@ with no argument it opens the task picker.
 | `:Tasks eval [expr]`    | Evaluate an expression (or bare expression name) and echo it.  |
 | `:Tasks template`       | Insert a task template at the cursor (only in the tasks file). |
 | `:Tasks panel`          | Toggle the [status panel](#status-panel).                      |
-| `:Tasks panel jump N`   | Focus panel page/tab N (also `:N Tasks panel jump`).           |
+| `:Tasks panel jump N`   | Focus panel page/tab N.                                         |
 | `:Tasks panel remove`   | Dispose a finished task tab.                                    |
 | `:Tasks panel clear`    | Dispose all finished task tabs.                                 |
 
 Subcommands and task names complete on `<Tab>`.
+
+`:Tasks panel jump N` takes the page number as an argument, so you can bind it
+with a count prefix — e.g. `3<leader>tj` focuses page 3:
+
+```lua
+vim.keymap.set("n", "<leader>tj", function()
+    vim.cmd("Tasks panel jump " .. vim.v.count1)
+end, { desc = "Jump to status panel page [count]" })
+```
 
 ## Status panel
 
