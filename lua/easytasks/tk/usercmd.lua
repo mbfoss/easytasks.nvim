@@ -74,14 +74,14 @@ local M = {}
     return args
 end
 
----@alias easytasks.tk.usercmd.subcommand_fn fun(cmd:string,rest:string[],arg_lead:string):string[]
+---@alias easytasks.tk.usercmd.subcommand fun(cmd:string,rest:string[],arg_lead:string):string[]
 
 ---@alias easytasks.tk.usercmd.run_fn
 ---| fun(cmd:string,args:string[],opts:vim.api.keyset.create_user_command.command_args)
 
 
----@param subcommand_fn easytasks.tk.usercmd.subcommand_fn
-local function _complete(subcommand_fn, arg_lead, cmd_line)
+---@param subcommand easytasks.tk.usercmd.subcommand
+local function _complete(subcommand, arg_lead, cmd_line)
     local function filter(strs)
         local out = {}
         for _, s in ipairs(strs or {}) do
@@ -99,11 +99,11 @@ local function _complete(subcommand_fn, arg_lead, cmd_line)
 
     local cmd = args[1]
     if #args == 1 then
-        return filter(subcommand_fn(cmd, {}, arg_lead))
+        return filter(subcommand(cmd, {}, arg_lead))
     elseif #args >= 2 then
         local rest = { unpack(args, 2) }
         rest[#rest] = nil
-        return filter(subcommand_fn(cmd, rest, arg_lead))
+        return filter(subcommand(cmd, rest, arg_lead))
     end
     return {}
 end
@@ -124,7 +124,7 @@ end
 
 ---@param cmd string
 ---@param run_fn easytasks.tk.usercmd.run_fn
----@param opts {desc:string?,subcommand_fn:easytasks.tk.usercmd.subcommand_fn?,count:boolean,range:boolean}?
+---@param opts {desc:string?,subcommand:easytasks.tk.usercmd.subcommand?,count:boolean,range:boolean}?
 function M.register_user_cmd(cmd, run_fn, opts)
     opts = opts or {}
     vim.api.nvim_create_user_command(cmd, function(cmd_opts)
@@ -134,8 +134,8 @@ function M.register_user_cmd(cmd, run_fn, opts)
             nargs = "*",
             count = opts.count,
             range = opts.range,
-            complete = opts.subcommand_fn ~= nil and function(arg_lead, cmd_line, _)
-                return _complete(opts.subcommand_fn, arg_lead, cmd_line)
+            complete = opts.subcommand ~= nil and function(arg_lead, cmd_line, _)
+                return _complete(opts.subcommand, arg_lead, cmd_line)
             end or function() return {} end,
             desc = opts.desc,
         })

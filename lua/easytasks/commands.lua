@@ -278,20 +278,12 @@ function M.register(cmd_name)
         {
             desc = cmd_name,
             count = true,
-            subcommand_fn = function(_, rest, arg_lead)
+            subcommand = function(_, rest, arg_lead)
                 if #rest == 0 then
-                    local built_in = { "run", "rerun", "shell", "eval", "stop", "cancel", "template", "panel" }
-                    return built_in
+                    return { "run", "rerun", "shell", "eval", "stop", "cancel", "template", "panel" }
                 end
                 if rest[1] == "panel" and #rest == 1 then
                     return { "jump", "remove", "clear" }
-                end
-                if rest[1] == "eval" then
-                    return {}
-                end
-                if #rest >= 1 then
-                    local _sub = usercmd.get_subcommand(rest[1])
-                    if _sub then return _sub.complete({ unpack(rest, 2) }, arg_lead) end
                 end
                 return {}
             end,
