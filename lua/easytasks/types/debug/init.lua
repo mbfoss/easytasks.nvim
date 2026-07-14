@@ -49,6 +49,29 @@ local function _parameters_schema(sch, adapter, configuration_name)
     }
 end
 
+--- A `configuration` property schema listing an adapter's configuration names,
+--- with each name's `description` (from easydap) attached so the LSP can show
+--- it on completion/hover.
+---@param sch table  the `easydap.schema` module
+---@param adapter string
+---@param configuration_names string[]
+---@return table
+local function _configuration_name_schema(sch, adapter, configuration_names)
+    local one_of = {}
+    for _, configuration_name in ipairs(configuration_names) do
+        local configuration = sch.configuration(adapter, configuration_name)
+        one_of[#one_of + 1] = {
+            const       = configuration_name,
+            description = configuration and configuration.description,
+        }
+    end
+    return {
+        type      = "string",
+        minLength = 1,
+        oneOf     = one_of,
+    }
+end
+
 --- Per-adapter conditional branches: each branch first tests only `adapter`,
 --- and nests the (adapter, configuration) branches for `parameters` inside its
 --- own `then`. This way the schema navigator only has to walk the
@@ -88,7 +111,7 @@ local function _configuration_branches(sch)
             },
             ["then"] = {
                 properties = {
-                    configuration = { enum = configuration_names },
+                    configuration = _configuration_name_schema(sch, adapter, configuration_names),
                 },
                 allOf = (#configuration_branches > 0) and configuration_branches or nil,
             },

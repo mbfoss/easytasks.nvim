@@ -97,27 +97,6 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 > `opts = {}` calls `require("easytasks").setup()` with the defaults. Replace it
 > with a table to override any [configuration](#configuration) value.
 
-Using [paq-nvim](https://github.com/savq/paq-nvim):
-
-```lua
-require("paq"){
-  "mbfoss/easytasks.nvim",
-}
--- then, somewhere in your config:
-require("easytasks").setup()
-```
-
-Using the built-in package mechanism (`:h packages`):
-
-```sh
-git clone https://github.com/mbfoss/easytasks.nvim \
-  ~/.local/share/nvim/site/pack/plugins/start/easytasks.nvim
-```
-
-```lua
-require("easytasks").setup()
-```
-
 ## Quick start
 
 1. Create a `tasks.toml` in your project root:
