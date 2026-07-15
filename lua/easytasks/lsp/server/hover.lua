@@ -20,11 +20,6 @@ local function hover_text(node)
     lines[#lines + 1] = ("Type: `%s`"):format(type_label)
   end
 
-  local default_val = s_util.get_default_toml(node)
-  if default_val ~= "" then
-    lines[#lines + 1] = ("Default: `%s`"):format(default_val)
-  end
-
   if node.required and #node.required > 0 then
     lines[#lines + 1] = "Required keys: " .. table.concat(node.required, ", ")
   end
