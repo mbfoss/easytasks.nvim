@@ -192,50 +192,6 @@ function _expressions.prompt(_, prompt_text, default, completion)
     return result
 end
 
-_expressions["select-pid"] = function(_, prompt)
-    local lines = vim.fn.systemlist("ps -eo pid,user,comm 2>/dev/null")
-    if not lines or #lines == 0 then
-        return nil, "No processes found"
-    end
-
-    ---@type {label:string, pid:string}[]
-    local choices = {}
-    for i, line in ipairs(lines) do
-        if i > 1 then -- skip header
-            local pid, user, name = line:match("^%s*(%d+)%s+(%S+)%s+(.-)%s*$")
-            if pid then
-                choices[#choices + 1] = {
-                    label = ("%8s | %s - %s"):format(pid, user, name),
-                    pid   = pid,
-                }
-            end
-        end
-    end
-    if #choices == 0 then return nil, "No processes found" end
-
-    local co = coroutine.running()
-    vim.schedule(function()
-        local labels = vim.tbl_map(function(c) return c.label end, choices)
-        vim.ui.select(labels, { prompt = type(prompt) == "string" and prompt or "Select process" }, function(selected)
-            if not selected then
-                coroutine.resume(co, nil)
-                return
-            end
-            for _, c in ipairs(choices) do
-                if c.label == selected then
-                    coroutine.resume(co, c.pid)
-                    return
-                end
-            end
-            coroutine.resume(co, nil)
-        end)
-    end)
-
-    local pid = coroutine.yield()
-    if not pid then return nil, "Process selection cancelled" end
-    return tonumber(pid)
-end
-
 -- Everything defined above is a built-in; snapshot the name set so `M.register`
 -- can forbid overriding one, and seed their completion descriptions.
 for name in pairs(_expressions) do _builtin[name] = true end
@@ -251,7 +207,6 @@ _descriptions.projectdir    = "Absolute path of the project root (where the task
 _descriptions.env           = "Value of an environment variable: env VARNAME"
 _descriptions.shell         = "stdout of a shell command, trailing newlines stripped: shell CMD…"
 _descriptions.prompt        = "Ask for input at run time: prompt TEXT [default] [completion]"
-_descriptions["select-pid"] = "Pick a running process and yield its PID"
 
 -- ── Public API ──────────────────────────────────────────────────────────────
 

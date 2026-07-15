@@ -664,6 +664,29 @@ function M.list(toml_path)
     return ordered, by_name, err
 end
 
+--- Return the sorted names of every expression usable against the given tasks
+--- file: the registered built-in/user expressions plus the inline `[expressions]`
+--- declared in the document. A tasks file that fails to load contributes nothing,
+--- so the registered names are still returned.
+---@param toml_path string
+---@return string[]
+function M.list_expression_names(toml_path)
+    local names, seen = {}, {}
+    for _, entry in ipairs(require("easytasks.expressions").list()) do
+        seen[entry.name] = true
+        names[#names + 1] = entry.name
+    end
+    local _, _, expressions = _load_tasks(toml_path)
+    for name in pairs(expressions or {}) do
+        if not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
+    return names
+end
+
 --- Evaluate an expression template string against the given tasks file, resolving
 --- both built-in and inline `[expressions]`. The result is delivered to `callback`
 --- (like `resolver.resolve_expressions`, on the main loop).

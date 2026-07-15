@@ -111,8 +111,6 @@ boolean   = "true" | "false" ;
 ident     = alpha { alpha | digit | "_" | "-" } ;
 ```
 
-(`ident` allows `-` so names like `select-pid` work.)
-
 ## Inline macros (`[expressions]` table)
 
 `[expressions]` maps a name to a **template string** that may contain holes.

@@ -41,6 +41,14 @@ function M.list_tasks(toml_path)
     return exec.list(toml_path)
 end
 
+--- Return the sorted names of every expression usable against a tasks file:
+--- registered expressions plus the file's inline `[expressions]`.
+---@param toml_path string
+---@return string[]
+function M.list_expression_names(toml_path)
+    return exec.list_expression_names(toml_path)
+end
+
 --- Evaluate an expression template string against a tasks file, resolving both
 --- built-in and inline `[expressions]`. The result is delivered to `callback`.
 ---@param expr      string

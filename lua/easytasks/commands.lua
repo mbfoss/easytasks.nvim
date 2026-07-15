@@ -298,6 +298,12 @@ function M.register(cmd_name)
                     end
                     return actions
                 end
+                if rest[1] == "eval" and #rest == 1 then
+                    local cwd = project.find_root()
+                    if not cwd then return {} end
+                    local path = vim.fs.normalize(vim.fs.joinpath(cwd, config.tasks_filename))
+                    return runner.list_expression_names(path)
+                end
                 if rest[1] == "panel" and #rest == 1 then
                     return { "jump", "remove", "clear" }
                 end

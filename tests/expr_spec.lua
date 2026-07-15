@@ -61,10 +61,6 @@ describe("calls", function()
         assert.equal("call", n.args[1].kind)
         assert.equal("env", n.args[1].name)
     end)
-
-    it("keeps a hyphenated name as a single identifier", function()
-        assert.equal("select-pid", ast("select-pid").name)
-    end)
 end)
 
 describe("string literals (verbatim)", function()

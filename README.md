@@ -316,7 +316,6 @@ drops the field). Otherwise the value is string interpolation.
 | `env(NAME)`                             | Value of an environment variable.                                |
 | `shell(CMD)`                            | Stdout of a shell command, trailing newlines stripped.           |
 | `prompt(TEXT, default?, completion?)`   | Ask for input at run time.                                       |
-| `select-pid(prompt?)`                   | Pick a running process and yield its PID.                        |
 | `lbrace`                                | A literal `{{` (escape hatch; same as `{{{{`).                   |
 
 Strings inside a hole use `"…"` or `'…'` and are **always verbatim** (no escape
