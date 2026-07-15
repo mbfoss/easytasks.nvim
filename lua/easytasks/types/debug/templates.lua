@@ -25,10 +25,10 @@ end
 local function _parameters(sch, adapter, configuration_name)
     local configuration = sch.configuration(adapter, configuration_name)
     local required       = configuration.required or {}
+    local kinds = sch.configuration_placeholder_kinds(adapter, configuration_name)
     local params, order = {}, {}
     for _, name in ipairs(required) do
-        local kind = sch.configuration_placeholder_kind(adapter, configuration_name, name)
-        params[name] = _placeholder(kind)
+        params[name] = _placeholder(kinds[name])
         order[#order + 1] = name
     end
     return params, order

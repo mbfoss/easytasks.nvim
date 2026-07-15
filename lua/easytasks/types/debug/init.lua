@@ -36,8 +36,7 @@ local function _parameters_schema(sch, adapter, configuration_name)
     table.sort(required)
 
     local props = {}
-    for _, name in ipairs(sch.configuration_placeholders(adapter, configuration_name)) do
-        local kind  = sch.configuration_placeholder_kind(adapter, configuration_name, name)
+    for name, kind in pairs(sch.configuration_placeholder_kinds(adapter, configuration_name)) do
         props[name] = _placeholder_schema(kind)
     end
 
