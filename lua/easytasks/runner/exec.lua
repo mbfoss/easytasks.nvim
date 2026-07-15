@@ -486,13 +486,25 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
 
     local ok = coroutine.yield(function(waker)
         local settled = false
-        local cancel = type_def.start(task, ctx, function(result)
+        local function settle(result)
             if settled then return end
             settled = true
             waker(result)
-        end)
-        assert(type(cancel) == "function",
-            "task type '" .. tostring(task.type) .. "' start() must return a cancel function")
+        end
+        -- A task type's start() runs synchronously here; a throw would otherwise
+        -- escape through whatever callback resumed this coroutine and leave the
+        -- run stuck. Catch it, report it, and settle the run as failed instead.
+        local call_ok, cancel = pcall(type_def.start, task, ctx, settle)
+        if not call_ok then
+            _append_report(run_id, "task type '" .. tostring(task.type)
+                .. "' start() error: " .. tostring(cancel))
+            return settle(false)
+        end
+        if type(cancel) ~= "function" then
+            _append_report(run_id, "task type '" .. tostring(task.type)
+                .. "' start() must return a cancel function")
+            return settle(false)
+        end
         entry.cancel = cancel
     end)
 
