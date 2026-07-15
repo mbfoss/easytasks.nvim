@@ -132,7 +132,7 @@ local function _schema()
         description = "Definition of a `debug` task (runs via a DAP adapter)",
         ["x-order"] = {
             "name", "type", "if_running", "depends_on", "depends_order", "save_buffers",
-            "adapter", "configuration", "parameters", "raw_messages",
+            "adapter", "configuration", "parameters", "dap_overrides", "raw_messages",
         },
         required    = { "adapter", "configuration" },
         properties  = {
@@ -151,6 +151,11 @@ local function _schema()
                 type                 = { "object", "null" },
                 additionalProperties = true,
             },
+            dap_overrides = {
+                type                 = { "object", "null" },
+                additionalProperties = true,
+                description = "Raw DAP request-body fields, deep-merged over the resolved configuration (advanced escape hatch; not validated against the adapter)",
+            },
             raw_messages  = {
                 type        = { "boolean", "null" },
                 description = "Capture all raw DAP protocol messages in a dedicated buffer attached to the task",
@@ -163,10 +168,11 @@ end
 ---A `debug` task: the framework base plus the adapter/configuration selection
 ---and the values for that configuration's placeholders.
 ---@class easytasks.DebugTask : easytasks.TaskBase
----@field adapter       string
----@field configuration string
----@field parameters?   table<string, any>
----@field raw_messages? boolean
+---@field adapter        string
+---@field configuration  string
+---@field parameters?    table<string, any>
+---@field dap_overrides? table<string, any>
+---@field raw_messages?  boolean
 
 ---@param task    easytasks.DebugTask
 ---@param ctx     easytasks.RunCtx
@@ -187,6 +193,10 @@ function M.start(task, ctx, on_done)
         ctx.report("debug: " .. tostring(err))
         on_done(false)
         return function() end
+    end
+
+    if task.dap_overrides then
+        body = vim.tbl_deep_extend("force", body, task.dap_overrides)
     end
 
     local params = {
