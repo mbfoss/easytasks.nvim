@@ -132,7 +132,7 @@ local function _schema()
         description = "Definition of a `debug` task (runs via a DAP adapter)",
         ["x-order"] = {
             "name", "type", "if_running", "depends_on", "depends_order", "save_buffers",
-            "adapter", "configuration", "parameters", "dap_overrides", "raw_messages",
+            "adapter", "configuration", "parameters", "request_overrides", "raw_messages",
         },
         required    = { "adapter", "configuration" },
         properties  = {
@@ -152,7 +152,7 @@ local function _schema()
                 additionalProperties = true,
                 description = "Values for the selected `configuration`'s placeholders",
             },
-            dap_overrides = {
+            request_overrides = {
                 type                 = { "object", "null" },
                 additionalProperties = true,
                 description = "Raw DAP request-body fields, deep-merged over the resolved configuration (advanced escape hatch; not validated against the adapter)",
@@ -172,7 +172,7 @@ end
 ---@field adapter        string
 ---@field configuration  string
 ---@field parameters?    table<string, any>
----@field dap_overrides? table<string, any>
+---@field request_overrides? table<string, any>
 ---@field raw_messages?  boolean
 
 ---@param task    easytasks.DebugTask
@@ -196,8 +196,8 @@ function M.start(task, ctx, on_done)
         return function() end
     end
 
-    if task.dap_overrides then
-        body = vim.tbl_deep_extend("force", body, task.dap_overrides)
+    if task.request_overrides then
+        body = vim.tbl_deep_extend("force", body, task.request_overrides)
     end
 
     local params = {
