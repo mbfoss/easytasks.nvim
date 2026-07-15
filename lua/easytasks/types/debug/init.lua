@@ -210,7 +210,7 @@ function M.start(task, ctx, on_done)
         raw_messages = task.raw_messages,
     }
 
-    return require("easydap.task").start(params, {
+    return require("easydap").start_task(params, {
         add_bufnr = ctx.add_bufnr,
         report    = ctx.report,
         on_done   = on_done,

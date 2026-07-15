@@ -80,6 +80,7 @@ vim.pack.add({
   { src = "https://github.com/mbfoss/easytasks.nvim" },
 })
 
+-- require("easydap").setup()
 require("easytasks").setup()
 ```
 
@@ -247,7 +248,7 @@ When the tasks-file LSP has easydap available, `configuration` completes to the
 adapter's named configurations and `parameters` is completed and validated
 against the placeholders that configuration declares. `dap_overrides` is passed
 through verbatim and is not validated.
-
+ 
 ## Shared task options
 
 These fields are available on **every** task type.
