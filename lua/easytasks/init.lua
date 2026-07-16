@@ -30,6 +30,13 @@ function M.register_expression(name, fn, opts)
     require("easytasks.expressions").register(name, fn, opts)
 end
 
+--- Run a task whose definition is supplied inline, not from a TOML file.
+---@param task_name string
+---@param task_def  easytasks.TaskBase  task data (same shape as a decoded TOML task entry)
+function M.run_ephemeral(task_name, task_def)
+    require("easytasks.runner.exec").run_ephemeral(task_name, task_def)
+end
+
 local _enabled = false
 
 -- The tasks file gets its own `easytasks` filetype (not `toml`): it carries
