@@ -37,7 +37,6 @@ local project      = require("easytasks.project")
 ---@class easytasks.AddBufOpts
 ---@field label?      string
 ---@field priority?   integer
----@field autoscroll? boolean
 
 ---@class easytasks.RunCtx
 ---@field name       string   the task's name (the `[tasks.<name>]` key)
@@ -460,11 +459,6 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
             local label = opts.label
             if not label then
                 label = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
-            end
-            -- The producer signals autoscroll through the contract opts; the status
-            -- panel reads it from this buffer-local var (set here, not by the producer).
-            if opts.autoscroll then
-                pcall(vim.api.nvim_buf_set_var, bufnr, "easytasks_autoscroll", true)
             end
             table.insert(entry.bufnrs, { bufnr = bufnr, label = label, priority = opts.priority or 0 })
             _notify_state(run_id)

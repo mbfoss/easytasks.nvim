@@ -416,8 +416,7 @@ waiting on dependencies). Each tab has:
 - a **terminal page** per spawned buffer, streaming stdout/stderr live.
 
 Click a tab or use `:Tasks panel jump N` to switch pages. New output on an
-inactive tab is flagged with an unread marker. Terminal pages autoscroll while
-your cursor sits at the bottom, and stop following as soon as you scroll up.
+inactive tab is flagged with an unread marker.
 `:Tasks shell` adds a plain interactive shell as its own tab.
 
 ## Editing support (LSP)
