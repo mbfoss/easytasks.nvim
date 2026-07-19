@@ -1,11 +1,9 @@
 ---@class tomltasks.debug.Module : tomltasks.TaskTypeDef
 local M = {}
 
---- The `parameters` object schema for one (adapter, profile): one property
---- per input the profile declares, described with the input's own
---- `description`. A tasks file is a *typed* document, so each property is the
---- input's typed authored form — which ezdap's input registry states directly,
---- as JSON Schema, alongside the parse/seed/completion faces of the same format.
+--- The `parameters` object schema for one (adapter, profile): one property per
+--- input the profile declares, described with the input's own `description` and
+--- typed in the authored form ezdap's input registry states as JSON Schema.
 ---@param sch table  the `ezdap.schema` module
 ---@param adapter string
 ---@param profile_name string
@@ -52,12 +50,9 @@ local function _profile_name_schema(sch, adapter, profile_names)
     }
 end
 
---- Per-adapter conditional branches: each branch first tests only `adapter`,
---- and nests the (adapter, profile) branches for `parameters` inside its
---- own `then`. This way the schema navigator only has to walk the
---- profile-level branches of the adapter that actually matched, rather
---- than re-testing every adapter's profile names against every task
---- (which mattered once the adapter count got large).
+--- Per-adapter conditional branches: each tests only `adapter` and nests its
+--- (adapter, profile) `parameters` branches inside its own `then`, so the
+--- navigator walks only the matched adapter's profiles.
 ---@param sch table  the `ezdap.schema` module
 ---@return table[]
 local function _profile_branches(sch)
@@ -101,9 +96,8 @@ local function _profile_branches(sch)
 end
 
 --- The `debug` task schema. tomltasks owns only the framework fields; the DAP
---- vocabulary lives entirely under `parameters` (values for the chosen
---- profile's inputs) and is projected from ezdap's per-adapter named
---- profiles.
+--- vocabulary lives entirely under `parameters` and is projected from ezdap's
+--- per-adapter named profiles.
 ---@return table
 local function _schema()
     local sch          = require("ezdap.schema")
@@ -161,11 +155,9 @@ end
 ---@param on_done fun(ok: boolean)
 ---@return fun()
 function M.start(task, ctx, on_done)
-    -- `resolve_task` answers through a callback because a profile's `build`
-    -- may ask the user something first (an attach shape picks a process for an unset
-    -- `pid`), so the task can arrive a picker later than this call. Until it does
-    -- there is no session to stop, which is what `cancel_resolve` is for: it drops
-    -- the answer if one ever lands, leaving us free to settle right away.
+    -- `resolve_task` answers through a callback because a profile's `build` may
+    -- prompt the user first, so the task can arrive later than this call. Until
+    -- then there is no session to stop — hence `cancel_resolve`.
     local stop, finished = nil, false
 
     ---`on_done` fires once, whichever of the run and the cancel path gets there first.

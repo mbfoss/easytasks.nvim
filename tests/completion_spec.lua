@@ -13,10 +13,8 @@ local completion = require("tomltasks.lsp.server.completion")
 local CK         = vim.lsp.protocol.CompletionItemKind
 local IF         = vim.lsp.protocol.InsertTextFormat
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Shared schema fixture — covers scalars, enums, booleans, oneOf, nested
 -- objects, arrays, and arrays-of-tables with nested objects.
--- ─────────────────────────────────────────────────────────────────────────────
 local SCHEMA = {
     type       = "object",
     properties = {
@@ -67,9 +65,7 @@ local SCHEMA = {
     },
 }
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Helpers
--- ─────────────────────────────────────────────────────────────────────────────
 
 -- Split a snippet on its single "|" cursor marker into (text, row0, col0).
 local function split_cursor(s)
@@ -146,9 +142,7 @@ local function expect(snippet, expected)
     assert.same(expected, labels(complete(snippet)))
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Guards
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – guards", function()
     it("returns empty when no schema is set", function()
         local ctx = make_ctx("mode = ", nil)
@@ -168,9 +162,7 @@ describe("completion – guards", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- [table.header] completion
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – table headers", function()
     it("suggests all reachable object table paths", function()
         -- Only object tables (and object sub-tables of an array element) — scalar
@@ -198,9 +190,7 @@ describe("completion – table headers", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- [[array.of.tables]] completion
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – array-of-tables headers", function()
     it("suggests array-of-tables paths only", function()
         expect("[[|", { "tasks" })
@@ -211,9 +201,7 @@ describe("completion – array-of-tables headers", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Value side (after '=')
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – value side", function()
     it("suggests string enum members with their quotes", function()
         expect("mode = |", { '"dev"', '"prod"' })
@@ -294,9 +282,7 @@ describe("completion – value side", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Key side (before '=')
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – key side", function()
     it("suggests section keys on a trailing blank line", function()
         expect("[server]\n|", { "host", "port", "tags" })
@@ -328,9 +314,7 @@ describe("completion – key side", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Document root
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – document root", function()
     it("suggests every top-level key in an empty document", function()
         expect("|", {
@@ -347,9 +331,7 @@ describe("completion – document root", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Inline tables
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – inline tables", function()
     it("suggests keys inside an inline table", function()
         expect("server = { h| }", { "host", "port", "tags" })
@@ -372,9 +354,7 @@ describe("completion – inline tables", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Section scope (trailing blank lines after a header)
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – section scope", function()
     it("suggests array-of-tables element keys after [[tasks]]", function()
         expect("[[tasks]]\n|", { "cmd", "env", "name" })
@@ -389,14 +369,9 @@ describe("completion – section scope", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Undecoded sections (duplicate / invalid / unknown headers)
---
--- A section the decoder rejects (e.g. a duplicate header) carries no decode tag.
--- The cursor on its trailing line must still resolve keys from the header path
--- rather than falling through to top-level keys. Regression test for the
--- "[tasks.env] suggests `tasks`" bug.
--- ─────────────────────────────────────────────────────────────────────────────
+-- Undecoded sections (duplicate / invalid / unknown headers): a rejected section
+-- carries no decode tag, but the cursor on its trailing line must still resolve
+-- keys from the header path. Regression test for "[tasks.env] suggests `tasks`".
 describe("completion – undecoded sections", function()
     it("resolves keys from the header path for a duplicate [table]", function()
         expect("[[tasks]]\n[tasks.env]\n[tasks.env]\n|", { "HOME", "PATH" })
@@ -417,14 +392,9 @@ describe("completion – undecoded sections", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Name-keyed maps (additionalProperties given as an object schema)
---
--- Mirrors the tomltasks task file, where tasks are declared as `[tasks.<name>]`
--- and `tasks` is `{ type=object, additionalProperties = <task schema> }`. The
--- names are user-defined, so completion resolves task keys/sub-tables through
--- additionalProperties and enumerates existing entries for header paths.
--- ─────────────────────────────────────────────────────────────────────────────
+-- Name-keyed maps (additionalProperties as an object schema), mirroring the tasks
+-- file where `tasks` is `{ type=object, additionalProperties = <task schema> }`
+-- and names are user-defined, so completion resolves keys through it.
 describe("completion – name-keyed maps", function()
     local KEYED = {
         type                 = "object",
@@ -471,9 +441,7 @@ describe("completion – name-keyed maps", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Property ordering & item shape
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – property ordering", function()
     it("honours an explicit x-order", function()
         local schema = {
@@ -501,9 +469,7 @@ describe("completion – property ordering", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Value starters & multi-type values
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – value starters", function()
     local schema = {
         type       = "object",
@@ -549,9 +515,7 @@ describe("completion – value starters", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Type labels in completion item detail
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – type labels", function()
     local schema = {
         type       = "object",
@@ -574,9 +538,7 @@ describe("completion – type labels", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- additionalProperties / patternProperties (open-set maps)
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – open-set maps", function()
     local schema = {
         type       = "object",
@@ -607,9 +569,7 @@ describe("completion – open-set maps", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Dotted and quoted keys
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – dotted & quoted keys", function()
     it("resolves a quoted table header", function()
         expect('["server"]\n|', { "host", "port", "tags" })
@@ -620,9 +580,7 @@ describe("completion – dotted & quoted keys", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Nested and arrayed inline tables
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – nested inline tables", function()
     it("suggests keys of a nested inline table", function()
         expect("db = { opts = { p| } }", { "pool" })
@@ -637,9 +595,7 @@ describe("completion – nested inline tables", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Array-of-tables element binding
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – array-of-tables binding", function()
     it("binds [tasks.env] to the most recent [[tasks]] element", function()
         expect('[[tasks]]\nname = "a"\n[[tasks]]\n[tasks.env]\n|', { "HOME", "PATH" })
@@ -650,9 +606,7 @@ describe("completion – array-of-tables binding", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Document-root dedup is position-independent
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – root dedup position independence", function()
     it("excludes a top-level key even when its section is below the cursor", function()
         expect('|\n[server]\nhost = "x"\n', {
@@ -662,9 +616,7 @@ describe("completion – root dedup position independence", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
 -- Header textEdit replacement range
--- ─────────────────────────────────────────────────────────────────────────────
 describe("completion – header replacement range", function()
     it("replaces the whole typed dotted path, starting after the bracket", function()
         local it = item(complete("[db.|"), "db.opts")
@@ -682,13 +634,9 @@ describe("completion – header replacement range", function()
     end)
 end)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Dynamic value sources (schema `x-completionType`)
---
--- Mirrors `depends_on`: a string array whose items carry
--- `["x-completionType"] = "TaskNamesExceptSelf"`, completed from the sibling
--- task names in the document (excluding the task being edited).
--- ─────────────────────────────────────────────────────────────────────────────
+-- Dynamic value sources (schema `x-completionType`), mirroring `depends_on`: a
+-- string array whose items carry `["x-completionType"] = "TaskNamesExceptSelf"`,
+-- completed from the document's sibling task names.
 describe("completion – dynamic sources (x-completionType)", function()
     local SRC = {
         type                 = "object",

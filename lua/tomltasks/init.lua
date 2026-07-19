@@ -2,10 +2,9 @@ local M      = {}
 
 local config = require("tomltasks.config")
 
---- Register a task type. Can be called at any time before setup() to have the
---- type included in the schema, or after setup() for runtime-only use.
---- `loader` may be a module path string, a zero-arg factory function, or a
---- fully-resolved TaskTypeDef table.
+--- Register a task type: before setup() to have it included in the schema, or
+--- after for runtime-only use. `loader` may be a module path string, a zero-arg
+--- factory function, or a fully-resolved TaskTypeDef table.
 ---@param name   string
 ---@param loader tomltasks.TypeLoader
 function M.register_task_type(name, loader)
@@ -19,10 +18,9 @@ function M.register_qfmatcher(name, fn)
     require("tomltasks.types.process").register_qfmatcher(name, fn)
 end
 
---- Register a custom expression for use in task config values.
---- Expression syntax in TOML: `{{ name }}` or `{{ name(arg1, arg2) }}`.
---- Built-in expressions cannot be overridden (raises an error). Pass
---- `{ desc = … }` to have the name shown (with that text) in LSP completion.
+--- Register a custom expression for use in task config values, written in TOML as
+--- `{{ name }}` or `{{ name(arg1, arg2) }}`. Built-ins cannot be overridden; pass
+--- `{ desc = … }` to have the name shown with that text in LSP completion.
 ---@param name string
 ---@param fn   tomltasks.ExpressionFn
 ---@param opts? { desc?: string }
@@ -67,10 +65,9 @@ function M.enable()
     if _enabled then return end
     _enabled = true
 
-    -- Register the tasks file as its own `tomltasks` filetype. This applies
-    -- regardless of extension (e.g. a custom name with no `.toml`) and, unlike
-    -- reusing `toml`, keeps ordinary `.toml` files untouched and pulls in no
-    -- treesitter parser (there is none for this filetype).
+    -- Register the tasks file as its own `tomltasks` filetype, regardless of
+    -- extension. Unlike reusing `toml`, this keeps ordinary `.toml` files
+    -- untouched and pulls in no treesitter parser (there is none for it).
     vim.filetype.add({
         filename = {
             [config.tasks_filename] = FILETYPE,

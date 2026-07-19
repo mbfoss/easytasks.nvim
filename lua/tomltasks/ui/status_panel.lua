@@ -6,7 +6,7 @@ local fixedwin                  = require('tomltasks.tk.fixedwin')
 ---@class tomltasks.ui.status_panel
 local M                         = {}
 
--- ── State ─────────────────────────────────────────────────────────────────────
+-- State
 
 local _win                      = nil ---@type integer?
 local _height_ratio             = nil ---@type number?
@@ -18,11 +18,9 @@ local _known_buf_counts         = {} ---@type table<string, integer>  bufnr coun
 local _active_run_id            = nil ---@type string?
 local _active_page              = 0 -- 0 = info scratch, 1..n = entry.bufnrs index
 
--- Restarting a task already in the panel is an exception to the "don't disturb a
--- focused user" rule: the re-run takes over the view even while the panel is
--- focused. _restart_pending_name is the task name of an active run that was just
--- disposed (a same-named re-run arriving next is the restart); _restart_follow_run
--- is the run_id we keep showing past the focus guard until it finishes.
+-- Restarting a task already in the panel takes over the view even while it is
+-- focused. _restart_pending_name is the name of a just-disposed active run;
+-- _restart_follow_run is the run_id we keep showing past the focus guard.
 local _restart_pending_name     = nil ---@type string?
 local _restart_follow_run       = nil ---@type string?
 
@@ -30,10 +28,9 @@ local _subscribed               = false
 local _attached_bufs            = {} ---@type table<integer, true>  bufnrs where nvim_buf_attach has been called
 local _unread_bufnrs            = {} ---@type table<integer, true>  bufnrs with new lines added while not visible
 
--- Flat, winbar-order map from global page number to its navigable target. Every
--- tab and page the winbar draws gets one sequential number (left to right);
--- _build_winbar rebuilds this each render and it is the single source of truth
--- for click handling and `:Tasks panel jump N`.
+-- Flat, winbar-order map from global page number to its navigable target, one
+-- sequential number per tab/page. _build_winbar rebuilds it each render; it is
+-- the single source of truth for clicks and `:Tasks panel jump N`.
 local _page_targets             = {} ---@type { run_id: string, page: integer }[]
 
 local _log_buf                  = nil ---@type integer?
@@ -55,7 +52,7 @@ local _throttled_refresh_winbar = throttle.throttle_wrap(100, function()
     vim.schedule(_refresh_winbar)
 end)
 
--- ── Highlights ────────────────────────────────────────────────────────────────
+-- Highlights
 
 local function _setup_hl()
     local function fg(name)
@@ -89,13 +86,11 @@ local _badge = {
 -- whether the shell is still running or has exited.
 local _shell_badge = { icon = "❯", hl = "TomlTasksBadgeMuted" }
 
--- ── Helpers ───────────────────────────────────────────────────────────────────
+-- Helpers
 
 -- `vim.wo[win].opt = val` sets both the window-local value AND nvim's hidden
--- global default (the value new windows inherit), even for options with no
--- real global scope (winfixbuf, number, signcolumn, ...) — so every panel open
--- would silently leak its window settings into every future plain window.
--- Force `scope = "local"` to keep these changes confined to `win`.
+-- global default, even for options with no real global scope — so every panel
+-- open would leak its settings into future plain windows. Force `scope = "local"`.
 ---@param win integer
 ---@param opt string
 ---@param val any
@@ -111,7 +106,7 @@ local function _run_idx(run_id)
     end
 end
 
--- ── Info buffer ───────────────────────────────────────────────────────────────
+-- Info buffer
 
 local function _cancel_log_sub()
     if _log_sub then
@@ -196,7 +191,7 @@ local function _get_empty_buf()
     return _empty_buf
 end
 
--- ── Buffer display ────────────────────────────────────────────────────────────
+-- Buffer display
 
 ---@param bufnr integer
 local function _attach_buf(bufnr)
@@ -274,12 +269,11 @@ local function _show_active()
     end
 end
 
--- ── Winbar ────────────────────────────────────────────────────────────────────
+-- Winbar
 
--- Each item: { kind, text }
---   kind 1 = croppable (task name)
---   kind 2 = fixed visible text (icons, time, punctuation)
---   kind 3 = zero-width escape (highlight groups, click regions)
+-- Each item: { kind, text } — kind 1 = croppable (task name), kind 2 = fixed
+-- visible text (icons, time, punctuation), kind 3 = zero-width escape
+-- (highlight groups, click regions).
 
 ---@param width integer
 ---@return string
@@ -410,7 +404,7 @@ _refresh_winbar = function()
 end
 
 
--- ── State change subscription ─────────────────────────────────────────────────
+-- State change subscription
 
 ---Best page index for an entry: highest-priority buffer, or 0 if no buffers.
 ---The info page (0) is treated as priority -1 so any real buffer beats it.
@@ -459,9 +453,8 @@ local function _is_focused()
 end
 
 ---Render the active run after a state change. Skipped while the user is focused
----in the panel so we don't disturb them — except for a restarted run, which keeps
----the view past the focus guard. When new buffers appeared, advances to the best
----page first.
+---in the panel, except for a restarted run, which keeps the view past the focus
+---guard. When new buffers appeared, advances to the best page first.
 ---@param entry      tomltasks.RunEntry
 ---@param prev_count integer  buffer count before this state change
 ---@param run_id     string   the run this entry belongs to
@@ -527,7 +520,7 @@ local function _on_state_change(run_id, entry)
     vim.schedule(_refresh_winbar)
 end
 
--- ── Winbar click handler (global — required by %N@v:lua.fn@ syntax) ───────────
+-- Winbar click handler (global — required by %N@v:lua.fn@ syntax)
 
 ---@param id integer  global page number assigned by _build_winbar
 _G._TomlTasksWbc = function(id)
@@ -538,7 +531,7 @@ _G._TomlTasksWbc = function(id)
     _refresh_winbar()
 end
 
--- ── Cleanup ───────────────────────────────────────────────────────────────────
+-- Cleanup
 
 ---@param run_id string
 local function _on_dispose(run_id)
@@ -553,8 +546,7 @@ local function _on_dispose(run_id)
     if was_active then
         -- A restart disposes the old run, then synchronously launches the new one.
         -- Remember this run's name so that same-tick re-run is recognised as a
-        -- restart and takes over the focused panel. Cleared next tick so a plain
-        -- manual disposal doesn't linger as a false restart hint.
+        -- restart. Cleared next tick so a plain disposal isn't a false hint.
         _restart_pending_name = name
         vim.schedule(function() _restart_pending_name = nil end)
         _set_active_run(_runs[#_runs])
@@ -567,13 +559,8 @@ local function _on_dispose(run_id)
 end
 
 --- Drop a standalone shell tab from the panel: clear its bookkeeping and switch
---- the panel window off the shell buffer (via _on_dispose's synchronous switch).
---- NEVER deletes the buffer — the caller owns that. Called from two places:
----   * M.dispose_shell, just BEFORE it deletes the buffer, so the window leaves
----     the buffer first and the panel window survives the delete;
----   * the terminal buffer's BufDelete/BufWipeout autocmd, when the buffer is
----     deleted by some other path (deleting it again here would raise E937).
---- Idempotent: whichever call arrives second is a no-op once the tab is gone.
+--- the panel window off the shell buffer. NEVER deletes the buffer — the caller
+--- owns that. Idempotent, since both dispose paths call it.
 ---@param run_id string
 local function _close_shell(run_id)
     if not _shell_entries[run_id] then return end
@@ -595,7 +582,7 @@ local function _on_close()
     end
 end
 
--- ── Public API ────────────────────────────────────────────────────────────────
+-- Public API
 
 function M.open()
     if _win and vim.api.nvim_win_is_valid(_win) then return end
@@ -670,16 +657,9 @@ function M.open()
     vim.api.nvim_create_autocmd("WinNew", {
         group    = augroup,
         callback = function()
-            -- 'winbar' is copied onto a freshly split window (most other
-            -- window-local options, like 'winfixbuf', and window-local
-            -- variables are not). If someone splits the panel window itself,
-            -- the new sibling inherits our winbar text verbatim (click regions
-            -- included), but it is never re-rendered by _refresh_winbar (which
-            -- only targets `_win`), so its page numbers go stale as soon as the
-            -- panel state changes and clicking it jumps to the wrong target.
-            -- Detect the inherited winbar text and confirm it isn't already our
-            -- marked panel window, then strip every panel-special option back
-            -- off immediately so the sibling reverts to a plain window.
+            -- 'winbar' is copied onto a freshly split window, so splitting the
+            -- panel leaves a sibling with our click regions that _refresh_winbar
+            -- never updates. Detect it and strip the panel-special options off.
             local new_win = vim.api.nvim_get_current_win()
             if _win and new_win ~= _win and vim.api.nvim_win_is_valid(_win)
                 and vim.wo[new_win].winbar ~= ""
@@ -710,11 +690,9 @@ function M.toggle()
     end
 end
 
---- Activate the nth panel page (1-based, left to right, matching the number
---- prefixes shown in the winbar) and focus the panel on it. The numbering is
---- global across every tab and page — a task's name/info tab, each of its buffer
---- pages, and each shell all get one sequential number. The target page is given
---- as an argument (`:Tasks panel jump 3`).
+--- Activate the nth panel page (1-based, matching the winbar number prefixes)
+--- and focus the panel on it. Numbering is global across every tab and page —
+--- info tabs, buffer pages, and shells all get one sequential number.
 ---@param n integer?  page number; defaults to 1 when omitted or non-positive
 function M.jump(n)
     M.open()
@@ -836,13 +814,9 @@ function M.dispose_entry(run_id)
     return exec.dispose(run_id)
 end
 
---- Dispose a standalone shell tab: remove the tab from the panel, then delete
---- its terminal buffer (killing the shell if it is still running). _close_shell
---- runs FIRST so the panel window leaves the buffer before it is deleted —
---- otherwise Neovim tears the panel window down along with it (a split whose
---- shown buffer is deleted with no fallback is closed, and no autocmd fires
---- early enough to prevent it). The buffer's BufDelete/BufWipeout autocmd then
---- calls _close_shell again, a no-op now that the tab is already gone.
+--- Dispose a standalone shell tab: remove the tab, then delete its terminal
+--- buffer. _close_shell runs FIRST so the panel window leaves the buffer before
+--- the delete, which would otherwise tear the panel window down with it.
 ---@param run_id string
 ---@return boolean ok, string? err
 function M.dispose_shell(run_id)

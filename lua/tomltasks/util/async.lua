@@ -1,10 +1,9 @@
 ---@class tomltasks.async
 local M = {}
 
---- Drive `fn` as a coroutine. Calls `on_done(ok, result)` when it finishes or errors.
---- When the coroutine yields it must yield a function `setup(waker)`. The step
---- function calls `setup(step)` immediately, handing the coroutine's own resume
---- path to whoever will wake it later (a timer, an on_exit callback, etc.).
+--- Drive `fn` as a coroutine, calling `on_done(ok, result)` when it finishes or
+--- errors. Each yield must yield a `setup(waker)` function, called at once with
+--- the resume path, handing it to whoever will wake the coroutine.
 ---@param fn     fun(...): any
 ---@param on_done fun(ok: boolean, result: any)
 ---@param ...    any  arguments forwarded to fn

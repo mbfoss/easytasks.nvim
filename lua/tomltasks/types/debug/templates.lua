@@ -6,11 +6,9 @@ local ordered = require("tomltasks.util.table_util").ordered
 --- required inputs. This keeps the template list in lockstep with whatever
 --- adapters ezdap ships.
 
---- Build the `parameters` skeleton for one (adapter, profile): every
---- required input, in sorted order. Each starting value comes from ezdap's input
---- registry, so a seeded task is written in the same authored form the tasks-file
---- schema demands of it (a `shell_args` input seeds the command line you type, not
---- the argument list ezdap splits it into).
+--- Build the `parameters` skeleton for one (adapter, profile): every required
+--- input, sorted. Starting values come from ezdap's input registry, so the task
+--- is seeded in the authored form the tasks-file schema demands.
 ---@param sch table  the `ezdap.schema` module
 ---@param adapter string
 ---@param profile_name string

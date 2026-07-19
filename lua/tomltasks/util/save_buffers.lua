@@ -30,10 +30,9 @@ local function _has_hidden_attr(path)
     return st ~= nil and type(st.flags) == "number" and bit.band(st.flags, _UF_HIDDEN) ~= 0
 end
 
---- True if `path` is hidden: either it or any directory between it and `root`
---- is dot-prefixed (all platforms) or carries the OS hidden attribute (Windows
---- hidden, macOS UF_HIDDEN). Assumes `path` is inside `root` (see
---- `_is_inside_folder`) and both are normalized to forward slashes.
+--- True if `path` is hidden: it or any directory between it and `root` is
+--- dot-prefixed or carries the OS hidden attribute (Windows hidden, macOS
+--- UF_HIDDEN). Assumes `path` is inside `root` and both use forward slashes.
 ---@param root string
 ---@param path string
 ---@return boolean
@@ -70,10 +69,9 @@ local function _compile_globs(globs)
     return out
 end
 
---- Save all modified buffers that belong to project_root, filtered by config globs.
---- Hidden files (dot-prefixed, or carrying the OS hidden attribute on Windows /
---- macOS, or under such a directory) are skipped unless config.include_hidden is true.
---- Empty include_globs means include all; empty exclude_globs means exclude nothing.
+--- Save all modified buffers under project_root, filtered by config globs. Hidden
+--- files are skipped unless config.include_hidden is true. Empty include_globs
+--- means include all; empty exclude_globs means exclude nothing.
 ---@param project_root string
 ---@param config tomltasks.SaveBuffersConfig
 ---@return integer saved, string[] paths

@@ -41,11 +41,9 @@ M.ErrorCodes = {
   ServerCancelled = -32802, RequestFailed = -32803,
 }
 
--- Installs vim.lsp.protocol (used at require-time by completion.lua and
--- symbols.lua) and a harmless vim.api.nvim_create_namespace stub (used at
--- require-time by diagnostics.lua, whose return value is never read by the
--- worker — diagnostics.build() never touches it, only diagnostics.publish/
--- update do, and those stay client-side).
+-- Installs vim.lsp.protocol (needed at require-time by completion.lua and
+-- symbols.lua) and a harmless vim.api.nvim_create_namespace stub for
+-- diagnostics.lua, whose return value the worker never reads.
 function M.install()
   vim.lsp = vim.lsp or {}
   vim.lsp.protocol = vim.lsp.protocol or {

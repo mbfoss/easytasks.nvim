@@ -8,10 +8,9 @@
 
 local M             = {}
 
---- All expressions, built-in and user-registered, keyed by name. Private;
---- built-ins are defined below via `function _expressions.<name>`, and
---- `M.register` adds user ones. A single map keeps lookup (`M.get`) and
---- enumeration (`M.list`, used by LSP completion) trivial and complete.
+--- All expressions, built-in and user-registered, keyed by name. Built-ins are
+--- defined below via `function _expressions.<name>`; `M.register` adds user ones.
+--- One map keeps both lookup (`M.get`) and enumeration (`M.list`) complete.
 ---@type table<string, tomltasks.ExpressionFn>
 local _expressions  = {}
 
@@ -71,7 +70,7 @@ local _valid_complete_types = {
   customlist = true,
 }
 
--- ── Helpers ───────────────────────────────────────────────────────────────────
+-- Helpers
 
 local _nofile_err   = "current buffer is not a regular file"
 local _badtype_err  = "current file type is not `%s`"
@@ -88,13 +87,11 @@ local function _check_file(filetype)
     end
 end
 
--- ── Built-in expressions ──────────────────────────────────────────────────
+-- Built-in expressions
 
---- Emit a literal `{{`. The escape hatch for a hole opener in output, since a
---- literal `{{` cannot be produced from *inside* a hole (holes are located by
---- brace nesting). Equivalent to writing `{{{{`. A literal `}}` needs no escape —
---- it is already literal outside a hole. Takes no argument (it emits the braces
---- itself; it cannot receive them, as that would reopen a hole).
+--- Emit a literal `{{`, equivalent to writing `{{{{`. Takes no argument, since
+--- passing the braces in would reopen a hole. A literal `}}` needs no escape —
+--- it is already literal outside a hole.
 ---@return string
 function _expressions.lbrace()
     return "{{"
@@ -152,10 +149,9 @@ function _expressions.env(_, varname)
     return (val ~= vim.NIL and val) or nil
 end
 
---- Run a shell command and return its stdout with trailing newlines stripped
---- (like `$(...)` command substitution). A non-zero exit status is an error. The
---- command is an ordinary string argument, so a verbatim string literal keeps its
---- own quoting: `{{ shell("printf 'a, b'") }}`.
+--- Run a shell command and return its stdout with trailing newlines stripped,
+--- like `$(...)`. A non-zero exit status is an error. The command is an ordinary
+--- string argument: `{{ shell("printf 'a, b'") }}`.
 ---@param cmd string  the command
 ---@return string? output, string? err
 function _expressions.shell(_, cmd)
@@ -208,7 +204,7 @@ _descriptions.env           = "Value of an environment variable: env VARNAME"
 _descriptions.shell         = "stdout of a shell command, trailing newlines stripped: shell CMD…"
 _descriptions.prompt        = "Ask for input at run time: prompt TEXT [default] [completion]"
 
--- ── Public API ──────────────────────────────────────────────────────────────
+-- Public API
 
 --- Look up an expression function by name (built-in or user-registered; both
 --- live in the same map, and a user one can never shadow a built-in — see
@@ -220,9 +216,8 @@ function M.get(name)
 end
 
 --- List every expression (built-in and user-registered) as `{ name, description }`
---- entries, sorted by name. Marshaled to the tasks-file LSP so completion can
---- offer expression names inside a `{{ … }}` hole. Inline `[expressions]` are not
---- included here (they live in the document, not this registry).
+--- entries, sorted by name, for the tasks-file LSP's completion inside a hole.
+--- Inline `[expressions]` live in the document, not this registry, so are absent.
 ---@return { name: string, description: string? }[]
 function M.list()
     local names = vim.tbl_keys(_expressions)

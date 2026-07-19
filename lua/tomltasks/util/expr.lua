@@ -47,7 +47,7 @@ local M = {}
 ---@field args?       tomltasks.expr.Node[]   argument nodes (call)
 ---@field parts?      tomltasks.expr.Node[]   operands (concat)
 
--- ── Character classes ─────────────────────────────────────────────────────────
+-- Character classes
 
 ---@param c string
 local function _is_space(c) return c == " " or c == "\t" or c == "\n" or c == "\r" or c == "\f" or c == "\v" end
@@ -79,7 +79,7 @@ local function _err(msg, pos)
     return ("%s (at col %d)"):format(msg, pos)
 end
 
--- ── Tokenizer ─────────────────────────────────────────────────────────────────
+-- Tokenizer
 
 --- Split `src` into tokens. Whitespace separates tokens and is otherwise
 --- insignificant. Returns `nil, err` on the first malformed token.
@@ -161,11 +161,9 @@ function M.tokenize(src)
     return _tokenize(src)
 end
 
---- If `src:sub(i, i)` opens a verbatim string literal, return the index just
---- past its closing delimiter; otherwise return `nil`. On an unterminated string
---- returns `nil, err`. Shared with the runner's hole scanner so that locating a
---- hole's closing `}}` and tokenizing its interior agree on where strings begin
---- and end — a `}}` inside a string must not be mistaken for the hole's end.
+--- If `src:sub(i, i)` opens a verbatim string literal, return the index just past
+--- its closing delimiter, else `nil` (`nil, err` if unterminated). Shared with the
+--- runner's hole scanner so both agree where strings begin and end.
 ---@param src string
 ---@param i   integer
 ---@return integer? next_i, string? err
@@ -179,14 +177,9 @@ function M.skip_string(src, i)
     return j + 1
 end
 
---- Given `text` that ends at a cursor, determine whether the cursor sits inside
---- an open `{{ … }}` hole and, if so, return the hole's interior from just after
---- the opening `{{` up to the end of `text` (i.e. what has been typed into the
---- hole so far). Returns `nil` when the cursor is not inside a hole. `text` must
---- begin at a point known to be outside any hole (e.g. just after a `=`) so hole
---- state can be tracked forward. A `{{{{` escape is a literal `{{`, not an opener;
---- string literals are skipped so a `}}` inside one does not close the hole. Used
---- by the LSP to locate the cursor for completion.
+--- Given `text` ending at a cursor, return the interior of the open `{{ … }}`
+--- hole the cursor sits in — what has been typed so far — or `nil`. `text` must
+--- begin outside any hole (e.g. just after a `=`) to track hole state forward.
 ---@param text string
 ---@return string? interior
 function M.scan_hole(text)
@@ -224,10 +217,8 @@ function M.scan_hole(text)
 end
 
 --- Return the interior text of every *complete* `{{ … }}` hole in `text`, in
---- order. A `{{{{` escape is skipped (a literal `{{`); string literals are skipped
---- so a `}}` inside one does not close a hole; an unterminated final hole is
---- omitted (left for run time, and so half-typed expressions are not flagged).
---- Used by the LSP to diagnose each hole's expression.
+--- order. `{{{{` escapes and string literals are skipped; an unterminated final
+--- hole is omitted, so half-typed expressions are not flagged. Used by the LSP.
 ---@param text string
 ---@return string[]
 function M.holes(text)
@@ -260,7 +251,7 @@ function M.holes(text)
     return out
 end
 
--- ── Parser ────────────────────────────────────────────────────────────────────
+-- Parser
 
 --- Parse `src` (the inner text of a hole) into a single expression AST. Returns
 --- `nil, err` on any syntax error. A parenthesized group is unwrapped — grouping

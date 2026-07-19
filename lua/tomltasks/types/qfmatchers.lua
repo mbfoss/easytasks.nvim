@@ -20,11 +20,9 @@ end
 --- GCC / Clang: file:line:col: severity: message
 ---@type tomltasks.QfMatcher
 local function _gcc(line, context)
-    -- Template/instantiation diagnostics: GCC reports the error at the
-    -- location it physically occurs (often a deeply included header, which is
-    -- useless to jump to) and prints the user-code location that triggered the
-    -- instantiation on a trailing "required from here" line. Remember that
-    -- location so the following diagnostic points at the real source instead.
+    -- Template/instantiation diagnostics: GCC reports the error in a deep header
+    -- and prints the triggering user-code location on a trailing "required from
+    -- here" line. Remember it so the next diagnostic points at the real source.
     local rf_file, rf_lnum, rf_col = line:match("^(.+):(%d+):(%d+):%s+required from here%s*$")
     if rf_file then
         context.required_from = { file = rf_file, lnum = rf_lnum, col = rf_col }

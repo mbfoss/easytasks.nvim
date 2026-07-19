@@ -5,7 +5,6 @@ local expressions = require("tomltasks.expressions")
 local expr = require("tomltasks.util.expr")
 
 --- Expression evaluation
---- ─────────────────────
 --- A task string is literal text with `{{ … }}` *holes*. Nothing outside a hole
 --- is special, so the top level never needs escaping: a bare `$`, `\`, or single
 --- `}` is literal, and DAP-style `${var}` passes through untouched. Only the
@@ -28,11 +27,9 @@ local expr = require("tomltasks.util.expr")
 ---@type fun(str: string, open_at: integer): string?, integer?, string?
 local _find_span
 
---- Find the extent of a `{{ … }}` hole. `open_at` is the index of the opening
---- `{{`'s first `{`. String literals are skipped so a `}}` inside one does not
---- close the hole. There are no nested holes in the grammar (nesting is function
---- composition), so no brace recursion is needed. Returns the inner text (between
---- the braces) and the index of the closing `}}`'s second `}`.
+--- Find the extent of a `{{ … }}` hole opening at `open_at` (its first `{`).
+--- String literals are skipped so a `}}` inside one does not close the hole early.
+--- Returns the inner text and the index of the closing `}}`'s second `}`.
 ---@param str     string
 ---@param open_at integer
 ---@return string? inner, integer? close_at, string? err
@@ -86,11 +83,9 @@ local _expand_recursive
 ---@type fun(str: string, ctx: tomltasks.ExpressionCtx): any, string?
 local _expand_value
 
---- Evaluate one AST node to a value. Literals yield their value; a `concat`
---- stringifies its operands (a `nil` operand becomes `""`); a `param` reads the
---- current inline-expression argument frame; a `call` is delegated to
---- `_eval_call`. Values are returned type-preservingly (a sole number/boolean
---- survives) — the caller decides whether to stringify.
+--- Evaluate one AST node to a value: literals yield their value, `concat`
+--- stringifies its operands (`nil` becomes `""`), `param` reads the argument
+--- frame, `call` delegates to `_eval_call`. Types are preserved for the caller.
 ---@param node tomltasks.expr.Node
 ---@param ctx  tomltasks.ExpressionCtx
 ---@return any value, string? err
@@ -121,13 +116,9 @@ _eval_node = function(node, ctx)
     return nil, "internal error: unknown node kind '" .. tostring(kind) .. "'"
 end
 
---- Evaluate a `call` node. Arguments are evaluated first, in the caller's scope,
---- type-preservingly. The name is then resolved: a built-in or user-registered
---- expression (`expressions.get`) is invoked as `fn(ctx, arg1, …)`; otherwise it
---- is looked up in the inline `[expressions]` table (`ctx.expressions`) and its
---- template resolved with a fresh positional-argument frame (`$1`, `$2`, …) on
---- `ctx._args`. A cycle guard (`ctx._resolving`) turns runaway inline recursion
---- into an error.
+--- Evaluate a `call` node: arguments first, in the caller's scope, then the name
+--- via `expressions.get` or the inline `[expressions]` table, whose template gets
+--- a fresh `$1`, `$2`, … frame. `ctx._resolving` guards runaway recursion.
 ---@param node tomltasks.expr.Node
 ---@param ctx  tomltasks.ExpressionCtx
 ---@return any value, string? err
@@ -234,10 +225,9 @@ _expand_recursive = function(str, ctx)
     return table.concat(res)
 end
 
---- Expand a single (string) value. When the *entire* trimmed value is one hole
---- (`"{{ name(args) }}"`), the expression's raw value is returned, so non-string
---- types (numbers, booleans, …) survive intact. Otherwise the value is treated as
---- string interpolation and every hole's result is stringified into place.
+--- Expand a single (string) value. When the *entire* trimmed value is one hole,
+--- the expression's raw value is returned so non-string types survive intact;
+--- otherwise every hole's result is stringified into place.
 ---@param str string
 ---@param ctx tomltasks.ExpressionCtx
 ---@return any value, string? err

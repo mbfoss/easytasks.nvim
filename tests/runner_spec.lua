@@ -11,16 +11,14 @@ local ui         = require("tomltasks.ui")
 
 local tasks_filename = require("tomltasks.config").tasks_filename
 
--- The built-in `debug` type projects its schema from the companion `ezdap`
--- plugin, which isn't on the runtime path in the isolated test env. Every task
--- run rebuilds the full schema across all registered types, so override `debug`
--- with a schemaless stub to keep the build self-contained (no debug tasks are
--- exercised here).
+-- The built-in `debug` type projects its schema from the companion `ezdap` plugin,
+-- absent from the isolated test env. Every run rebuilds the full schema, so
+-- override `debug` with a schemaless stub (no debug tasks are exercised here).
 task_types.register("debug", {
     start = function(_, _, done) done(true); return function() end end,
 })
 
--- ── controllable task types ──────────────────────────────────────────────────
+-- controllable task types
 -- Shared, test-mutable state the custom types report into. Reset in before_each.
 local run_order = {}          -- names, in the order t_order tasks start
 local manual    = {}          -- manual.done := the current t_manual run's on_done
@@ -67,13 +65,11 @@ task_types.register("t_expr", {
     start  = function(_, _, done) done(true); return function() end end,
 })
 
--- ── helpers ──────────────────────────────────────────────────────────────────
+-- helpers
 
---- Write task TOML to a fresh temp file and return its absolute path.
---- Tasks are a name-keyed map (`[tasks.<name>]`). For brevity the specs still
---- write the older array-of-tables form (`[[tasks]]` immediately followed by
---- `name="X"`); this helper rewrites each such pair into a `[tasks.X]` header,
---- dropping the now-redundant `name` line.
+--- Write task TOML to a fresh temp file and return its absolute path. Tasks are a
+--- name-keyed map, but for brevity the specs still write `[[tasks]]` followed by
+--- `name="X"`; this rewrites each such pair into a `[tasks.X]` header.
 ---@param lines string[]
 ---@return string path
 local function write_tasks(lines)
@@ -163,7 +159,7 @@ local function has_report(entry, needle)
     return false
 end
 
--- ── suite ────────────────────────────────────────────────────────────────────
+-- suite
 
 describe("runner exec", function()
     local prev_notify, prev_warn, warnings

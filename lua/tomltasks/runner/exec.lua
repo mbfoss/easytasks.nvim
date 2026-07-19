@@ -121,7 +121,7 @@ function M.get_all()
     return vim.tbl_extend("force", {}, _running)
 end
 
--- ─── TOML loading ────────────────────────────────────────────────────────────
+-- TOML loading
 
 ---@param toml_path string
 ---@return table<string,tomltasks.TaskBase>?, string[]?, table<string,string>?, string?
@@ -146,12 +146,9 @@ local function _load_tasks(toml_path)
         return nil, nil, nil, "no tasks table in " .. toml_path
     end
 
-    -- Tasks are a name-keyed map (`[tasks.<name>]`); the key is the task name.
-    -- TOML forbids duplicate keys, so uniqueness is guaranteed by the parser — no
-    -- duplicate check is needed. The name is not stored on the task data; the
-    -- runner carries it alongside (as the run's key and via RunCtx.name), so
-    -- previews/encodes of the task stay free of a synthetic field. Document order
-    -- is preserved via the decoder's key-order metadata.
+    -- Tasks are a name-keyed map (`[tasks.<name>]`), so the parser already
+    -- guarantees unique names. The name is carried alongside the task data, not
+    -- stored on it, keeping previews/encodes free of a synthetic field.
     local table_util = require("tomltasks.util.table_util")
     local by_name    = {}
     local ordered    = {} ---@type string[]
@@ -182,7 +179,7 @@ local function _load_tasks(toml_path)
     return by_name, ordered, data.expressions or {}, nil
 end
 
--- ─── Dependency validation ───────────────────────────────────────────────────
+-- Dependency validation
 
 ---@param name   string
 ---@param tasks  table<string,tomltasks.TaskBase>
@@ -202,7 +199,7 @@ local function _find_missing_dep(name, tasks, seen)
     return nil
 end
 
--- ─── Cycle detection ─────────────────────────────────────────────────────────
+-- Cycle detection
 
 ---@param name    string
 ---@param tasks   table<string,tomltasks.TaskBase>
@@ -225,7 +222,7 @@ local function _find_cycle(name, tasks, visited, stack)
     return nil
 end
 
--- ─── save_buffers ──────────────────────────────────────────────────────────────
+-- save_buffers
 
 --- Normalize a task's `save_buffers` field into a SaveBuffersConfig, or nil if
 --- saving is disabled. Accepts `true` (save all) or `{ include, exclude }`.
@@ -261,7 +258,7 @@ local function _save_buffers_for(task, report)
     report(table.concat(lines, "\n"))
 end
 
--- ─── Core execution ──────────────────────────────────────────────────────────
+-- Core execution
 
 --- Dispose any finished (non-running, non-waiting) non-ephemeral runs for a
 --- task, so a fresh run reuses the same panel tab instead of stacking up.
@@ -290,10 +287,9 @@ local function _stop_run(run_id)
     if entry.cancel then entry.cancel() end
 end
 
---- Run a single task (and its dependencies) as a coroutine.
---- Always creates and fully owns its RunEntry — entry is created synchronously
---- before the first yield, so it is visible to callers immediately.
---- Must be called from within a coroutine (via async.go).
+--- Run a single task (and its dependencies) as a coroutine. Must be called from
+--- within a coroutine (via async.go). Always creates and fully owns its RunEntry,
+--- synchronously before the first yield, so callers see it immediately.
 ---@param name      string
 ---@param tasks     table<string,tomltasks.TaskBase>
 ---@param run_id?   string   pre-existing run_id to reuse (e.g. a waiting entry)
@@ -344,16 +340,14 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
         return state == "ok"
     end
 
-    -- ── depends_on ──────────────────────────────────────────────────────────
+    -- depends_on
     local deps = type(task.depends_on) == "table" and task.depends_on or {}
     if #deps > 0 then
         entry.state       = "waiting"
         entry.waiting_for = deps
-        -- Run-ids of the dependency runs currently in flight. They live under
-        -- their own task names, so a stop aimed at this (merely waiting) task
-        -- would otherwise leave them running and this coroutine blocked forever.
-        -- Each dependency reports its id here as it starts; the cancel below then
-        -- propagates the stop down to them (stopping a finished run is a no-op).
+        -- Run-ids of the in-flight dependency runs, reported here as each starts.
+        -- They live under their own task names, so without this a stop aimed at
+        -- this waiting task would leave them running and block the coroutine.
         local dep_runs    = {}
         local function track_dep(rid) dep_runs[rid] = true end
         entry.cancel = function()
@@ -411,12 +405,12 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
         _append_report(run_id, "dependencies resolved")
     end
 
-    -- ── stop check (may have been requested while waiting for deps) ──────────
+    -- stop check (may have been requested while waiting for deps)
     if entry.stop_requested then
         return finish("stopped")
     end
 
-    -- ── expression resolution ────────────────────────────────────────────────
+    -- expression resolution
     local expression_ok, resolved = coroutine.yield(function(waker)
         resolver.resolve_expressions(task, { task = task, expressions = expressions or {} },
             function(ok, result, err)
@@ -429,7 +423,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
     end
     task = resolved
 
-    -- ── type-specific run ────────────────────────────────────────────────────
+    -- type-specific run
     local type_def = task_types.get(task.type)
     if not type_def then
         _append_report(run_id, "unknown task type: " .. tostring(task.type))
@@ -437,9 +431,8 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
     end
 
     -- Types with a command of their own report the resolved (expression-expanded)
-    -- config so it's visible in the panel. Skip it for composite-style types:
-    -- their behaviour is entirely their dependencies, so dumping their config
-    -- after the deps have already run is just noise.
+    -- config so it's visible in the panel. Composite-style types are skipped:
+    -- their behaviour is entirely their dependencies, so it would be noise.
     if not type_def.no_command then
         _append_report(run_id, "resolved task:\n" .. toml.encode(task))
     end
@@ -508,7 +501,7 @@ local function _run_task_coro(name, tasks, run_id, ephemeral, primary, expressio
     return finish(ok and "ok" or "failed")
 end
 
--- ─── Internal launch ─────────────────────────────────────────────────────────
+-- Internal launch
 
 --- Create a terminal failed RunEntry visible in the status panel.
 ---@param task_name string
@@ -558,7 +551,7 @@ local function _launch(task_name, tasks, run_id, ephemeral, expressions)
     end)
 end
 
--- ─── Public ──────────────────────────────────────────────────────────────────
+-- Public
 
 ---@param task_name string
 ---@param toml_path string
@@ -659,9 +652,8 @@ function M.list(toml_path)
 end
 
 --- Return the sorted names of every expression usable against the given tasks
---- file: the registered built-in/user expressions plus the inline `[expressions]`
---- declared in the document. A tasks file that fails to load contributes nothing,
---- so the registered names are still returned.
+--- file: the registered built-in/user ones plus the document's inline
+--- `[expressions]`. A file that fails to load just contributes nothing.
 ---@param toml_path string
 ---@return string[]
 function M.list_expression_names(toml_path)

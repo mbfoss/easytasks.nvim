@@ -22,11 +22,8 @@ local function fallback_range(range)
 end
 
 -- Walk the decoded values and flag any `{{ … }}` hole whose expression fails to
--- parse. Parsing the *decoded* value (not the raw document text) matches what the
--- runner evaluates, so TOML escapes inside a hole are handled correctly; the cost
--- is that the diagnostic can only highlight the whole value, not the exact column.
--- Array elements and map keys are both addressed by `tostring(key)`, matching the
--- decode tree.
+-- parse. Parsing the *decoded* value matches what the runner evaluates, at the
+-- cost of highlighting the whole value rather than the exact column.
 ---@param data        any
 ---@param dt          tomltools.DecodeTree
 ---@param dt_id       integer

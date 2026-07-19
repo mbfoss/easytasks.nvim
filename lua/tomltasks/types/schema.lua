@@ -12,11 +12,9 @@ local M = {}
 ---@field exclude?        string[]  glob patterns; matching buffers are never saved
 ---@field include_hidden? boolean   also save hidden files, which are skipped by default
 
---- Fields shared by every task, regardless of type. The Lua-type mirror of
---- `base_properties` below; concrete task types extend this class with their
---- own fields. The task name is not part of this data — tasks are keyed by name
---- in the `[tasks.<name>]` header; the runner carries the name separately and
---- hands it to task types via `RunCtx.name`.
+--- Fields shared by every task, regardless of type — the Lua-type mirror of
+--- `base_properties` below, which concrete task types extend. The name is not
+--- part of this data; the runner hands it over via `RunCtx.name`.
 ---@class tomltasks.TaskBase
 ---@field type           string                            task type (determines behaviour)
 ---@field if_running?    tomltasks.IfRunning               what happens if the task is already running

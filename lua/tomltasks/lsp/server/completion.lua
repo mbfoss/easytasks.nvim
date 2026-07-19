@@ -34,13 +34,9 @@ local function key_items(schema, existing)
     return items
 end
 
--- One completion item for a string value (an enum member or a dynamic source
--- candidate). The label carries the quotes (the standard way, matching the
--- inserted literal); the insert only appends the closing quote when one is
--- already open before the cursor. When `range` is given (an already-open
--- string), an explicit textEdit spanning the open quote through the cursor makes
--- the client's filter prefix include the quote so a partially-typed value still
--- matches the quoted label.
+-- One completion item for a string value (an enum member or dynamic candidate).
+-- The label carries the quotes; the insert appends a closing quote only when one
+-- is open. `range` spans the open quote so partial values still match the label.
 ---@param value         string
 ---@param detail        string?
 ---@param documentation string?
@@ -193,9 +189,8 @@ local function header_items(gather_fn, root_schema, root_data, typed_keys, repla
     for _, entry in ipairs(paths) do
         if entry.path:sub(1, #prefix) == prefix and entry.path ~= prefix then
             -- Composite paths contain dots, which most clients treat as word
-            -- boundaries; a bare insertText would only replace the segment after
-            -- the last dot and duplicate the rest. An explicit textEdit spanning
-            -- the whole typed path replaces it cleanly.
+            -- boundaries, so a bare insertText would replace only the last segment
+            -- and duplicate the rest. An explicit textEdit spans the whole path.
             items[#items + 1] = {
                 label    = entry.path,
                 kind     = CK.Module,
@@ -206,10 +201,9 @@ local function header_items(gather_fn, root_schema, root_data, typed_keys, repla
     return items
 end
 
--- Position where the dotted key path begins inside a [header] / [[header]],
--- i.e. immediately after the opening bracket(s). Used as the start of the
--- completion replacement range. Falls back to the header start if no bracket
--- token is present.
+-- Position where the dotted key path begins inside a [header] / [[header]], i.e.
+-- immediately after the opening bracket(s), used as the start of the completion
+-- replacement range. Falls back to the header start if no bracket token exists.
 ---@param cst    tomltools.Cst
 ---@param hdr_id integer
 ---@return integer row
@@ -266,9 +260,8 @@ local function is_type(schema, name)
 end
 
 -- Resolve a section's schema from its [header] key path when the section has no
--- decode tag (e.g. a duplicate/invalid header the decoder rejected). Intermediate
--- array-of-tables levels descend into `items`, mirroring how [a.b] binds to an
--- [[a]] element. Returns the flattened object schema, or nil when not navigable.
+-- decode tag (e.g. a header the decoder rejected). Array-of-tables levels descend
+-- into `items`, mirroring how [a.b] binds to an [[a]] element.
 ---@param root_schema table?
 ---@param keys        tomltools.CstData[]   header key parts
 ---@return table?
@@ -358,13 +351,9 @@ local function in_open_string(interior)
     return false
 end
 
--- When the cursor is in expression-*name* position inside a `{{ … }}` hole, return
--- the partial name typed so far and the 0-based column it begins at; else nil.
--- Name position = the start of the hole, or just after `(`, `,`, or `..` (a nested
--- call, an argument, or a concat operand). Never inside a string literal, and not
--- after an already-complete name (`{{ env |` offers nothing). The scan runs from
--- `(sr, sc)` — a point known to be outside any hole, e.g. the `=` — forward to the
--- cursor, so `{{{{` escapes and `}}` inside strings are handled correctly.
+-- When the cursor is in expression-*name* position inside a `{{ … }}` hole (its
+-- start, or after `(`, `,`, `..`, but not in a string or after a complete name),
+-- return the partial name and start column. Scans from `(sr, sc)`, outside holes.
 ---@param lines string[]
 ---@param sr integer  scan-start row (0-based)
 ---@param sc integer  scan-start col (0-based)
@@ -467,10 +456,8 @@ function M.handler(context, params, callback)
     if kvp_id then
         if cursor_after_equals(cst, kvp_id, row, col) then
             -- In the name position of a `{{ … }}` hole: offer expression names
-            -- instead of schema value items. The scan runs from the `=` (a point
-            -- outside any hole) so brace escapes and strings are handled correctly.
-            -- The partially-typed name (if any) is replaced via textEdit so a manual
-            -- completion request also works.
+            -- instead of schema value items. Scans from the `=` (outside any
+            -- hole); the partial name is replaced via textEdit.
             local sr, sc = equals_start(cst, kvp_id)
             local hole   = sr and hole_name_at(lines, sr, sc --[[@as integer]], row, col)
             if hole then
@@ -570,9 +557,8 @@ function M.handler(context, params, callback)
     end
 
     -- Cursor is in whitespace between KVPs inside a section or inline table.
-    -- token_at may land directly on the section composite when the cursor sits in
-    -- its trailing gap (e.g. an empty line after [a.b]); treat that node as the
-    -- scope itself rather than searching only its ancestors.
+    -- token_at may land on the section composite itself when the cursor sits in
+    -- its trailing gap, so treat that node as the scope, not just its ancestors.
     local scope_id = ((tok_k == K.InlineTable or tok_k == K.TableSection or tok_k == K.AotSection) and tok_id)
         or cst:ancestor_of_kind(tok_id, K.InlineTable, K.TableSection, K.AotSection)
     if scope_id then

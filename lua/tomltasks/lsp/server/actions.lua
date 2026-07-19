@@ -10,7 +10,7 @@ local Cst        = require("tomltasks.tomltools.Cst")
 
 local K          = Cst.Kind
 
--- ── Helpers ───────────────────────────────────────────────────────────────────
+-- Helpers
 
 ---@param sl   integer  0-indexed start line
 ---@param sc   integer  0-indexed start char (inclusive)
@@ -49,7 +49,7 @@ local function enclosing_scope(cst, dt, row, col)
     return scope_id, dt_id
 end
 
--- ── Action: fill missing required keys ─────────────────────────────────────
+-- Action: fill missing required keys
 
 --- Offers to insert all required keys that are absent from the enclosing section.
 --- Uses schema defaults as placeholder values; falls back to `""` for untyped keys.
@@ -121,7 +121,7 @@ function M.fill_required_keys(ctx, params)
     }
 end
 
--- ── Provider list ─────────────────────────────────────────────────────────────
+-- Provider list
 
 --- All built-in providers as a ready-to-assign list for context.code_action_providers.
 ---@type (fun(ctx: tomltasks.LspBufferContext, params: table): lsp.CodeAction[]?)[]

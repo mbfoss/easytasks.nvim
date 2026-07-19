@@ -15,7 +15,7 @@ M.SERVER_VERSION = "0.1.0"
 ---@type table<integer, {client_id: integer, debug_commands: boolean}>
 local attached = {}
 
--- ── Public API ────────────────────────────────────────────────────────────────
+-- Public API
 
 ---@class tomltasks.ThreadLspStartOpts
 ---@field schema         (fun(buf: integer, uri: string): table)?
@@ -88,7 +88,7 @@ function M.stop(buf)
     end
 end
 
--- ── Debug dump API ────────────────────────────────────────────────────────────
+-- Debug dump API
 -- Only works when opts.debug_commands = true was passed to M.start().
 
 local _dump_methods = {

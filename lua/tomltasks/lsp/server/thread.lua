@@ -29,7 +29,7 @@ function M.thread_main(read_fd, write_fd)
     local doc_symbol  = require("tomltasks.lsp.server.symbols")
     local fmt         = require("tomltasks.lsp.server.format")
 
-    -- ── Transport ─────────────────────────────────────────────────────────────
+    -- Transport
     local uv     = vim.uv
     local reader = assert(uv.new_pipe(false))
     reader:open(read_fd)
@@ -41,7 +41,7 @@ function M.thread_main(read_fd, write_fd)
         writer:write(frame.encode(obj))
     end
 
-    -- ── Logger ───────────────────────────────────────────────────────────────────
+    -- Logger
     local MessageType = { Error = 1, Warning = 2, Info = 3, Log = 4 }
 
     ---@param msg   string
@@ -54,7 +54,7 @@ function M.thread_main(read_fd, write_fd)
     end
     log("thread server starting", MessageType.Info)
 
-    -- ── Server state ─────────────────────────────────────────────────────────────
+    -- Server state
     ---@type table<string, tomltasks.LspBufferContext>
     local documents      = {} -- uri → context
     ---@type table<string, table>
@@ -63,7 +63,7 @@ function M.thread_main(read_fd, write_fd)
     local expr_lists     = {} -- uri → built-in expression list ({name, description})
     local debug_commands = false
 
-    -- ── Capabilities ─────────────────────────────────────────────────────────────
+    -- Capabilities
     local INITIALIZE_RESULT = {
         capabilities = {
             textDocumentSync                = { openClose = true, change = 2 },
@@ -78,7 +78,7 @@ function M.thread_main(read_fd, write_fd)
         serverInfo = { name = "tomltasks-toml", version = "0.1.0" },
     }
 
-    -- ── Document helpers ──────────────────────────────────────────────────────────
+    -- Document helpers
 
     local DIAG_DEBOUNCE_MS = 200
 
@@ -158,7 +158,7 @@ function M.thread_main(read_fd, write_fd)
         end
     end
 
-    -- ── Incremental text application ─────────────────────────────────────────────
+    -- Incremental text application
 
     ---@param text   string
     ---@param change table  { range: {start, end}, text: string }
@@ -178,7 +178,7 @@ function M.thread_main(read_fd, write_fd)
         return table.concat(before, "\n") .. change.text .. table.concat(after, "\n")
     end
 
-    -- ── Request / notification dispatch ──────────────────────────────────────────
+    -- Request / notification dispatch
 
     ---@param id     integer|string|nil
     ---@param result any
@@ -195,7 +195,7 @@ function M.thread_main(read_fd, write_fd)
         write_frame({ id = id, error = { code = code, message = message } })
     end
 
-    -- ── Debug dump helpers (only compiled when debug_commands = true) ─────────────
+    -- Debug dump helpers (only compiled when debug_commands = true)
 
     local dump_cst, dump_decode_tree, dump_data, dump_schema
 
@@ -243,7 +243,7 @@ function M.thread_main(read_fd, write_fd)
         return vim.inspect(ctx.schema)
     end
 
-    -- ── Main dispatcher ───────────────────────────────────────────────────────────
+    -- Main dispatcher
 
     ---@param msg table
     local function dispatch(msg)
@@ -252,7 +252,7 @@ function M.thread_main(read_fd, write_fd)
         local params = msg.params or {}
         log("dispatch method=" .. tostring(method) .. " id=" .. tostring(id), MessageType.Log)
 
-        -- ── Lifecycle ────────────────────────────────────────────────────────────
+        -- Lifecycle
         if method == "initialize" then
             local opts = params.initializationOptions or {}
             if opts.debug_commands then
@@ -276,7 +276,7 @@ function M.thread_main(read_fd, write_fd)
             return
         end
 
-        -- ── Text synchronisation ─────────────────────────────────────────────────
+        -- Text synchronisation
         if method == "textDocument/didOpen" then
             local uri  = params.textDocument.uri
             local text = params.textDocument.text
@@ -332,7 +332,7 @@ function M.thread_main(read_fd, write_fd)
             return
         end
 
-        -- ── Debug dump requests (requires debug_commands = true) ─────────────────
+        -- Debug dump requests (requires debug_commands = true)
         if debug_commands then
             if method == "tomltasks/dumpCst"
                 or method == "tomltasks/dumpDecodeTree"
@@ -360,7 +360,7 @@ function M.thread_main(read_fd, write_fd)
             end
         end
 
-        -- ── Feature requests ─────────────────────────────────────────────────────
+        -- Feature requests
         local function doc_uri()
             local uri = params.textDocument and params.textDocument.uri
             if not uri then respond_err(id, -32602, "missing textDocument.uri") end
@@ -442,11 +442,9 @@ function M.thread_main(read_fd, write_fd)
         end
     end
 
-    -- ── reader loop ──────────────────────────────────────────────────────────────
-    -- Each message is dispatched inside its own pcall: an error handling one
-    -- frame must not abort the rest of the batch read off the pipe, nor get
-    -- swallowed silently (frame.feed would otherwise stop at the first frame
-    -- whose handler throws, dropping every later frame in the same chunk).
+    -- reader loop. Each message is dispatched inside its own pcall: without it,
+    -- frame.feed stops at the first frame whose handler throws, silently
+    -- dropping every later frame in the same chunk.
     local function safe_dispatch(msg)
         local ok, err = pcall(dispatch, msg)
         if not ok then

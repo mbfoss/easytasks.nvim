@@ -34,15 +34,9 @@ function M.start(dispatchers)
         return true
     end
 
-    -- reader:read_start's callback runs in a libuv "fast event context",
-    -- where most vim.api calls (and anything they trigger transitively, e.g.
-    -- the built-in publishDiagnostics handler's nvim_create_namespace) are
-    -- disallowed. Unlike the stdio-cmd path (vim.lsp.rpc.start), nothing
-    -- wraps a function-cmd's `dispatchers` in vim.schedule for us, so every
-    -- call into `dispatchers` or a request callback must be deferred here.
-    -- Each message also gets its own pcall so one bad notification/response
-    -- can't abort the rest of the batch read off the pipe (see the matching
-    -- comment in thread_server.lua's reader loop).
+    -- reader:read_start's callback runs in a libuv "fast event context" where
+    -- most vim.api calls are disallowed, and nothing schedules a function-cmd's
+    -- `dispatchers` for us — so defer each here, under its own pcall.
     local function on_message(msg)
         if msg.id ~= nil and msg.method == nil then
             local cb = message_callbacks[msg.id]
