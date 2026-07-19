@@ -105,11 +105,11 @@ function M.build_resolved_schema()
     return s
 end
 
---- True if the companion easydap plugin is available. Probes the specific
+--- True if the companion ezdap plugin is available. Probes the specific
 --- submodule the `debug` type needs; a plain `require` is side-effect-free here.
 ---@return boolean
-local function _has_easydap()
-    return (pcall(require, "easydap.schema"))
+local function _has_ezdap()
+    return (pcall(require, "ezdap.schema"))
 end
 
 -- Built-in task types (loaded lazily on first use)
@@ -117,10 +117,10 @@ M.register("composite",   "tomltasks.types.composite")
 M.register("process",     "tomltasks.types.process")
 M.register("shell",       "tomltasks.types.shell")
 
--- The `debug` type depends on easydap for its schema, templates, and execution,
--- so it is registered only when easydap is installed. Without it, tomltasks runs
+-- The `debug` type depends on ezdap for its schema, templates, and execution,
+-- so it is registered only when ezdap is installed. Without it, tomltasks runs
 -- fine and simply offers no `debug` task type (rather than crashing on use).
-if _has_easydap() then
+if _has_ezdap() then
     M.register("debug",   "tomltasks.types.debug")
 end
 

@@ -1,22 +1,22 @@
 local ordered = require("tomltasks.util.table_util").ordered
 
---- Debug templates are projected from easydap's per-adapter named profiles
+--- Debug templates are projected from ezdap's per-adapter named profiles
 --- rather than hand-maintained: one entry per (adapter, profile) that
---- easydap declares, with `parameters` prefilled for the profile's
+--- ezdap declares, with `parameters` prefilled for the profile's
 --- required inputs. This keeps the template list in lockstep with whatever
---- adapters easydap ships.
+--- adapters ezdap ships.
 
 --- Build the `parameters` skeleton for one (adapter, profile): every
---- required input, in sorted order. Each starting value comes from easydap's input
+--- required input, in sorted order. Each starting value comes from ezdap's input
 --- registry, so a seeded task is written in the same authored form the tasks-file
 --- schema demands of it (a `shell_args` input seeds the command line you type, not
---- the argument list easydap splits it into).
----@param sch table  the `easydap.schema` module
+--- the argument list ezdap splits it into).
+---@param sch table  the `ezdap.schema` module
 ---@param adapter string
 ---@param profile_name string
 ---@return table params, string[] order  empty when the profile requires nothing
 local function _parameters(sch, adapter, profile_name)
-    local dap_inputs = require("easydap.inputs")
+    local dap_inputs = require("ezdap.inputs")
     local required   = sch.profile_required(adapter, profile_name)
     local inputs     = sch.profile_inputs(adapter, profile_name)
     local params, order = {}, {}
@@ -29,7 +29,7 @@ end
 
 ---@return tomltasks.TaskTemplate[]
 return function()
-    local sch = require("easydap.schema")
+    local sch = require("ezdap.schema")
     local templates = {}
     for _, adapter in ipairs(sch.profiled_adapters()) do
         for _, profile_name in ipairs(sch.profile_names(adapter)) do

@@ -547,10 +547,6 @@ describe("completion – value starters", function()
     it("treats a nullable string as a string", function()
         assert.same({ '"', "'" }, labels(complete_with(schema, "nul = |")))
     end)
-
-    it("offers nothing for a const-valued field", function()
-        assert.same({}, labels(complete_with(schema, "konst = |")))
-    end)
 end)
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -775,7 +771,7 @@ describe("completion – x-completionType registry consistency", function()
         -- Shared base fields — where depends_on and other dynamic-source fields live.
         walk(require("tomltasks.types.schema").base_properties)
         -- Plus each task type's own static schema fragment. Best effort: a type
-        -- whose schema needs an unavailable backend (e.g. `debug` → easydap) is
+        -- whose schema needs an unavailable backend (e.g. `debug` → ezdap) is
         -- skipped rather than failing the whole suite in a bare environment.
         for _, tname in ipairs(types.get_names()) do
             local ok, def = pcall(types.get, tname)

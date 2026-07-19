@@ -4,14 +4,14 @@ local M = {}
 --- The `parameters` object schema for one (adapter, profile): one property
 --- per input the profile declares, described with the input's own
 --- `description`. A tasks file is a *typed* document, so each property is the
---- input's typed authored form — which easydap's input registry states directly,
+--- input's typed authored form — which ezdap's input registry states directly,
 --- as JSON Schema, alongside the parse/seed/completion faces of the same format.
----@param sch table  the `easydap.schema` module
+---@param sch table  the `ezdap.schema` module
 ---@param adapter string
 ---@param profile_name string
 ---@return table
 local function _parameters_schema(sch, adapter, profile_name)
-    local dap_inputs = require("easydap.inputs")
+    local dap_inputs = require("ezdap.inputs")
     local required   = sch.profile_required(adapter, profile_name)
 
     local props = {}
@@ -30,9 +30,9 @@ local function _parameters_schema(sch, adapter, profile_name)
 end
 
 --- A `profile` property schema listing an adapter's profile names,
---- with each name's `description` (from easydap) attached so the LSP can show
+--- with each name's `description` (from ezdap) attached so the LSP can show
 --- it on completion/hover.
----@param sch table  the `easydap.schema` module
+---@param sch table  the `ezdap.schema` module
 ---@param adapter string
 ---@param profile_names string[]
 ---@return table
@@ -58,7 +58,7 @@ end
 --- profile-level branches of the adapter that actually matched, rather
 --- than re-testing every adapter's profile names against every task
 --- (which mattered once the adapter count got large).
----@param sch table  the `easydap.schema` module
+---@param sch table  the `ezdap.schema` module
 ---@return table[]
 local function _profile_branches(sch)
     local branches = {}
@@ -102,11 +102,11 @@ end
 
 --- The `debug` task schema. tomltasks owns only the framework fields; the DAP
 --- vocabulary lives entirely under `parameters` (values for the chosen
---- profile's inputs) and is projected from easydap's per-adapter named
+--- profile's inputs) and is projected from ezdap's per-adapter named
 --- profiles.
 ---@return table
 local function _schema()
-    local sch          = require("easydap.schema")
+    local sch          = require("ezdap.schema")
     local all_adapters = sch.profiled_adapters()
 
     return {
@@ -176,7 +176,7 @@ function M.start(task, ctx, on_done)
         on_done(ok)
     end
 
-    local cancel_resolve = require("easydap.schema").resolve_task({
+    local cancel_resolve = require("ezdap.schema").resolve_task({
         adapter = task.adapter,
         profile = task.profile,
         name    = ctx.name,
@@ -192,7 +192,7 @@ function M.start(task, ctx, on_done)
         end
         dap_task.raw_messages = task.raw_messages
 
-        stop = require("easydap").start_task(dap_task, {
+        stop = require("ezdap").start_task(dap_task, {
             add_bufnr = ctx.add_bufnr,
             report    = ctx.report,
             on_done   = settle,

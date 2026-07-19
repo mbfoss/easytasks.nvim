@@ -11,7 +11,7 @@ local ui         = require("tomltasks.ui")
 
 local tasks_filename = require("tomltasks.config").tasks_filename
 
--- The built-in `debug` type projects its schema from the companion `easydap`
+-- The built-in `debug` type projects its schema from the companion `ezdap`
 -- plugin, which isn't on the runtime path in the isolated test env. Every task
 -- run rebuilds the full schema across all registered types, so override `debug`
 -- with a schemaless stub to keep the build self-contained (no debug tasks are

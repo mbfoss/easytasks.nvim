@@ -41,7 +41,7 @@ that streams each task's output.
   root; the presence of that file *is* what marks a directory as a project.
 - **Built-in task types** — run a program directly (`process`), through a shell
   (`shell`), group other tasks (`composite`), or start a debug session
-  (`debug`, via [easydap.nvim](https://github.com/mbfoss/easydap.nvim)).
+  (`debug`, via [ezdap.nvim](https://github.com/mbfoss/ezdap.nvim)).
 - **Task dependencies** — declare `depends_on` and run prerequisites in
   `sequence` or in `parallel` before the task itself.
 - **Concurrency policies** — control what happens when a task is already running
@@ -60,7 +60,7 @@ that streams each task's output.
 ## Requirements
 
 - **Neovim ≥ 0.10**
-- [easydap.nvim](https://github.com/mbfoss/easydap.nvim) — *optional*, required
+- [ezdap.nvim](https://github.com/mbfoss/ezdap.nvim) — *optional*, required
   only for the `debug` task type.
 
 ## Installation
@@ -70,11 +70,11 @@ Using Neovim's built-in plugin manager, `vim.pack` (**Neovim 0.12+**; see
 
 ```lua
 vim.pack.add({
-  -- { src = "https://github.com/mbfoss/easydap.nvim" }, -- optional, only for `debug` tasks
+  -- { src = "https://github.com/mbfoss/ezdap.nvim" }, -- optional, only for `debug` tasks
   { src = "https://github.com/mbfoss/tomltasks.nvim" },
 })
 
--- require("easydap").setup()
+-- require("ezdap").setup()
 require("tomltasks").setup()
 ```
 
@@ -84,7 +84,7 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 {
   "mbfoss/tomltasks.nvim",
   -- optional, only for `debug` tasks:
-  -- dependencies = { "mbfoss/easydap.nvim" },
+  -- dependencies = { "mbfoss/ezdap.nvim" },
   opts = {},
 }
 ```
@@ -211,8 +211,8 @@ depends_order = "sequence"
 
 ### `debug`
 
-Starts a debug session through [easydap.nvim](https://github.com/mbfoss/easydap.nvim).
-This task type is **only available when easydap.nvim is installed** — without it,
+Starts a debug session through [ezdap.nvim](https://github.com/mbfoss/ezdap.nvim).
+This task type is **only available when ezdap.nvim is installed** — without it,
 tomltasks works normally and simply offers no `debug` type.
 
 Each debug adapter publishes a set of **named profiles** — its launch/attach
@@ -236,7 +236,7 @@ parameters = { command = "{{ outdir }}/app --flag", cwd = "{{ projectdir }}" }
 | `request_overrides` | table                | Raw request fields, deep-merged over the resolved profile. Advanced escape hatch.             |
 | `raw_messages`  | boolean                  | Capture the raw debug protocol messages in a dedicated buffer.                                 |
 
-When easydap is available, `profile` completes to the adapter's named profiles
+When ezdap is available, `profile` completes to the adapter's named profiles
 and `parameters` is completed and validated against the inputs that profile
 declares.
 
@@ -444,4 +444,4 @@ project with `require("tomltasks").in_project()`.
 ## License
 
 Released under the [MIT License](LICENSE). Debug support is provided by
-[easydap.nvim](https://github.com/mbfoss/easydap.nvim).
+[ezdap.nvim](https://github.com/mbfoss/ezdap.nvim).
