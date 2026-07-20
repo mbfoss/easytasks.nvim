@@ -107,7 +107,7 @@ local function _schema()
         description = "Definition of a `debug` task (runs via a DAP adapter)",
         ["x-order"] = {
             "name", "type", "if_running", "depends_on", "depends_order", "save_buffers",
-            "adapter", "profile", "parameters", "request_overrides", "raw_messages",
+            "adapter", "profile", "parameters", "request_overrides",
         },
         required    = { "adapter", "profile" },
         properties  = {
@@ -132,10 +132,6 @@ local function _schema()
                 additionalProperties = true,
                 description = "Raw DAP request-body fields, deep-merged over the resolved profile (advanced escape hatch; not validated against the adapter)",
             },
-            raw_messages  = {
-                type        = { "boolean", "null" },
-                description = "Capture all raw DAP protocol messages in a dedicated buffer attached to the task",
-            },
         },
         allOf       = _profile_branches(sch),
     }
@@ -148,7 +144,6 @@ end
 ---@field profile        string
 ---@field parameters?    table<string, any>
 ---@field request_overrides? table<string, any>
----@field raw_messages?  boolean
 
 ---@param task    tomltasks.DebugTask
 ---@param ctx     tomltasks.RunCtx
@@ -182,7 +177,6 @@ function M.start(task, ctx, on_done)
         if task.request_overrides then
             dap_task.parameters = vim.tbl_deep_extend("force", dap_task.parameters, task.request_overrides)
         end
-        dap_task.raw_messages = task.raw_messages
 
         stop = require("ezdap").start_task(dap_task, {
             add_bufnr = ctx.add_bufnr,

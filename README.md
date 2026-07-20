@@ -234,7 +234,6 @@ parameters = { command = "{{ outdir }}/app --flag", cwd = "{{ projectdir }}" }
 | `profile`       | string                   | **Required.** Which of the adapter's named profiles to run (e.g. `launch`, `attach`).         |
 | `parameters`    | table                    | Values for the selected `profile`'s inputs. Keys depend on `adapter`/`profile`.               |
 | `request_overrides` | table                | Raw request fields, deep-merged over the resolved profile. Advanced escape hatch.             |
-| `raw_messages`  | boolean                  | Capture the raw debug protocol messages in a dedicated buffer.                                 |
 
 When ezdap is available, `profile` completes to the adapter's named profiles
 and `parameters` is completed and validated against the inputs that profile
