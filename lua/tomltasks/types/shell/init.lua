@@ -53,7 +53,7 @@ local M = {
 
         -- A string command is evaluated by the shell (vim.fn.jobstart semantics).
         local cmd = command
-        local label = vim.fn.fnamemodify(cmd:match("^%S+") or cmd, ":t")
+        local label = ctx.name or vim.fn.fnamemodify(cmd:match("^%S+") or cmd, ":t")
 
         -- A readable buffer name in place of the opaque `term://…`; run_id is
         -- unique per instance (`<name>#<counter>`) and the label names the command.

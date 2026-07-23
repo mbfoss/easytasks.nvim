@@ -68,11 +68,11 @@ local M = {
             cmd = command
         end
 
-        local label = cmd[1] and vim.fn.fnamemodify(cmd[1], ":t") or nil
+        local label = ctx.name or(cmd[1] and vim.fn.fnamemodify(cmd[1], ":t")) or nil
 
         -- A readable buffer name in place of the opaque `term://…`; run_id is
         -- unique per instance (`<name>#<counter>`) and the label names the command.
-        local bufname = "tomltasks://" .. ctx.run_id .. (label and ("/" .. label) or "")
+        local bufname = "tomltasks://" .. ctx.run_id .. "/" .. (label or "task")
 
         local on_data
         if qf_parse then
@@ -120,14 +120,14 @@ local M = {
             command          = {
                 description = "Command to execute directly, without a shell.",
                 oneOf = {
-                    { type = "string", minLength = 1, description = "Command string, split into argv via POSIX shell-word rules." },
+                    { type = "string", minLength = 1,                       description = "Command string, split into argv via POSIX shell-word rules." },
                     {
                         type        = "array",
                         minItems    = 1,
                         description = "Program and arguments, used as-is.",
                         items       = { type = "string", minLength = 1, description = "Command or argument token" },
                     },
-                    { type = "null", description = "No command execution" },
+                    { type = "null",   description = "No command execution" },
                 },
             },
             cwd              = { type = { "string", "null" }, description = "Working directory used when executing the command" },
